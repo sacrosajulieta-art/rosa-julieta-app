@@ -106,6 +106,8 @@ body {
 .toggle-btn.active-pink { background: rgba(255,46,126,0.13); border-color: var(--pink); color: var(--pink); }
 
 .confirm-btn { background: var(--pink); color: #fff; border: none; border-radius: 8px; padding: 10px; font-size: 13px; font-weight: 600; cursor: pointer; margin-top: 4px; width: 100%; }
+.checkbox-label { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); cursor: pointer; padding: 4px 0; }
+.checkbox-label input { width: 16px; height: 16px; accent-color: var(--pink); }
 
 .file-label { display: flex; align-items: center; gap: 8px; justify-content: center; background: var(--bg); border: 1px dashed var(--border); border-radius: 8px; padding: 14px; font-size: 13px; cursor: pointer; }
 
