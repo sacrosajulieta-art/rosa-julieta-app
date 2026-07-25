@@ -70,6 +70,19 @@ function guessValueField(row) {
   return null;
 }
 
+async function parseXLSX(file) {
+  const buffer = await file.arrayBuffer();
+  const wb = XLSX.read(buffer, { type: 'array' });
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  const json = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+  // normaliza chaves pra minúsculo, igual o parseCSV
+  return json.map((row) => {
+    const norm = {};
+    Object.entries(row).forEach(([k, v]) => { norm[String(k).toLowerCase().trim()] = v; });
+    return norm;
+  });
+}
+
 function exportCSV(txMes, monthLabel) {
   if (!txMes.length) { alert('Não há lançamentos neste mês pra exportar.'); return; }
   const rows = [['Data', 'Tipo', 'Categoria', 'Natureza', 'Descrição', 'Valor']];
@@ -278,8 +291,8 @@ function renderFinanceiro(c) {
 
     ${state.showUpload ? `
       <div class="form-card">
-        <div class="form-hint">Suba o relatório de vendas exportado (CSV) do Shopee, Mercado Livre, Amazon ou TikTok Shop. O sistema procura a coluna de valor automaticamente e lança como entrada.</div>
-        <label class="file-label">📤 Escolher arquivo CSV<input type="file" accept=".csv" id="csvInput" style="display:none" /></label>
+        <div class="form-hint">Suba o relatório de vendas exportado (CSV ou Excel) do Shopee, Mercado Livre, Amazon ou TikTok Shop. O sistema procura a coluna de valor automaticamente e lança como entrada.</div>
+        <label class="file-label">📤 Escolher arquivo CSV ou Excel<input type="file" accept=".csv,.xlsx,.xls" id="csvInput" style="display:none" /></label>
       </div>
     ` : ''}
 
@@ -534,13 +547,19 @@ function attachFinanceiroHandlers(c) {
   if (csvInput) csvInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const text = await file.text();
-    const rows = parseCSV(text);
+    const isExcel = /\.xlsx?$/i.test(file.name);
+    let rows;
+    try {
+      rows = isExcel ? await parseXLSX(file) : parseCSV(await file.text());
+    } catch (err) {
+      alert('Não consegui ler esse arquivo. Confira se é um export válido do marketplace.');
+      return;
+    }
     const novos = [];
     rows.forEach((row) => {
       const raw = guessValueField(row);
       if (!raw) return;
-      const valor = parseBRNumber(raw);
+      const valor = parseBRNumber(String(raw));
       if (!valor) return;
       novos.push({
         tipo: 'entrada', valor, categoria: 'Venda marketplace',
@@ -548,7 +567,11 @@ function attachFinanceiroHandlers(c) {
         data: todayStr(),
       });
     });
-    if (novos.length) await addTxBatch(novos);
+    if (novos.length) {
+      await addTxBatch(novos);
+    } else {
+      alert('Não encontrei nenhuma coluna de valor reconhecível nesse arquivo. Me manda o nome das colunas que eu ajusto.');
+    }
     state.showUpload = false;
     render();
   });
