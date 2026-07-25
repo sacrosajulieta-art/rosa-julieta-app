@@ -101,6 +101,15 @@ function guessQuantidadeField(row) {
   for (const c of candidates) if (row[c]) return Number(row[c]) || 1;
   return 1;
 }
+function guessDataFromFilename(fileName) {
+  const m = fileName.match(/(\d{4})(\d{2})(\d{2})-(\d{4})(\d{2})(\d{2})/);
+  if (!m) return null;
+  const [, y1, mo1, d1, y2, mo2, d2] = m;
+  // só usa se o relatório cobre um único dia (início = fim); em relatórios de
+  // vários dias não dá pra saber em qual dia exato cada linha vendeu
+  if (y1 === y2 && mo1 === mo2 && d1 === d2) return `${y1}-${mo1}-${d1}`;
+  return null;
+}
 function guessPlataformaFromRow(row, plataformas) {
   const candidates = ['loja', 'plataforma', 'canal', 'marketplace'];
   let raw = null;
@@ -744,6 +753,7 @@ function attachFinanceiroHandlers(c) {
 
     const plataformaId = document.getElementById('uploadPlataforma')?.value || '';
     const plataforma = state.plataformas.find((p) => p.id === plataformaId);
+    const dataArquivo = guessDataFromFilename(file.name);
 
     // mapa de SKU (minúsculo, sem espaço nas pontas) -> produto
     // cada produto pode ter vários SKUs separados por vírgula (ex: "TOP-JACK, TOP-JACKK")
@@ -771,7 +781,7 @@ function attachFinanceiroHandlers(c) {
       if (!valor) return;
 
       const descricaoItem = guessDescricaoField(row, file.name);
-      const dataLinha = guessDataField(row) || todayStr();
+      const dataLinha = guessDataField(row) || dataArquivo || todayStr();
       const plataformaLinha = guessPlataformaFromRow(row, state.plataformas) || plataforma;
       const taxaPctLinha = plataformaLinha ? plataformaLinha.taxaPercentual : 0;
 
