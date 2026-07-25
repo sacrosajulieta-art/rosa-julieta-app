@@ -126,6 +126,12 @@ body {
 .dre-tr-final td:first-child { border-radius: 10px 0 0 10px; border-right: none; }
 .dre-tr-final td:last-child { border-radius: 0 10px 10px 0; border-left: none; font-size: 17px; }
 
+.sair-link { background: none; border: none; color: var(--text-muted); font-size: 10.5px; text-decoration: underline; cursor: pointer; margin-top: 6px; padding: 0; }
+
+.gate-wrap { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; }
+.gate-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 22px; width: 100%; max-width: 320px; }
+.gate-card input { margin-bottom: 4px; }
+
 .file-label { display: flex; align-items: center; gap: 8px; justify-content: center; background: var(--bg); border: 1px dashed var(--border); border-radius: 8px; padding: 14px; font-size: 13px; cursor: pointer; }
 
 .tx-row { display: flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
