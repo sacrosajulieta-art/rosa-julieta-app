@@ -30,6 +30,15 @@ const NATUREZA_POR_CATEGORIA = (() => {
 const fmt = (n) => (n ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const monthKey = (d) => d.slice(0, 7);
+function addMonths(mKey, n) {
+  const [y, m] = mKey.split('-').map(Number);
+  const d = new Date(y, m - 1 + n, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+function daysInMonth(mKey) {
+  const [y, m] = mKey.split('-').map(Number);
+  return new Date(y, m, 0).getDate();
+}
 const esc = (s) => (s ?? '').toString().replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 function parseBRNumber(str) {
@@ -221,7 +230,7 @@ async function loadData() {
 }
 
 function mapTxFromDb(row) {
-  return { id: row.id, tipo: row.tipo, valor: Number(row.valor), categoria: row.categoria, natureza: row.natureza, descricao: row.descricao, data: row.data };
+  return { id: row.id, tipo: row.tipo, valor: Number(row.valor), categoria: row.categoria, natureza: row.natureza, descricao: row.descricao, data: row.data, recorrente: !!row.recorrente, recorrenteOrigemId: row.recorrente_origem_id || null };
 }
 function mapProdutoFromDb(row) {
   return { id: row.id, nome: row.nome, sku: row.sku, estoqueAtual: row.estoque_atual, estoqueMinimo: row.estoque_minimo, custoUnitario: Number(row.custo_unitario), totalVendido: row.total_vendido || 0, ultimaVenda: row.ultima_venda || null };
@@ -229,7 +238,7 @@ function mapProdutoFromDb(row) {
 
 async function addTx(tx) {
   const { error } = await sb.from('transacoes').insert({
-    tipo: tx.tipo, valor: tx.valor, categoria: tx.categoria, natureza: tx.natureza || null, descricao: tx.descricao || null, data: tx.data,
+    tipo: tx.tipo, valor: tx.valor, categoria: tx.categoria, natureza: tx.natureza || null, descricao: tx.descricao || null, data: tx.data, recorrente: !!tx.recorrente,
   });
   if (error) alert('Erro ao salvar: ' + error.message);
 }
@@ -249,7 +258,7 @@ async function removeTxBatch(ids) {
 }
 async function updateTx(id, tx) {
   const { error } = await sb.from('transacoes').update({
-    tipo: tx.tipo, valor: tx.valor, categoria: tx.categoria, natureza: tx.natureza || null, descricao: tx.descricao || null, data: tx.data,
+    tipo: tx.tipo, valor: tx.valor, categoria: tx.categoria, natureza: tx.natureza || null, descricao: tx.descricao || null, data: tx.data, recorrente: !!tx.recorrente,
   }).eq('id', id);
   if (error) alert('Erro ao atualizar: ' + error.message);
 }
@@ -290,6 +299,29 @@ async function addPlataforma(nome, taxaPercentual, taxaFixa) {
 async function removePlataforma(id) {
   const { error } = await sb.from('plataformas').delete().eq('id', id);
   if (error) alert('Erro ao remover plataforma: ' + error.message);
+}
+
+async function garantirRecorrentes() {
+  const hojeMonth = todayStr().slice(0, 7);
+  const templates = state.tx.filter((t) => t.recorrente);
+  for (const t of templates) {
+    const dia = Number(t.data.slice(8, 10));
+    let cursor = addMonths(monthKey(t.data), 1);
+    let iter = 0;
+    while (cursor <= hojeMonth && iter < 36) {
+      const jaExiste = state.tx.some((x) => x.recorrenteOrigemId === t.id && monthKey(x.data) === cursor);
+      if (!jaExiste) {
+        const diaFinal = Math.min(dia, daysInMonth(cursor));
+        const novaData = `${cursor}-${String(diaFinal).padStart(2, '0')}`;
+        await sb.from('transacoes').insert({
+          tipo: t.tipo, valor: t.valor, categoria: t.categoria, natureza: t.natureza || null, descricao: t.descricao || null,
+          data: novaData, recorrente: false, recorrente_origem_id: t.id,
+        });
+      }
+      cursor = addMonths(cursor, 1);
+      iter++;
+    }
+  }
 }
 
 function setupRealtime() {
@@ -463,6 +495,7 @@ function renderFinanceiro(c) {
           : `<input type="text" id="txCategoria" placeholder="Categoria (ex: Venda marketplace)" />`}
         <input type="text" id="txDescricao" placeholder="Descrição (opcional, ex: nome do funcionário)" />
         <input type="date" id="txData" value="${todayStr()}" />
+        <label class="checkbox-label"><input type="checkbox" id="txRecorrente" /> 🔁 Repetir todos os meses</label>
         <button class="confirm-btn" id="salvarTx">Salvar lançamento</button>
       </div>
     ` : ''}
@@ -491,6 +524,7 @@ function renderFinanceiro(c) {
                   : `<input type="text" id="editTxCategoria-${t.id}" placeholder="Categoria" value="${esc(t.categoria)}" />`}
                 <input type="text" id="editTxDescricao-${t.id}" placeholder="Descrição (opcional)" value="${esc(t.descricao || '')}" />
                 <input type="date" id="editTxData-${t.id}" value="${t.data}" />
+                <label class="checkbox-label"><input type="checkbox" id="editTxRecorrente-${t.id}" ${t.recorrente ? 'checked' : ''} /> 🔁 Repetir todos os meses</label>
                 <div class="form-row">
                   <button class="confirm-btn" data-salvar-edit-tx="${t.id}">Salvar</button>
                   <button class="toggle-btn" data-cancelar-edit-tx="${t.id}">Cancelar</button>
@@ -503,7 +537,7 @@ function renderFinanceiro(c) {
           <div class="tx-row">
             ${state.selectMode ? `<input type="checkbox" class="tx-checkbox" data-select-tx="${t.id}" ${checked ? 'checked' : ''} />` : `<div class="tx-dot" style="background:${t.tipo === 'entrada' ? 'var(--teal)' : 'var(--pink)'}"></div>`}
             <div style="flex:1">
-              <div class="tx-categoria">${esc(t.categoria)}</div>
+              <div class="tx-categoria">${esc(t.categoria)}${(t.recorrente || t.recorrenteOrigemId) ? ' 🔁' : ''}</div>
               ${t.descricao ? `<div class="tx-desc">${esc(t.descricao)}</div>` : ''}
               <div class="tx-date">${t.data}</div>
             </div>
@@ -951,9 +985,11 @@ function attachFinanceiroHandlers(c) {
     const categoria = document.getElementById('txCategoria').value;
     const descricao = document.getElementById('txDescricao').value;
     const data = document.getElementById('txData').value || todayStr();
+    const recorrente = document.getElementById('txRecorrente')?.checked || false;
     if (!valor || !categoria) { alert('Preencha valor e categoria.'); return; }
     const natureza = tipo === 'saida' ? (NATUREZA_POR_CATEGORIA[categoria] || 'variavel') : null;
-    await addTx({ tipo, valor, categoria, natureza, descricao, data });
+    await addTx({ tipo, valor, categoria, natureza, descricao, data, recorrente });
+    if (recorrente) { await loadData(); await garantirRecorrentes(); }
     state.showTxForm = false;
     window.__txFormTipo = 'saida';
     render();
@@ -987,9 +1023,11 @@ function attachFinanceiroHandlers(c) {
       const categoria = document.getElementById(`editTxCategoria-${id}`).value;
       const descricao = document.getElementById(`editTxDescricao-${id}`).value;
       const data = document.getElementById(`editTxData-${id}`).value || todayStr();
+      const recorrente = document.getElementById(`editTxRecorrente-${id}`)?.checked || false;
       if (!valor || !categoria) { alert('Preencha valor e categoria.'); return; }
       const natureza = tipo === 'saida' ? (NATUREZA_POR_CATEGORIA[categoria] || 'variavel') : null;
-      await updateTx(id, { tipo, valor, categoria, natureza, descricao, data });
+      await updateTx(id, { tipo, valor, categoria, natureza, descricao, data, recorrente });
+      if (recorrente) { await loadData(); await garantirRecorrentes(); }
       state.editingTxId = null;
       window.__editTxTipo = null;
       render();
@@ -1111,5 +1149,8 @@ if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(console.error));
 }
 
-loadData();
+(async () => {
+  await loadData();
+  await garantirRecorrentes();
+})();
 setupRealtime();
