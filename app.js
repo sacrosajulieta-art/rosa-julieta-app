@@ -68,12 +68,26 @@ function parseCSV(text) {
 }
 function guessValueField(row) {
   // prioriza valores por item de linha (evita duplicar o total do pedido quando há várias variações)
-  const candidates = ['subtotal do produto', 'valor total', 'valor', 'total', 'preço total', 'preco total', 'valor do produto', 'receita'];
+  const candidates = ['subtotal do produto', 'valor total', 'valor de vendas válidas', 'valor total de vendas', 'valor da nota fiscal', 'valor', 'total', 'preço total', 'preco total', 'valor do produto', 'receita'];
   for (const c of candidates) if (row[c]) return row[c];
   return null;
 }
+function guessDataField(row) {
+  const candidates = ['data', 'data de criação do pedido', 'data do pedido', 'date'];
+  for (const c of candidates) {
+    const v = row[c];
+    if (v === undefined || v === '' || v === null) continue;
+    if (v instanceof Date) return v.toISOString().slice(0, 10);
+    const s = String(v).trim();
+    let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+    m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+    if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+  }
+  return null;
+}
 function guessDescricaoField(row, fallback) {
-  const candidates = ['nome do produto', 'produto', 'título', 'titulo', 'descrição', 'descricao'];
+  const candidates = ['nome do produto', 'produto', 'título', 'titulo', 'descrição', 'descricao', 'destinatário', 'destinatario', 'cliente'];
   for (const c of candidates) if (row[c]) return String(row[c]);
   return fallback;
 }
@@ -87,10 +101,27 @@ function guessQuantidadeField(row) {
   for (const c of candidates) if (row[c]) return Number(row[c]) || 1;
   return 1;
 }
+function guessTaxaRealField(row) {
+  // tenta usar os valores REAIS de taxa que a própria plataforma calculou no relatório
+  // (mais preciso que estimar por %, já que varia por cupom/ads/frete em cada pedido)
+  const liquidaKeys = ['taxa de comissão líquida', 'taxa de serviço líquida'];
+  const brutaKeys = ['taxa de comissão bruta', 'taxa de serviço bruta'];
+  const extrasKeys = ['taxa de transação', 'taxa de envio reversa'];
+  const temLiquida = liquidaKeys.some((k) => row[k] !== undefined && row[k] !== '');
+  const principais = temLiquida ? liquidaKeys : brutaKeys;
+  let total = 0; let achou = false;
+  [...principais, ...extrasKeys].forEach((k) => {
+    if (row[k] !== undefined && row[k] !== '') {
+      total += parseBRNumber(String(row[k]));
+      achou = true;
+    }
+  });
+  return achou ? total : null;
+}
 
 async function parseXLSX(file) {
   const buffer = await file.arrayBuffer();
-  const wb = XLSX.read(buffer, { type: 'array' });
+  const wb = XLSX.read(buffer, { type: 'array', cellDates: true });
   const sheet = wb.Sheets[wb.SheetNames[0]];
   const json = XLSX.utils.sheet_to_json(sheet, { defval: '' });
   // normaliza chaves pra minúsculo, igual o parseCSV
@@ -147,18 +178,23 @@ const state = {
   editingProdutoId: null,
   selectMode: false,
   selectedTxIds: new Set(),
+  plataformas: [],
+  showTaxasForm: false,
 };
 
 // ==================== DATA LAYER ====================
 async function loadData() {
-  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }] = await Promise.all([
+  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }] = await Promise.all([
     sb.from('transacoes').select('*').order('data', { ascending: false }),
     sb.from('produtos').select('*').order('created_at', { ascending: false }),
+    sb.from('plataformas').select('*').order('nome', { ascending: true }),
   ]);
   if (e1) console.error(e1);
   if (e2) console.error(e2);
+  if (e3) console.error(e3);
   state.tx = (tx || []).map(mapTxFromDb);
   state.produtos = (produtos || []).map(mapProdutoFromDb);
+  state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual) }));
   state.loading = false;
   render();
 }
@@ -222,10 +258,16 @@ async function updateProduto(id, p) {
   if (error) alert('Erro ao atualizar produto: ' + error.message);
 }
 
+async function updatePlataformaTaxa(id, taxaPercentual) {
+  const { error } = await sb.from('plataformas').update({ taxa_percentual: taxaPercentual }).eq('id', id);
+  if (error) alert('Erro ao salvar taxa: ' + error.message);
+}
+
 function setupRealtime() {
   sb.channel('rj-changes')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'transacoes' }, loadData)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'produtos' }, loadData)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'plataformas' }, loadData)
     .subscribe();
 }
 
@@ -315,6 +357,7 @@ function renderFinanceiro(c) {
     <div class="section-title-wrap">
       <div><div class="section-title">Financeiro</div><div class="section-subtitle">Lançamentos e importação de vendas</div></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="icon-btn-ghost" id="toggleTaxas">⚙️ Taxas</button>
         <button class="icon-btn-ghost" id="toggleSelect">${state.selectMode ? '✕ Cancelar' : '☑️ Selecionar'}</button>
         <button class="icon-btn-ghost" id="exportCsv">💾 Exportar</button>
         <button class="icon-btn-ghost" id="toggleUpload">📤 CSV</button>
@@ -324,9 +367,27 @@ function renderFinanceiro(c) {
 
     <input type="month" class="month-input" id="monthSelect" value="${state.selectedMonth}" />
 
+    ${state.showTaxasForm ? `
+      <div class="form-card">
+        <div class="form-hint">Defina a taxa média (%) de cada plataforma — usada só como estimativa quando o relatório importado não trouxer o valor real da taxa (o Shopee, por exemplo, já traz o valor exato, então nem sempre precisa da %).</div>
+        ${state.plataformas.map((p) => `
+          <div class="form-row" style="align-items:center">
+            <div style="flex:1;font-size:13px;font-weight:600">${esc(p.nome)}</div>
+            <input type="text" style="max-width:90px" id="taxaInput-${p.id}" value="${p.taxaPercentual}" placeholder="0" />
+            <span style="font-size:13px;color:var(--text-muted)">%</span>
+          </div>
+        `).join('')}
+        <button class="confirm-btn" id="salvarTaxas">Salvar taxas</button>
+      </div>
+    ` : ''}
+
     ${state.showUpload ? `
       <div class="form-card">
         <div class="form-hint">Suba o relatório de vendas exportado (CSV ou Excel) do Shopee, Mercado Livre, Amazon ou TikTok Shop. O sistema procura a coluna de valor automaticamente e lança como entrada. Se o SKU do arquivo bater com o SKU cadastrado no Estoque, o estoque é baixado sozinho.</div>
+        <select id="uploadPlataforma">
+          <option value="">Nenhuma taxa (importar valor bruto)</option>
+          ${state.plataformas.map((p) => `<option value="${p.id}">${esc(p.nome)}${p.taxaPercentual > 0 ? ` (${p.taxaPercentual}%)` : ''}</option>`).join('')}
+        </select>
         <label class="file-label">📤 Escolher arquivo CSV ou Excel<input type="file" accept=".csv,.xlsx,.xls" id="csvInput" style="display:none" /></label>
       </div>
     ` : ''}
@@ -586,6 +647,7 @@ function attachHandlers(c) {
       state.editingProdutoId = null;
       state.selectMode = false;
       state.selectedTxIds = new Set();
+      state.showTaxasForm = false;
       render();
     });
   });
@@ -605,6 +667,20 @@ function attachFinanceiroHandlers(c) {
   if (toggleSelect) toggleSelect.addEventListener('click', () => {
     state.selectMode = !state.selectMode;
     state.selectedTxIds = new Set();
+    render();
+  });
+
+  const toggleTaxas = document.getElementById('toggleTaxas');
+  if (toggleTaxas) toggleTaxas.addEventListener('click', () => { state.showTaxasForm = !state.showTaxasForm; render(); });
+
+  const salvarTaxas = document.getElementById('salvarTaxas');
+  if (salvarTaxas) salvarTaxas.addEventListener('click', async () => {
+    for (const p of state.plataformas) {
+      const input = document.getElementById(`taxaInput-${p.id}`);
+      const novaTaxa = parseBRNumber(input.value);
+      if (novaTaxa !== p.taxaPercentual) await updatePlataformaTaxa(p.id, novaTaxa);
+    }
+    state.showTaxasForm = false;
     render();
   });
 
@@ -658,6 +734,10 @@ function attachFinanceiroHandlers(c) {
       return;
     }
 
+    const plataformaId = document.getElementById('uploadPlataforma')?.value || '';
+    const plataforma = state.plataformas.find((p) => p.id === plataformaId);
+    const taxaPct = plataforma ? plataforma.taxaPercentual : 0;
+
     // mapa de SKU (minúsculo, sem espaço nas pontas) -> produto
     // cada produto pode ter vários SKUs separados por vírgula (ex: "TOP-JACK, TOP-JACKK")
     const skuMap = new Map();
@@ -670,9 +750,12 @@ function attachFinanceiroHandlers(c) {
     });
 
     const novos = [];
-    const deducoes = new Map(); // produtoId -> qtd a baixar
+    const deducoes = new Map(); // produtoId -> { qtd, ultimaData }
     const skusNaoEncontrados = new Set();
     let temSku = false;
+    let totalTaxas = 0;
+    let totalTaxasReais = 0;
+    let totalTaxasEstimadas = 0;
 
     rows.forEach((row) => {
       const raw = guessValueField(row);
@@ -680,11 +763,35 @@ function attachFinanceiroHandlers(c) {
       const valor = parseBRNumber(String(raw));
       if (!valor) return;
 
+      const descricaoItem = guessDescricaoField(row, file.name);
+      const dataLinha = guessDataField(row) || todayStr();
+
       novos.push({
-        tipo: 'entrada', valor, categoria: 'Venda marketplace',
-        descricao: guessDescricaoField(row, file.name),
-        data: todayStr(),
+        tipo: 'entrada', valor,
+        categoria: plataforma ? `Venda ${plataforma.nome}` : 'Venda marketplace',
+        descricao: descricaoItem,
+        data: dataLinha,
       });
+
+      const taxaReal = guessTaxaRealField(row);
+      if (taxaReal !== null && taxaReal > 0) {
+        totalTaxas += taxaReal;
+        totalTaxasReais++;
+        novos.push({
+          tipo: 'saida', valor: Math.round(taxaReal * 100) / 100, categoria: 'Taxas de marketplace', natureza: 'variavel',
+          descricao: `Taxa real${plataforma ? ' ' + plataforma.nome : ''} — ${descricaoItem}`,
+          data: dataLinha,
+        });
+      } else if (taxaPct > 0) {
+        const taxaValor = Math.round(valor * (taxaPct / 100) * 100) / 100;
+        totalTaxas += taxaValor;
+        totalTaxasEstimadas++;
+        novos.push({
+          tipo: 'saida', valor: taxaValor, categoria: 'Taxas de marketplace', natureza: 'variavel',
+          descricao: `Taxa estimada ${plataforma.nome} (${taxaPct}%) — ${descricaoItem}`,
+          data: dataLinha,
+        });
+      }
 
       const sku = guessSkuField(row);
       if (sku) {
@@ -692,7 +799,10 @@ function attachFinanceiroHandlers(c) {
         const produto = skuMap.get(sku.trim().toLowerCase());
         const qtd = guessQuantidadeField(row);
         if (produto) {
-          deducoes.set(produto.id, (deducoes.get(produto.id) || 0) + qtd);
+          const atual = deducoes.get(produto.id) || { qtd: 0, ultimaData: dataLinha };
+          atual.qtd += qtd;
+          if (dataLinha > atual.ultimaData) atual.ultimaData = dataLinha;
+          deducoes.set(produto.id, atual);
         } else {
           skusNaoEncontrados.add(sku);
         }
@@ -709,19 +819,27 @@ function attachFinanceiroHandlers(c) {
     await addTxBatch(novos);
 
     // aplica baixa de estoque + soma no total vendido
-    for (const [produtoId, qtd] of deducoes.entries()) {
+    for (const [produtoId, info] of deducoes.entries()) {
       const produto = state.produtos.find((p) => p.id === produtoId);
       if (produto) {
-        const novoEstoque = Math.max(0, produto.estoqueAtual - qtd);
-        const novoTotalVendido = (produto.totalVendido || 0) + qtd;
-        await registrarVendaProduto(produtoId, novoEstoque, novoTotalVendido, todayStr());
+        const novoEstoque = Math.max(0, produto.estoqueAtual - info.qtd);
+        const novoTotalVendido = (produto.totalVendido || 0) + info.qtd;
+        await registrarVendaProduto(produtoId, novoEstoque, novoTotalVendido, info.ultimaData);
       }
     }
 
     state.showUpload = false;
     render();
 
-    let resumo = `${novos.length} venda(s) importada(s).`;
+    const qtdVendas = novos.filter((n) => n.tipo === 'entrada').length;
+    let resumo = `${qtdVendas} venda(s) importada(s).`;
+    if (totalTaxas > 0) {
+      resumo += `\nTaxas descontadas: ${fmt(totalTaxas)}`;
+      const partes = [];
+      if (totalTaxasReais > 0) partes.push(`${totalTaxasReais} com valor real do relatório`);
+      if (totalTaxasEstimadas > 0) partes.push(`${totalTaxasEstimadas} estimada(s) por %`);
+      if (partes.length) resumo += ` (${partes.join(', ')}).`;
+    }
     if (temSku) {
       resumo += `\n${deducoes.size} produto(s) com estoque baixado automaticamente.`;
       if (skusNaoEncontrados.size) {
