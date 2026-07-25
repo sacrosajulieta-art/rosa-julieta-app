@@ -1411,7 +1411,7 @@ function render() {
     </div>
     <div class="tabs-wrap">
       ${tabBtn('dashboard', 'Dashboard', c.produtosStatus.filter(p => p.status !== 'ok').length)}
-      ${tabBtn('financeiro', 'Financeiro')}
+      ${tabBtn('financeiro', 'Financeiro', c.contasAVencer.length)}
       ${tabBtn('estoque', 'Estoque')}
       ${tabBtn('tecido', 'Tecido')}
       ${tabBtn('producao', 'Produção')}
@@ -1804,6 +1804,13 @@ function renderDashboard(c) {
   return `
     <input type="month" class="month-input" id="dashboardMonthSelect" value="${state.selectedMonth}" />
 
+    ${c.contasAVencer.length > 0 ? `
+      <div class="alerta-vencimento" data-ir-financeiro="1">
+        <span>📅 ${c.contasAVencer.length} conta(s) vencendo nos próximos 7 dias — ${fmt(c.contasAVencer.reduce((a, t) => a + t.valor, 0))}</span>
+        <span class="alerta-vencimento-link">Ver no Financeiro ›</span>
+      </div>
+    ` : ''}
+
     <div class="stats-grid">
       <div class="stat-card">
         <div class="stat-icon" style="background:rgba(0,212,160,0.1)">📈</div>
@@ -1933,6 +1940,13 @@ function attachHandlers(c) {
   if (state.tab === 'dashboard') {
     const dashboardMonthSelect = document.getElementById('dashboardMonthSelect');
     if (dashboardMonthSelect) dashboardMonthSelect.addEventListener('change', (e) => { state.selectedMonth = e.target.value; render(); });
+
+    const alertaVencimento = document.querySelector('[data-ir-financeiro]');
+    if (alertaVencimento) alertaVencimento.addEventListener('click', () => {
+      state.tab = 'financeiro';
+      state.showResumoFinanceiro = true;
+      render();
+    });
   }
   if (state.tab === 'financeiro') attachFinanceiroHandlers(c);
   if (state.tab === 'estoque') attachEstoqueHandlers(c);
