@@ -81,6 +81,8 @@ const state = {
   showUpload: false,
   showProdutoForm: false,
   entradaOpenId: null,
+  editingTxId: null,
+  editingProdutoId: null,
 };
 
 // ==================== DATA LAYER ====================
@@ -120,6 +122,12 @@ async function removeTx(id) {
   const { error } = await sb.from('transacoes').delete().eq('id', id);
   if (error) alert('Erro ao remover: ' + error.message);
 }
+async function updateTx(id, tx) {
+  const { error } = await sb.from('transacoes').update({
+    tipo: tx.tipo, valor: tx.valor, categoria: tx.categoria, natureza: tx.natureza || null, descricao: tx.descricao || null, data: tx.data,
+  }).eq('id', id);
+  if (error) alert('Erro ao atualizar: ' + error.message);
+}
 
 async function addProduto(p) {
   const { error } = await sb.from('produtos').insert({
@@ -134,6 +142,12 @@ async function updateProdutoEstoque(id, novoEstoque) {
 async function removeProduto(id) {
   const { error } = await sb.from('produtos').delete().eq('id', id);
   if (error) alert('Erro ao remover produto: ' + error.message);
+}
+async function updateProduto(id, p) {
+  const { error } = await sb.from('produtos').update({
+    nome: p.nome, sku: p.sku || null, estoque_atual: p.estoqueAtual, estoque_minimo: p.estoqueMinimo, custo_unitario: p.custoUnitario,
+  }).eq('id', id);
+  if (error) alert('Erro ao atualizar produto: ' + error.message);
 }
 
 function setupRealtime() {
@@ -209,12 +223,12 @@ function tabBtn(id, label, badge) {
 }
 
 // ---- Financeiro ----
-function categoriaOptionsHtml() {
+function categoriaOptionsHtml(selected) {
   return Object.entries(CATEGORIAS_SAIDA).map(([grupo, itens]) => `
     <optgroup label="${grupo}">
-      ${itens.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}
+      ${itens.map((c) => `<option value="${esc(c)}" ${c === selected ? 'selected' : ''}>${esc(c)}</option>`).join('')}
     </optgroup>
-  `).join('') + `<option value="Outro">Outro</option>`;
+  `).join('') + `<option value="Outro" ${selected === 'Outro' ? 'selected' : ''}>Outro</option>`;
 }
 
 function renderFinanceiro(c) {
@@ -255,7 +269,29 @@ function renderFinanceiro(c) {
 
     ${c.txMes.length === 0 ? `<div class="empty-state">Nenhum lançamento neste mês ainda.</div>` : `
       <div class="tx-list">
-        ${c.txMes.map((t) => `
+        ${c.txMes.map((t) => {
+          if (state.editingTxId === t.id) {
+            const editTipo = window.__editTxTipo || t.tipo;
+            return `
+              <div class="form-card">
+                <div class="form-row">
+                  <button class="toggle-btn ${editTipo === 'entrada' ? 'active-teal' : ''}" data-edit-tipo="entrada">Entrada</button>
+                  <button class="toggle-btn ${editTipo === 'saida' ? 'active-pink' : ''}" data-edit-tipo="saida">Saída</button>
+                </div>
+                <input type="text" id="editTxValor-${t.id}" placeholder="Valor" value="${t.valor.toFixed(2).replace('.', ',')}" />
+                ${editTipo === 'saida'
+                  ? `<select id="editTxCategoria-${t.id}"><option value="">Selecione a categoria</option>${categoriaOptionsHtml(t.categoria)}</select>`
+                  : `<input type="text" id="editTxCategoria-${t.id}" placeholder="Categoria" value="${esc(t.categoria)}" />`}
+                <input type="text" id="editTxDescricao-${t.id}" placeholder="Descrição (opcional)" value="${esc(t.descricao || '')}" />
+                <input type="date" id="editTxData-${t.id}" value="${t.data}" />
+                <div class="form-row">
+                  <button class="confirm-btn" data-salvar-edit-tx="${t.id}">Salvar</button>
+                  <button class="toggle-btn" data-cancelar-edit-tx="${t.id}">Cancelar</button>
+                </div>
+              </div>
+            `;
+          }
+          return `
           <div class="tx-row">
             <div class="tx-dot" style="background:${t.tipo === 'entrada' ? 'var(--teal)' : 'var(--pink)'}"></div>
             <div style="flex:1">
@@ -264,9 +300,11 @@ function renderFinanceiro(c) {
               <div class="tx-date">${t.data}</div>
             </div>
             <div class="tx-valor" style="color:${t.tipo === 'entrada' ? 'var(--teal)' : 'var(--pink)'}">${t.tipo === 'entrada' ? '+' : '-'}${fmt(t.valor)}</div>
+            <button class="trash-btn" data-edit-tx="${t.id}">✏️</button>
             <button class="trash-btn" data-remove-tx="${t.id}">🗑</button>
           </div>
-        `).join('')}
+        `;
+        }).join('')}
       </div>
     `}
   `;
@@ -298,6 +336,25 @@ function renderEstoque(c) {
         ${c.produtosStatus.map((p) => {
           const statusColor = { critico: 'var(--red)', aguarde: 'var(--amber)', 'pode-cortar': 'var(--teal)', ok: 'var(--border)' }[p.status];
           const entradaOpen = state.entradaOpenId === p.id;
+
+          if (state.editingProdutoId === p.id) {
+            return `
+              <div class="form-card">
+                <input type="text" id="editPNome-${p.id}" placeholder="Nome do produto" value="${esc(p.nome)}" />
+                <input type="text" id="editPSku-${p.id}" placeholder="SKU (opcional)" value="${esc(p.sku || '')}" />
+                <div class="form-row">
+                  <input type="text" id="editPEstoqueAtual-${p.id}" placeholder="Estoque atual" value="${p.estoqueAtual}" />
+                  <input type="text" id="editPEstoqueMinimo-${p.id}" placeholder="Estoque mínimo" value="${p.estoqueMinimo}" />
+                </div>
+                <input type="text" id="editPCusto-${p.id}" placeholder="Custo por unidade" value="${p.custoUnitario.toFixed(2).replace('.', ',')}" />
+                <div class="form-row">
+                  <button class="confirm-btn" data-salvar-edit-produto="${p.id}">Salvar</button>
+                  <button class="toggle-btn" data-cancelar-edit-produto="${p.id}">Cancelar</button>
+                </div>
+              </div>
+            `;
+          }
+
           return `
             <div class="produto-card" style="border-color:${statusColor}55">
               <div class="produto-header">
@@ -305,7 +362,10 @@ function renderEstoque(c) {
                   <div class="produto-nome">${esc(p.nome)}</div>
                   ${p.sku ? `<div class="produto-sku">${esc(p.sku)}</div>` : ''}
                 </div>
-                <button class="trash-btn" data-remove-produto="${p.id}">🗑</button>
+                <div style="display:flex;gap:2px">
+                  <button class="trash-btn" data-edit-produto="${p.id}">✏️</button>
+                  <button class="trash-btn" data-remove-produto="${p.id}">🗑</button>
+                </div>
               </div>
               <div class="produto-stock-row">
                 <button class="step-btn" data-step="-1" data-produto="${p.id}" data-atual="${p.estoqueAtual}">-</button>
@@ -411,6 +471,8 @@ function attachHandlers(c) {
       state.showUpload = false;
       state.showProdutoForm = false;
       state.entradaOpenId = null;
+      state.editingTxId = null;
+      state.editingProdutoId = null;
       render();
     });
   });
@@ -476,6 +538,37 @@ function attachFinanceiroHandlers(c) {
       await removeTx(btn.dataset.removeTx);
     });
   });
+
+  document.querySelectorAll('[data-edit-tx]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.editingTxId = btn.dataset.editTx;
+      window.__editTxTipo = null;
+      render();
+    });
+  });
+  document.querySelectorAll('[data-cancelar-edit-tx]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.editingTxId = null; render(); });
+  });
+  document.querySelectorAll('[data-edit-tipo]').forEach((btn) => {
+    btn.addEventListener('click', () => { window.__editTxTipo = btn.dataset.editTipo; render(); });
+  });
+  document.querySelectorAll('[data-salvar-edit-tx]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.salvarEditTx;
+      const original = state.tx.find((t) => t.id === id);
+      const tipo = window.__editTxTipo || original.tipo;
+      const valor = parseBRNumber(document.getElementById(`editTxValor-${id}`).value);
+      const categoria = document.getElementById(`editTxCategoria-${id}`).value;
+      const descricao = document.getElementById(`editTxDescricao-${id}`).value;
+      const data = document.getElementById(`editTxData-${id}`).value || todayStr();
+      if (!valor || !categoria) { alert('Preencha valor e categoria.'); return; }
+      const natureza = tipo === 'saida' ? (NATUREZA_POR_CATEGORIA[categoria] || 'variavel') : null;
+      await updateTx(id, { tipo, valor, categoria, natureza, descricao, data });
+      state.editingTxId = null;
+      window.__editTxTipo = null;
+      render();
+    });
+  });
 }
 
 function attachEstoqueHandlers(c) {
@@ -507,6 +600,27 @@ function attachEstoqueHandlers(c) {
   document.querySelectorAll('[data-remove-produto]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       if (confirm('Remover este produto?')) await removeProduto(btn.dataset.removeProduto);
+    });
+  });
+
+  document.querySelectorAll('[data-edit-produto]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.editingProdutoId = btn.dataset.editProduto; render(); });
+  });
+  document.querySelectorAll('[data-cancelar-edit-produto]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.editingProdutoId = null; render(); });
+  });
+  document.querySelectorAll('[data-salvar-edit-produto]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.salvarEditProduto;
+      const nome = document.getElementById(`editPNome-${id}`).value.trim();
+      const sku = document.getElementById(`editPSku-${id}`).value.trim();
+      const estoqueAtual = Number(document.getElementById(`editPEstoqueAtual-${id}`).value) || 0;
+      const estoqueMinimo = Number(document.getElementById(`editPEstoqueMinimo-${id}`).value) || 0;
+      const custoUnitario = parseBRNumber(document.getElementById(`editPCusto-${id}`).value);
+      if (!nome) { alert('Informe o nome do produto.'); return; }
+      await updateProduto(id, { nome, sku, estoqueAtual, estoqueMinimo, custoUnitario });
+      state.editingProdutoId = null;
+      render();
     });
   });
 
