@@ -427,6 +427,27 @@ function renderProducaoDono(c) {
 
   return `
     <div class="section-title-wrap">
+      <div><div class="section-title">Lançar produção</div><div class="section-subtitle">Registre peças produzidas manualmente</div></div>
+      <button class="icon-btn" id="toggleProducaoForm">＋ Lançar</button>
+    </div>
+
+    ${state.showProducaoForm ? `
+      <div class="form-card">
+        <select id="prodDonoCostureira">
+          <option value="">Selecione a costureira</option>
+          ${state.costureiras.filter((c) => c.ativa).map((cost) => `<option value="${cost.id}">${esc(cost.nome)}</option>`).join('')}
+        </select>
+        <select id="prodDonoProduto">
+          <option value="">Selecione o produto</option>
+          ${state.produtos.map((p) => `<option value="${p.id}">${esc(p.nome)}${p.sku ? ' — ' + esc(p.sku) : ''}</option>`).join('')}
+        </select>
+        <input type="text" id="prodDonoQuantidade" placeholder="Quantidade de peças" inputmode="numeric" />
+        <input type="date" id="prodDonoData" value="${todayStr()}" />
+        <button class="confirm-btn" id="salvarProducaoDono">Registrar produção</button>
+      </div>
+    ` : ''}
+
+    <div class="section-title-wrap">
       <div><div class="section-title">Costureiras</div><div class="section-subtitle">Cadastre quem produz pra você</div></div>
       <button class="icon-btn" id="toggleCostureiraForm">＋ Costureira</button>
     </div>
@@ -1092,6 +1113,7 @@ function attachHandlers(c) {
       state.showTaxasForm = false;
       state.showNovaPlataforma = false;
       state.showCostureiraForm = false;
+      state.showProducaoForm = false;
       render();
     });
   });
@@ -1405,6 +1427,24 @@ function attachFinanceiroHandlers(c) {
 }
 
 function attachProducaoHandlers(c) {
+  const toggleProducaoForm = document.getElementById('toggleProducaoForm');
+  if (toggleProducaoForm) toggleProducaoForm.addEventListener('click', () => { state.showProducaoForm = !state.showProducaoForm; render(); });
+
+  const salvarProducaoDono = document.getElementById('salvarProducaoDono');
+  if (salvarProducaoDono) salvarProducaoDono.addEventListener('click', async () => {
+    const costureiraId = document.getElementById('prodDonoCostureira').value;
+    const produtoId = document.getElementById('prodDonoProduto').value;
+    const quantidade = Number(document.getElementById('prodDonoQuantidade').value);
+    const data = document.getElementById('prodDonoData').value || todayStr();
+    if (!costureiraId || !produtoId || !quantidade || quantidade <= 0) {
+      alert('Selecione a costureira, o produto e informe a quantidade.');
+      return;
+    }
+    await registrarProducao(costureiraId, produtoId, quantidade, data);
+    state.showProducaoForm = false;
+    render();
+  });
+
   const toggleForm = document.getElementById('toggleCostureiraForm');
   if (toggleForm) toggleForm.addEventListener('click', () => { state.showCostureiraForm = !state.showCostureiraForm; render(); });
 
