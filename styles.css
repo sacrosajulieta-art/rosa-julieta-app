@@ -63,7 +63,7 @@ body {
 .stat-label { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
 .stat-value { font-family: 'IBM Plex Mono', monospace; font-size: 16px; font-weight: 600; }
 
-.section-title-wrap { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; gap: 10px; }
+.section-title-wrap { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; gap: 10px; flex-wrap: wrap; }
 .section-title { font-family: 'Space Grotesk', sans-serif; font-size: 16px; font-weight: 600; }
 .section-subtitle { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
 
