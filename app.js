@@ -536,6 +536,18 @@ function renderCostureiraDetalhe(costureiraId) {
     const produto = state.produtos.find((x) => x.id === p.produtoId);
     return acc + p.quantidade * (produto ? produto.valorMaoObra : 0);
   }, 0);
+
+  // resumo agrupado por produto, só do que ainda está pendente (a semana em aberto)
+  const porProdutoPendente = {};
+  pendentes.forEach((p) => {
+    const produto = state.produtos.find((x) => x.id === p.produtoId);
+    const nome = produto?.nome || 'Produto removido';
+    if (!porProdutoPendente[nome]) porProdutoPendente[nome] = { qtd: 0, valor: 0 };
+    porProdutoPendente[nome].qtd += p.quantidade;
+    porProdutoPendente[nome].valor += p.quantidade * (produto ? produto.valorMaoObra : 0);
+  });
+  const resumoProdutos = Object.entries(porProdutoPendente).sort((a, b) => b[1].qtd - a[1].qtd);
+
   const tipo = window.__prodDetalheTipo || 'producao';
 
   return `
@@ -562,6 +574,21 @@ function renderCostureiraDetalhe(costureiraId) {
         <div class="stat-value">${totalPendenteQtd}</div>
       </div>
     </div>
+
+    <div class="section-title-wrap">
+      <div><div class="section-title">Resumo da semana (pendente)</div><div class="section-subtitle">Total por modelo, pronto pro fechamento de sexta</div></div>
+    </div>
+    ${resumoProdutos.length === 0 ? `<div class="empty-state">Nenhuma produção pendente pra essa costureira.</div>` : `
+      <div class="tx-list" style="margin-bottom:28px">
+        ${resumoProdutos.map(([nome, info]) => `
+          <div class="tx-row">
+            <div class="tx-dot" style="background:${info.qtd >= 0 ? 'var(--teal)' : 'var(--red)'}"></div>
+            <div style="flex:1"><div class="tx-categoria">${esc(nome)}</div></div>
+            <div class="tx-valor" style="color:${info.qtd >= 0 ? 'var(--teal)' : 'var(--red)'}">${info.qtd} peças</div>
+          </div>
+        `).join('')}
+      </div>
+    `}
 
     <div class="section-title-wrap">
       <div><div class="section-title">Novo lançamento</div></div>
