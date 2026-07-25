@@ -140,3 +140,7 @@ body {
 .install-banner .dismiss { background: none; color: var(--text-muted); padding: 8px; }
 
 .sync-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--teal); display: inline-block; margin-right: 5px; }
+
+.select-bar { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 12px; }
+.tx-checkbox { width: 18px; height: 18px; accent-color: var(--pink); flex-shrink: 0; }
+#deleteSelectedTx:disabled { opacity: 0.4; }
