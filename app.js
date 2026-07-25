@@ -165,7 +165,7 @@ function mapTxFromDb(row) {
   return { id: row.id, tipo: row.tipo, valor: Number(row.valor), categoria: row.categoria, natureza: row.natureza, descricao: row.descricao, data: row.data };
 }
 function mapProdutoFromDb(row) {
-  return { id: row.id, nome: row.nome, sku: row.sku, estoqueAtual: row.estoque_atual, estoqueMinimo: row.estoque_minimo, custoUnitario: Number(row.custo_unitario) };
+  return { id: row.id, nome: row.nome, sku: row.sku, estoqueAtual: row.estoque_atual, estoqueMinimo: row.estoque_minimo, custoUnitario: Number(row.custo_unitario), totalVendido: row.total_vendido || 0 };
 }
 
 async function addTx(tx) {
@@ -204,6 +204,10 @@ async function addProduto(p) {
 async function updateProdutoEstoque(id, novoEstoque) {
   const { error } = await sb.from('produtos').update({ estoque_atual: novoEstoque }).eq('id', id);
   if (error) alert('Erro ao atualizar estoque: ' + error.message);
+}
+async function registrarVendaProduto(id, novoEstoque, novoTotalVendido) {
+  const { error } = await sb.from('produtos').update({ estoque_atual: novoEstoque, total_vendido: novoTotalVendido }).eq('id', id);
+  if (error) alert('Erro ao registrar venda: ' + error.message);
 }
 async function removeProduto(id) {
   const { error } = await sb.from('produtos').delete().eq('id', id);
@@ -451,6 +455,7 @@ function renderEstoque(c) {
                 <button class="step-btn" data-step="1" data-produto="${p.id}" data-atual="${p.estoqueAtual}">+</button>
                 <div class="produto-meta">mín. ${p.estoqueMinimo} · ${fmt(p.custoUnitario)}/un</div>
               </div>
+              ${p.totalVendido > 0 ? `<div class="produto-vendido">🏷️ ${p.totalVendido} un vendidas no total</div>` : ''}
               ${entradaOpen ? `
                 <div class="entrada-box">
                   <div class="form-hint">Peças recebidas do corte/costura. O custo é lançado automaticamente como saída no financeiro.</div>
@@ -675,10 +680,14 @@ function attachFinanceiroHandlers(c) {
 
     await addTxBatch(novos);
 
-    // aplica baixa de estoque
+    // aplica baixa de estoque + soma no total vendido
     for (const [produtoId, qtd] of deducoes.entries()) {
       const produto = state.produtos.find((p) => p.id === produtoId);
-      if (produto) await updateProdutoEstoque(produtoId, Math.max(0, produto.estoqueAtual - qtd));
+      if (produto) {
+        const novoEstoque = Math.max(0, produto.estoqueAtual - qtd);
+        const novoTotalVendido = (produto.totalVendido || 0) + qtd;
+        await registrarVendaProduto(produtoId, novoEstoque, novoTotalVendido);
+      }
     }
 
     state.showUpload = false;
