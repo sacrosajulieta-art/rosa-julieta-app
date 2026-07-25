@@ -68,7 +68,7 @@ function parseCSV(text) {
 }
 function guessValueField(row) {
   // prioriza valores por item de linha (evita duplicar o total do pedido quando há várias variações)
-  const candidates = ['subtotal do produto', 'valor total', 'valor de vendas válidas', 'valor total de vendas', 'valor da nota fiscal', 'valor', 'total', 'preço total', 'preco total', 'valor do produto', 'receita'];
+  const candidates = ['subtotal do produto', 'valor total', 'pagamentos recebidos', 'valor de vendas válidas', 'valor total de vendas', 'valor da nota fiscal', 'valor', 'total', 'preço total', 'preco total', 'valor do produto', 'receita'];
   for (const c of candidates) if (row[c]) return row[c];
   return null;
 }
@@ -87,7 +87,7 @@ function guessDataField(row) {
   return null;
 }
 function guessDescricaoField(row, fallback) {
-  const candidates = ['nome do produto', 'produto', 'título', 'titulo', 'descrição', 'descricao', 'destinatário', 'destinatario', 'cliente'];
+  const candidates = ['nome do produto', 'produtos', 'produto', 'título', 'titulo', 'descrição', 'descricao', 'destinatário', 'destinatario', 'cliente'];
   for (const c of candidates) if (row[c]) return String(row[c]);
   return fallback;
 }
@@ -97,9 +97,17 @@ function guessSkuField(row) {
   return null;
 }
 function guessQuantidadeField(row) {
-  const candidates = ['quantidade', 'qtd', 'quantity'];
+  const candidates = ['quantidade', 'unidades vendidas', 'qtd', 'quantity'];
   for (const c of candidates) if (row[c]) return Number(row[c]) || 1;
   return 1;
+}
+function guessPlataformaFromRow(row, plataformas) {
+  const candidates = ['loja', 'plataforma', 'canal', 'marketplace'];
+  let raw = null;
+  for (const c of candidates) { if (row[c]) { raw = String(row[c]); break; } }
+  if (!raw) return null;
+  const rawLower = raw.toLowerCase();
+  return plataformas.find((p) => rawLower.includes(p.nome.toLowerCase())) || null;
 }
 function guessTaxaRealField(row) {
   // tenta usar os valores REAIS de taxa que a própria plataforma calculou no relatório
@@ -383,7 +391,7 @@ function renderFinanceiro(c) {
 
     ${state.showUpload ? `
       <div class="form-card">
-        <div class="form-hint">Suba o relatório de vendas exportado (CSV ou Excel) do Shopee, Mercado Livre, Amazon ou TikTok Shop. O sistema procura a coluna de valor automaticamente e lança como entrada. Se o SKU do arquivo bater com o SKU cadastrado no Estoque, o estoque é baixado sozinho.</div>
+        <div class="form-hint">Suba o relatório de vendas exportado (CSV ou Excel) do Shopee, Mercado Livre, Amazon ou TikTok Shop. Se o arquivo já identificar a plataforma por linha (ex: relatórios do Upseller), o sistema detecta sozinho. Senão, usa a opção selecionada abaixo pra tudo.</div>
         <select id="uploadPlataforma">
           <option value="">Nenhuma taxa (importar valor bruto)</option>
           ${state.plataformas.map((p) => `<option value="${p.id}">${esc(p.nome)}${p.taxaPercentual > 0 ? ` (${p.taxaPercentual}%)` : ''}</option>`).join('')}
@@ -736,7 +744,6 @@ function attachFinanceiroHandlers(c) {
 
     const plataformaId = document.getElementById('uploadPlataforma')?.value || '';
     const plataforma = state.plataformas.find((p) => p.id === plataformaId);
-    const taxaPct = plataforma ? plataforma.taxaPercentual : 0;
 
     // mapa de SKU (minúsculo, sem espaço nas pontas) -> produto
     // cada produto pode ter vários SKUs separados por vírgula (ex: "TOP-JACK, TOP-JACKK")
@@ -765,10 +772,12 @@ function attachFinanceiroHandlers(c) {
 
       const descricaoItem = guessDescricaoField(row, file.name);
       const dataLinha = guessDataField(row) || todayStr();
+      const plataformaLinha = guessPlataformaFromRow(row, state.plataformas) || plataforma;
+      const taxaPctLinha = plataformaLinha ? plataformaLinha.taxaPercentual : 0;
 
       novos.push({
         tipo: 'entrada', valor,
-        categoria: plataforma ? `Venda ${plataforma.nome}` : 'Venda marketplace',
+        categoria: plataformaLinha ? `Venda ${plataformaLinha.nome}` : 'Venda marketplace',
         descricao: descricaoItem,
         data: dataLinha,
       });
@@ -779,16 +788,16 @@ function attachFinanceiroHandlers(c) {
         totalTaxasReais++;
         novos.push({
           tipo: 'saida', valor: Math.round(taxaReal * 100) / 100, categoria: 'Taxas de marketplace', natureza: 'variavel',
-          descricao: `Taxa real${plataforma ? ' ' + plataforma.nome : ''} — ${descricaoItem}`,
+          descricao: `Taxa real${plataformaLinha ? ' ' + plataformaLinha.nome : ''} — ${descricaoItem}`,
           data: dataLinha,
         });
-      } else if (taxaPct > 0) {
-        const taxaValor = Math.round(valor * (taxaPct / 100) * 100) / 100;
+      } else if (taxaPctLinha > 0) {
+        const taxaValor = Math.round(valor * (taxaPctLinha / 100) * 100) / 100;
         totalTaxas += taxaValor;
         totalTaxasEstimadas++;
         novos.push({
           tipo: 'saida', valor: taxaValor, categoria: 'Taxas de marketplace', natureza: 'variavel',
-          descricao: `Taxa estimada ${plataforma.nome} (${taxaPct}%) — ${descricaoItem}`,
+          descricao: `Taxa estimada ${plataformaLinha.nome} (${taxaPctLinha}%) — ${descricaoItem}`,
           data: dataLinha,
         });
       }
