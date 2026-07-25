@@ -713,6 +713,7 @@ function renderDashboard(c) {
                 <div class="alert-status" style="color:var(--pink)">${t.diasParaVencer === 0 ? '📅 Vence hoje' : t.diasParaVencer === 1 ? '📅 Vence amanhã' : `📅 Vence em ${t.diasParaVencer} dias`} — ${fmt(t.valor)}</div>
               </div>
             </div>
+            <button class="confirm-btn" style="background:var(--teal);margin-top:8px" data-marcar-pago="${t.id}">✅ Marcar como pago</button>
           </div>
         `).join('')}
       </div>
@@ -783,6 +784,16 @@ function attachHandlers(c) {
   if (state.tab === 'dashboard') {
     const dashboardMonthSelect = document.getElementById('dashboardMonthSelect');
     if (dashboardMonthSelect) dashboardMonthSelect.addEventListener('change', (e) => { state.selectedMonth = e.target.value; render(); });
+
+    document.querySelectorAll('[data-marcar-pago]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.marcarPago;
+        const t = state.tx.find((x) => x.id === id);
+        if (!t) return;
+        await updateTx(id, { tipo: t.tipo, valor: t.valor, categoria: t.categoria, natureza: t.natureza, descricao: t.descricao, data: todayStr(), recorrente: t.recorrente });
+        await loadData();
+      });
+    });
   }
   if (state.tab === 'financeiro') attachFinanceiroHandlers(c);
   if (state.tab === 'estoque') attachEstoqueHandlers(c);
