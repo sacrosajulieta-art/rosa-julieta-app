@@ -438,8 +438,6 @@ function renderProducaoDono(c) {
     porCostureira[p.costureiraId].ids.push(p.id);
   });
 
-  const tipo = window.__prodDonoTipo || 'producao';
-
   return `
     <div class="section-title-wrap">
       <div><div class="section-title">Valores por peça (SKU)</div><div class="section-subtitle">Quanto você paga por peça de cada modelo</div></div>
@@ -462,31 +460,6 @@ function renderProducaoDono(c) {
           `).join('')}
           <button class="confirm-btn" id="salvarValoresPeca">Salvar valores</button>
         `}
-      </div>
-    ` : ''}
-
-    <div class="section-title-wrap">
-      <div><div class="section-title">Lançar produção</div><div class="section-subtitle">Registre peças produzidas manualmente</div></div>
-      <button class="icon-btn" id="toggleProducaoForm">＋ Lançar</button>
-    </div>
-
-    ${state.showProducaoForm ? `
-      <div class="form-card">
-        <div class="form-row">
-          <button class="toggle-btn ${tipo === 'producao' ? 'active-teal' : ''}" data-prod-tipo="producao">✅ Produção</button>
-          <button class="toggle-btn ${tipo === 'defeito' ? 'active-pink' : ''}" data-prod-tipo="defeito">⚠️ Defeito</button>
-        </div>
-        <select id="prodDonoCostureira">
-          <option value="">Selecione a costureira</option>
-          ${state.costureiras.filter((c) => c.ativa).map((cost) => `<option value="${cost.id}">${esc(cost.nome)}</option>`).join('')}
-        </select>
-        <select id="prodDonoProduto">
-          <option value="">Selecione o produto</option>
-          ${state.produtos.map((p) => `<option value="${p.id}">${esc(p.nome)}${p.sku ? ' — ' + esc(p.sku) : ''}</option>`).join('')}
-        </select>
-        <input type="text" id="prodDonoQuantidade" placeholder="Quantidade de peças" inputmode="numeric" />
-        <input type="date" id="prodDonoData" value="${todayStr()}" />
-        <button class="confirm-btn" id="salvarProducaoDono">${tipo === 'defeito' ? 'Registrar defeito' : 'Registrar produção'}</button>
       </div>
     ` : ''}
 
@@ -1622,31 +1595,6 @@ function attachProducaoHandlers(c) {
       }
     }
     state.showValoresPecaForm = false;
-    render();
-  });
-
-  const toggleProducaoForm = document.getElementById('toggleProducaoForm');
-  if (toggleProducaoForm) toggleProducaoForm.addEventListener('click', () => { state.showProducaoForm = !state.showProducaoForm; render(); });
-
-  document.querySelectorAll('[data-prod-tipo]').forEach((btn) => {
-    btn.addEventListener('click', () => { window.__prodDonoTipo = btn.dataset.prodTipo; render(); });
-  });
-
-  const salvarProducaoDono = document.getElementById('salvarProducaoDono');
-  if (salvarProducaoDono) salvarProducaoDono.addEventListener('click', async () => {
-    const costureiraId = document.getElementById('prodDonoCostureira').value;
-    const produtoId = document.getElementById('prodDonoProduto').value;
-    let quantidade = Number(document.getElementById('prodDonoQuantidade').value);
-    const data = document.getElementById('prodDonoData').value || todayStr();
-    const tipo = window.__prodDonoTipo || 'producao';
-    if (!costureiraId || !produtoId || !quantidade || quantidade <= 0) {
-      alert('Selecione a costureira, o produto e informe a quantidade.');
-      return;
-    }
-    if (tipo === 'defeito') quantidade = -quantidade;
-    await registrarProducao(costureiraId, produtoId, quantidade, data);
-    state.showProducaoForm = false;
-    window.__prodDonoTipo = 'producao';
     render();
   });
 
