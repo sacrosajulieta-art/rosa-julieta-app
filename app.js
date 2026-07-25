@@ -75,6 +75,16 @@ function guessDescricaoField(row, fallback) {
   for (const c of candidates) if (row[c]) return String(row[c]);
   return fallback;
 }
+function guessSkuField(row) {
+  const candidates = ['nº de referência do sku principal', 'sku principal', 'número de referência sku', 'sku', 'referência sku', 'referencia sku'];
+  for (const c of candidates) if (row[c]) return String(row[c]).trim();
+  return null;
+}
+function guessQuantidadeField(row) {
+  const candidates = ['quantidade', 'qtd', 'quantity'];
+  for (const c of candidates) if (row[c]) return Number(row[c]) || 1;
+  return 1;
+}
 
 async function parseXLSX(file) {
   const buffer = await file.arrayBuffer();
@@ -304,7 +314,7 @@ function renderFinanceiro(c) {
 
     ${state.showUpload ? `
       <div class="form-card">
-        <div class="form-hint">Suba o relatório de vendas exportado (CSV ou Excel) do Shopee, Mercado Livre, Amazon ou TikTok Shop. O sistema procura a coluna de valor automaticamente e lança como entrada.</div>
+        <div class="form-hint">Suba o relatório de vendas exportado (CSV ou Excel) do Shopee, Mercado Livre, Amazon ou TikTok Shop. O sistema procura a coluna de valor automaticamente e lança como entrada. Se o SKU do arquivo bater com o SKU cadastrado no Estoque, o estoque é baixado sozinho.</div>
         <label class="file-label">📤 Escolher arquivo CSV ou Excel<input type="file" accept=".csv,.xlsx,.xls" id="csvInput" style="display:none" /></label>
       </div>
     ` : ''}
@@ -389,7 +399,7 @@ function renderEstoque(c) {
     ${state.showProdutoForm ? `
       <div class="form-card">
         <input type="text" id="pNome" placeholder="Nome do produto" />
-        <input type="text" id="pSku" placeholder="SKU (opcional)" />
+        <input type="text" id="pSku" placeholder="SKU (opcional) — vários separados por vírgula" />
         <div class="form-row">
           <input type="text" id="pEstoqueAtual" placeholder="Estoque atual" />
           <input type="text" id="pEstoqueMinimo" placeholder="Estoque mínimo" />
@@ -409,7 +419,7 @@ function renderEstoque(c) {
             return `
               <div class="form-card">
                 <input type="text" id="editPNome-${p.id}" placeholder="Nome do produto" value="${esc(p.nome)}" />
-                <input type="text" id="editPSku-${p.id}" placeholder="SKU (opcional)" value="${esc(p.sku || '')}" />
+                <input type="text" id="editPSku-${p.id}" placeholder="SKU (opcional) — vários separados por vírgula" value="${esc(p.sku || '')}" />
                 <div class="form-row">
                   <input type="text" id="editPEstoqueAtual-${p.id}" placeholder="Estoque atual" value="${p.estoqueAtual}" />
                   <input type="text" id="editPEstoqueMinimo-${p.id}" placeholder="Estoque mínimo" value="${p.estoqueMinimo}" />
@@ -614,25 +624,76 @@ function attachFinanceiroHandlers(c) {
       alert('Não consegui ler esse arquivo. Confira se é um export válido do marketplace.');
       return;
     }
+
+    // mapa de SKU (minúsculo, sem espaço nas pontas) -> produto
+    // cada produto pode ter vários SKUs separados por vírgula (ex: "TOP-JACK, TOP-JACKK")
+    const skuMap = new Map();
+    state.produtos.forEach((p) => {
+      if (!p.sku) return;
+      p.sku.split(',').forEach((s) => {
+        const key = s.trim().toLowerCase();
+        if (key) skuMap.set(key, p);
+      });
+    });
+
     const novos = [];
+    const deducoes = new Map(); // produtoId -> qtd a baixar
+    const skusNaoEncontrados = new Set();
+    let temSku = false;
+
     rows.forEach((row) => {
       const raw = guessValueField(row);
       if (!raw) return;
       const valor = parseBRNumber(String(raw));
       if (!valor) return;
+
       novos.push({
         tipo: 'entrada', valor, categoria: 'Venda marketplace',
         descricao: guessDescricaoField(row, file.name),
         data: todayStr(),
       });
+
+      const sku = guessSkuField(row);
+      if (sku) {
+        temSku = true;
+        const produto = skuMap.get(sku.trim().toLowerCase());
+        const qtd = guessQuantidadeField(row);
+        if (produto) {
+          deducoes.set(produto.id, (deducoes.get(produto.id) || 0) + qtd);
+        } else {
+          skusNaoEncontrados.add(sku);
+        }
+      }
     });
-    if (novos.length) {
-      await addTxBatch(novos);
-    } else {
+
+    if (!novos.length) {
       alert('Não encontrei nenhuma coluna de valor reconhecível nesse arquivo. Me manda o nome das colunas que eu ajusto.');
+      state.showUpload = false;
+      render();
+      return;
     }
+
+    await addTxBatch(novos);
+
+    // aplica baixa de estoque
+    for (const [produtoId, qtd] of deducoes.entries()) {
+      const produto = state.produtos.find((p) => p.id === produtoId);
+      if (produto) await updateProdutoEstoque(produtoId, Math.max(0, produto.estoqueAtual - qtd));
+    }
+
     state.showUpload = false;
     render();
+
+    let resumo = `${novos.length} venda(s) importada(s).`;
+    if (temSku) {
+      resumo += `\n${deducoes.size} produto(s) com estoque baixado automaticamente.`;
+      if (skusNaoEncontrados.size) {
+        resumo += `\n\nSKUs não encontrados no cadastro (${skusNaoEncontrados.size}), estoque não foi baixado pra eles:\n` + [...skusNaoEncontrados].slice(0, 15).join(', ');
+      }
+    } else {
+      resumo += `\n(Nenhuma coluna de SKU foi encontrada, então o estoque não foi ajustado.)`;
+    }
+    alert(resumo);
   });
 
   const salvarTx = document.getElementById('salvarTx');
