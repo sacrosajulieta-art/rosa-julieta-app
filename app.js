@@ -222,6 +222,7 @@ const state = {
   showCostureiraForm: false,
   showProducaoForm: false,
   costureiraDetalheId: null,
+  showValoresPecaForm: false,
 };
 
 // ==================== DATA LAYER ====================
@@ -440,6 +441,30 @@ function renderProducaoDono(c) {
   const tipo = window.__prodDonoTipo || 'producao';
 
   return `
+    <div class="section-title-wrap">
+      <div><div class="section-title">Valores por peça (SKU)</div><div class="section-subtitle">Quanto você paga por peça de cada modelo</div></div>
+      <button class="icon-btn-ghost" id="toggleValoresPeca">${state.showValoresPecaForm ? '✕ Fechar' : '💲 Ver/editar'}</button>
+    </div>
+
+    ${state.showValoresPecaForm ? `
+      <div class="form-card">
+        ${state.produtos.length === 0 ? `<div class="form-hint">Cadastre produtos no Estoque primeiro.</div>` : `
+          ${state.produtos.map((p) => `
+            <div class="taxa-row">
+              <div class="taxa-row-nome">${esc(p.nome)}${p.sku ? ` <span style="color:var(--text-muted);font-weight:400">(${esc(p.sku)})</span>` : ''}</div>
+              <div class="taxa-row-inputs">
+                <div class="taxa-input-group">
+                  <span>R$</span>
+                  <input type="text" id="valorPeca-${p.id}" value="${(p.valorMaoObra || 0).toFixed(2).replace('.', ',')}" placeholder="0" />
+                </div>
+              </div>
+            </div>
+          `).join('')}
+          <button class="confirm-btn" id="salvarValoresPeca">Salvar valores</button>
+        `}
+      </div>
+    ` : ''}
+
     <div class="section-title-wrap">
       <div><div class="section-title">Lançar produção</div><div class="section-subtitle">Registre peças produzidas manualmente</div></div>
       <button class="icon-btn" id="toggleProducaoForm">＋ Lançar</button>
@@ -1230,6 +1255,7 @@ function attachHandlers(c) {
       state.showCostureiraForm = false;
       state.showProducaoForm = false;
       state.costureiraDetalheId = null;
+      state.showValoresPecaForm = false;
       render();
     });
   });
@@ -1582,6 +1608,23 @@ function attachProducaoHandlers(c) {
   }
 
   // ---- Tela principal de Produção ----
+  const toggleValoresPeca = document.getElementById('toggleValoresPeca');
+  if (toggleValoresPeca) toggleValoresPeca.addEventListener('click', () => { state.showValoresPecaForm = !state.showValoresPecaForm; render(); });
+
+  const salvarValoresPeca = document.getElementById('salvarValoresPeca');
+  if (salvarValoresPeca) salvarValoresPeca.addEventListener('click', async () => {
+    for (const p of state.produtos) {
+      const input = document.getElementById(`valorPeca-${p.id}`);
+      if (!input) continue;
+      const novoValor = parseBRNumber(input.value);
+      if (novoValor !== (p.valorMaoObra || 0)) {
+        await updateProduto(p.id, { nome: p.nome, sku: p.sku, estoqueAtual: p.estoqueAtual, estoqueMinimo: p.estoqueMinimo, custoUnitario: p.custoUnitario, valorMaoObra: novoValor });
+      }
+    }
+    state.showValoresPecaForm = false;
+    render();
+  });
+
   const toggleProducaoForm = document.getElementById('toggleProducaoForm');
   if (toggleProducaoForm) toggleProducaoForm.addEventListener('click', () => { state.showProducaoForm = !state.showProducaoForm; render(); });
 
