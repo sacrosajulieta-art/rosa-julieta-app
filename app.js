@@ -165,7 +165,7 @@ function mapTxFromDb(row) {
   return { id: row.id, tipo: row.tipo, valor: Number(row.valor), categoria: row.categoria, natureza: row.natureza, descricao: row.descricao, data: row.data };
 }
 function mapProdutoFromDb(row) {
-  return { id: row.id, nome: row.nome, sku: row.sku, estoqueAtual: row.estoque_atual, estoqueMinimo: row.estoque_minimo, custoUnitario: Number(row.custo_unitario), totalVendido: row.total_vendido || 0 };
+  return { id: row.id, nome: row.nome, sku: row.sku, estoqueAtual: row.estoque_atual, estoqueMinimo: row.estoque_minimo, custoUnitario: Number(row.custo_unitario), totalVendido: row.total_vendido || 0, ultimaVenda: row.ultima_venda || null };
 }
 
 async function addTx(tx) {
@@ -205,8 +205,8 @@ async function updateProdutoEstoque(id, novoEstoque) {
   const { error } = await sb.from('produtos').update({ estoque_atual: novoEstoque }).eq('id', id);
   if (error) alert('Erro ao atualizar estoque: ' + error.message);
 }
-async function registrarVendaProduto(id, novoEstoque, novoTotalVendido) {
-  const { error } = await sb.from('produtos').update({ estoque_atual: novoEstoque, total_vendido: novoTotalVendido }).eq('id', id);
+async function registrarVendaProduto(id, novoEstoque, novoTotalVendido, dataVenda) {
+  const { error } = await sb.from('produtos').update({ estoque_atual: novoEstoque, total_vendido: novoTotalVendido, ultima_venda: dataVenda }).eq('id', id);
   if (error) alert('Erro ao registrar venda: ' + error.message);
 }
 async function removeProduto(id) {
@@ -243,10 +243,16 @@ function getComputed() {
     let status = 'ok';
     if (p.estoqueAtual <= 0) status = 'critico';
     else if (precisaRepor) status = saldoTotal >= custoRepor ? 'pode-cortar' : 'aguarde';
-    return { ...p, precisaRepor, qtdSugerida, custoRepor, status };
+    const diasSemVender = p.ultimaVenda ? Math.floor((Date.now() - new Date(p.ultimaVenda + 'T00:00:00').getTime()) / 86400000) : null;
+    return { ...p, precisaRepor, qtdSugerida, custoRepor, status, diasSemVender };
   });
 
-  return { saldoTotal, txMes, entradasMes, saidasMes, custoFixo, custoVariavel, produtosStatus };
+  const PARADO_DIAS = 30;
+  const produtosParados = produtosStatus
+    .filter((p) => p.estoqueAtual > 0 && (p.diasSemVender === null || p.diasSemVender >= PARADO_DIAS))
+    .sort((a, b) => (b.diasSemVender ?? 99999) - (a.diasSemVender ?? 99999));
+
+  return { saldoTotal, txMes, entradasMes, saidasMes, custoFixo, custoVariavel, produtosStatus, produtosParados };
 }
 
 // ==================== RENDER ====================
@@ -541,6 +547,26 @@ function renderDashboard(c) {
         `).join('')}
       </div>
     `}
+
+    <div class="section-title-wrap">
+      <div><div class="section-title">Produtos parados</div><div class="section-subtitle">Sem vender há 30 dias ou mais</div></div>
+    </div>
+    ${c.produtosParados.length === 0 ? `<div class="empty-state">Nenhum produto parado no momento 🎉</div>` : `
+      <div class="alert-list">
+        ${c.produtosParados.map((p) => `
+          <div class="alert-card" style="border-color:var(--amber)55">
+            <div class="alert-card-row">
+              <div class="alert-dot" style="background:var(--amber)"></div>
+              <div style="flex:1">
+                <div class="alert-name">${esc(p.nome)}</div>
+                <div class="alert-status" style="color:var(--amber)">${p.diasSemVender === null ? '⏸️ Nunca vendeu' : `⏸️ ${p.diasSemVender} dias sem vender`}</div>
+                <div class="alert-meta">Estoque: ${p.estoqueAtual} un · ${fmt(p.custoUnitario)}/un parado</div>
+              </div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `}
   `;
 }
 
@@ -686,7 +712,7 @@ function attachFinanceiroHandlers(c) {
       if (produto) {
         const novoEstoque = Math.max(0, produto.estoqueAtual - qtd);
         const novoTotalVendido = (produto.totalVendido || 0) + qtd;
-        await registrarVendaProduto(produtoId, novoEstoque, novoTotalVendido);
+        await registrarVendaProduto(produtoId, novoEstoque, novoTotalVendido, todayStr());
       }
     }
 
