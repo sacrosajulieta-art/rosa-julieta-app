@@ -334,7 +334,9 @@ function setupRealtime() {
 
 // ==================== COMPUTED ====================
 function getComputed() {
-  const saldoTotal = state.tx.reduce((acc, t) => acc + (t.tipo === 'entrada' ? t.valor : -t.valor), 0);
+  // saldo real de caixa: só conta o que já aconteceu até hoje, não despesas/receitas
+  // futuras já cadastradas adiantado (ex: aluguel do mês que vem lançado hoje)
+  const saldoTotal = state.tx.filter((t) => t.data <= todayStr()).reduce((acc, t) => acc + (t.tipo === 'entrada' ? t.valor : -t.valor), 0);
   const txMes = state.tx.filter((t) => monthKey(t.data) === state.selectedMonth);
   const entradasMes = txMes.filter((t) => t.tipo === 'entrada').reduce((a, t) => a + t.valor, 0);
   const saidasMes = txMes.filter((t) => t.tipo === 'saida').reduce((a, t) => a + t.valor, 0);
@@ -357,7 +359,17 @@ function getComputed() {
     .filter((p) => p.estoqueAtual > 0 && (p.diasSemVender === null || p.diasSemVender >= PARADO_DIAS))
     .sort((a, b) => (b.diasSemVender ?? 99999) - (a.diasSemVender ?? 99999));
 
-  return { saldoTotal, txMes, entradasMes, saidasMes, custoFixo, custoVariavel, produtosStatus, produtosParados };
+  // contas a vencer: saídas com data futura (ainda não contam no saldo atual),
+  // dentro dos próximos 7 dias, pra você se antecipar
+  const hoje = todayStr();
+  const JANELA_VENCIMENTO = 7;
+  const contasAVencer = state.tx
+    .filter((t) => t.tipo === 'saida' && t.data > hoje)
+    .map((t) => ({ ...t, diasParaVencer: Math.round((new Date(t.data + 'T00:00:00') - new Date(hoje + 'T00:00:00')) / 86400000) }))
+    .filter((t) => t.diasParaVencer <= JANELA_VENCIMENTO)
+    .sort((a, b) => a.diasParaVencer - b.diasParaVencer);
+
+  return { saldoTotal, txMes, entradasMes, saidasMes, custoFixo, custoVariavel, produtosStatus, produtosParados, contasAVencer };
 }
 
 // ==================== RENDER ====================
@@ -683,6 +695,26 @@ function renderDashboard(c) {
           <div class="custo-legend-item"><span class="legend-dot" style="background:var(--pink)"></span>Fixos — ${fmt(c.custoFixo)} (${pctFixo}%)</div>
           <div class="custo-legend-item"><span class="legend-dot" style="background:var(--surface2);border:1px solid var(--border)"></span>Variáveis — ${fmt(c.custoVariavel)} (${pctVariavel}%)</div>
         </div>
+      </div>
+    `}
+
+    <div class="section-title-wrap">
+      <div><div class="section-title">Contas a vencer</div><div class="section-subtitle">Próximos 7 dias — ainda não descontadas do saldo</div></div>
+    </div>
+    ${c.contasAVencer.length === 0 ? `<div class="empty-state">Nenhuma conta vencendo nos próximos 7 dias.</div>` : `
+      <div class="alert-list">
+        ${c.contasAVencer.map((t) => `
+          <div class="alert-card" style="border-color:var(--pink)55">
+            <div class="alert-card-row">
+              <div class="alert-dot" style="background:var(--pink)"></div>
+              <div style="flex:1">
+                <div class="alert-name">${esc(t.categoria)}</div>
+                ${t.descricao ? `<div class="alert-meta" style="margin-top:0">${esc(t.descricao)}</div>` : ''}
+                <div class="alert-status" style="color:var(--pink)">${t.diasParaVencer === 0 ? '📅 Vence hoje' : t.diasParaVencer === 1 ? '📅 Vence amanhã' : `📅 Vence em ${t.diasParaVencer} dias`} — ${fmt(t.valor)}</div>
+              </div>
+            </div>
+          </div>
+        `).join('')}
       </div>
     `}
 
