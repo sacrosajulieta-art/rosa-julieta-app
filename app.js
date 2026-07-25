@@ -571,7 +571,20 @@ function getComputed() {
     .filter((t) => t.diasParaVencer <= JANELA_VENCIMENTO)
     .sort((a, b) => a.diasParaVencer - b.diasParaVencer);
 
-  return { saldoTotal, txMes, entradasMes, saidasMes, custoFixo, custoVariavel, produtosStatus, produtosParados, contasAVencer };
+  // valor real do estoque: matéria-prima parada + peças prontas (pelo custo, não preço de venda)
+  const valorMateriaPrima = state.materiaPrima.reduce((a, m) => a + m.rolosDisponiveis * m.custoMedioRolo, 0);
+  const valorPecasProntas = produtosStatus.reduce((a, p) => a + p.estoqueAtual * p.custoUnitario, 0);
+  const valorEstoqueTotal = valorMateriaPrima + valorPecasProntas;
+  const materiaPrimaDetalhe = state.materiaPrima
+    .filter((m) => m.rolosDisponiveis > 0)
+    .map((m) => [`${m.cor} (${m.rolosDisponiveis} rolo(s))`, m.rolosDisponiveis * m.custoMedioRolo])
+    .sort((a, b) => b[1] - a[1]);
+  const pecasProntasDetalhe = produtosStatus
+    .filter((p) => p.estoqueAtual > 0)
+    .map((p) => [`${p.nome} (${p.estoqueAtual} un)`, p.estoqueAtual * p.custoUnitario])
+    .sort((a, b) => b[1] - a[1]);
+
+  return { saldoTotal, txMes, entradasMes, saidasMes, custoFixo, custoVariavel, produtosStatus, produtosParados, contasAVencer, valorMateriaPrima, valorPecasProntas, valorEstoqueTotal, materiaPrimaDetalhe, pecasProntasDetalhe };
 }
 
 // ==================== RENDER ====================
@@ -1765,6 +1778,33 @@ function renderDashboard(c) {
         <div class="stat-value">${fmt(c.saldoTotal)}</div>
       </div>
     </div>
+
+    <div class="section-title-wrap">
+      <div><div class="section-title">Valor do estoque</div><div class="section-subtitle">Pelo custo, não pelo preço de venda — o quanto está parado</div></div>
+    </div>
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon" style="background:rgba(255,182,39,0.1)">🧵</div>
+        <div class="stat-label">Matéria-prima</div>
+        <div class="stat-value">${fmt(c.valorMateriaPrima)}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:rgba(0,212,160,0.1)">👕</div>
+        <div class="stat-label">Peças prontas</div>
+        <div class="stat-value">${fmt(c.valorPecasProntas)}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:rgba(0,212,160,0.15)">📦</div>
+        <div class="stat-label">Total em estoque</div>
+        <div class="stat-value">${fmt(c.valorEstoqueTotal)}</div>
+      </div>
+    </div>
+    ${(c.materiaPrimaDetalhe.length > 0 || c.pecasProntasDetalhe.length > 0) ? `
+      <div class="prod-breakdown" style="margin-bottom:24px">
+        ${c.materiaPrimaDetalhe.map(([nome, val]) => `<div class="prod-breakdown-item"><span>🧵 ${esc(nome)}</span><span>${fmt(val)}</span></div>`).join('')}
+        ${c.pecasProntasDetalhe.map(([nome, val]) => `<div class="prod-breakdown-item"><span>👕 ${esc(nome)}</span><span>${fmt(val)}</span></div>`).join('')}
+      </div>
+    ` : ''}
 
     <div class="section-title-wrap">
       <div><div class="section-title">Custos fixos x variáveis</div><div class="section-subtitle">Baseado nos lançamentos deste mês</div></div>
