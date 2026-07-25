@@ -156,6 +156,11 @@ body {
 .produto-meta { font-size: 11px; color: var(--text-muted); margin-left: auto; font-family: 'IBM Plex Mono', monospace; }
 .produto-vendido { font-size: 11.5px; color: var(--teal); margin-top: 6px; }
 
+.variantes-box { margin-top: 10px; }
+.variante-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.variante-nome { flex: 1; font-size: 13px; }
+.variante-qtd { font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 600; min-width: 24px; text-align: center; }
+
 .entrada-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; margin-top: 12px; background: none; border: 1px dashed var(--border); border-radius: 8px; color: var(--text-muted); font-size: 12px; font-weight: 500; padding: 9px; cursor: pointer; }
 .entrada-box { margin-top: 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
 
