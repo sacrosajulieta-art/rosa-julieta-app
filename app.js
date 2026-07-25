@@ -432,10 +432,14 @@ function renderProducaoDono(c) {
   naoPagas.forEach((p) => {
     const produto = state.produtos.find((x) => x.id === p.produtoId);
     const valorUnit = produto ? produto.valorMaoObra : 0;
-    if (!porCostureira[p.costureiraId]) porCostureira[p.costureiraId] = { qtd: 0, valor: 0, ids: [] };
+    const valorItem = p.quantidade * valorUnit;
+    if (!porCostureira[p.costureiraId]) porCostureira[p.costureiraId] = { qtd: 0, valor: 0, ids: [], porDia: {} };
     porCostureira[p.costureiraId].qtd += p.quantidade;
-    porCostureira[p.costureiraId].valor += p.quantidade * valorUnit;
+    porCostureira[p.costureiraId].valor += valorItem;
     porCostureira[p.costureiraId].ids.push(p.id);
+    if (!porCostureira[p.costureiraId].porDia[p.data]) porCostureira[p.costureiraId].porDia[p.data] = { qtd: 0, valor: 0 };
+    porCostureira[p.costureiraId].porDia[p.data].qtd += p.quantidade;
+    porCostureira[p.costureiraId].porDia[p.data].valor += valorItem;
   });
 
   return `
@@ -496,14 +500,19 @@ function renderProducaoDono(c) {
       <div class="produto-list">
         ${Object.entries(porCostureira).map(([costureiraId, info]) => {
           const costureira = state.costureiras.find((cc) => cc.id === costureiraId);
+          const dias = Object.keys(info.porDia).sort();
+          const periodo = dias.length ? (dias[0] === dias[dias.length - 1] ? dias[0] : `${dias[0]} até ${dias[dias.length - 1]}`) : '';
           return `
             <div class="produto-card">
               <div class="produto-header">
                 <div>
                   <div class="produto-nome">${esc(costureira?.nome || 'Costureira removida')}</div>
-                  <div class="produto-sku">${info.qtd} peças (líquido, já descontando defeitos)</div>
+                  <div class="produto-sku">${info.qtd} peças (líquido) · ${periodo}</div>
                 </div>
                 <div class="dre-td-num ${info.valor >= 0 ? 'dre-positivo' : 'dre-negativo'}" style="font-size:16px">${fmt(info.valor)}</div>
+              </div>
+              <div class="prod-breakdown">
+                ${dias.map((d) => `<div class="prod-breakdown-item"><span>${d}</span><span>${info.porDia[d].qtd} peças · ${fmt(info.porDia[d].valor)}</span></div>`).join('')}
               </div>
               <button class="confirm-btn" style="margin-top:10px" data-pagar-costureira="${costureiraId}" data-ids="${info.ids.join(',')}" data-valor="${info.valor}" data-nome="${esc(costureira?.nome || '')}">✅ Pagar ${fmt(info.valor)}</button>
             </div>
