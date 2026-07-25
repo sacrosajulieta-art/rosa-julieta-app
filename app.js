@@ -70,6 +70,37 @@ function guessValueField(row) {
   return null;
 }
 
+function exportCSV(txMes, monthLabel) {
+  if (!txMes.length) { alert('Não há lançamentos neste mês pra exportar.'); return; }
+  const rows = [['Data', 'Tipo', 'Categoria', 'Natureza', 'Descrição', 'Valor']];
+  [...txMes].sort((a, b) => a.data.localeCompare(b.data)).forEach((t) => {
+    rows.push([
+      t.data,
+      t.tipo === 'entrada' ? 'Entrada' : 'Saída',
+      t.categoria,
+      t.natureza === 'fixo' ? 'Fixo' : t.natureza === 'variavel' ? 'Variável' : '',
+      t.descricao || '',
+      t.valor.toFixed(2).replace('.', ','),
+    ]);
+  });
+  const csvContent = rows.map((r) =>
+    r.map((cell) => {
+      const s = String(cell);
+      return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    }).join(';')
+  ).join('\r\n');
+
+  const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `rosa-julieta-financeiro-${monthLabel}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 // ==================== STATE ====================
 const state = {
   tab: 'dashboard',
@@ -236,7 +267,8 @@ function renderFinanceiro(c) {
   return `
     <div class="section-title-wrap">
       <div><div class="section-title">Financeiro</div><div class="section-subtitle">Lançamentos e importação de vendas</div></div>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="icon-btn-ghost" id="exportCsv">💾 Exportar</button>
         <button class="icon-btn-ghost" id="toggleUpload">📤 CSV</button>
         <button class="icon-btn" id="toggleTxForm">＋ Lançar</button>
       </div>
@@ -484,6 +516,9 @@ function attachHandlers(c) {
 function attachFinanceiroHandlers(c) {
   const monthSelect = document.getElementById('monthSelect');
   if (monthSelect) monthSelect.addEventListener('change', (e) => { state.selectedMonth = e.target.value; render(); });
+
+  const exportBtn = document.getElementById('exportCsv');
+  if (exportBtn) exportBtn.addEventListener('click', () => exportCSV(c.txMes, state.selectedMonth));
 
   const toggleUpload = document.getElementById('toggleUpload');
   if (toggleUpload) toggleUpload.addEventListener('click', () => { state.showUpload = !state.showUpload; render(); });
