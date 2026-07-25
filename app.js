@@ -45,6 +45,13 @@ function daysInMonth(mKey) {
   const [y, m] = mKey.split('-').map(Number);
   return new Date(y, m, 0).getDate();
 }
+function inicioDaSemana(dataStr) {
+  const d = new Date(dataStr + 'T00:00:00');
+  const dia = d.getDay();
+  const diff = dia === 0 ? -6 : 1 - dia;
+  d.setDate(d.getDate() + diff);
+  return d.toISOString().slice(0, 10);
+}
 const esc = (s) => (s ?? '').toString().replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 function parseBRNumber(str) {
@@ -223,6 +230,10 @@ const state = {
   showProducaoForm: false,
   costureiraDetalheId: null,
   showValoresPecaForm: false,
+  editingProducaoId: null,
+  prodFiltroStatus: 'todos',
+  prodFiltroInicio: null,
+  prodFiltroFim: null,
 };
 
 // ==================== DATA LAYER ====================
@@ -348,6 +359,21 @@ async function removeProducao(id) {
   const { error } = await sb.from('producoes').delete().eq('id', id);
   if (error) alert('Erro ao remover lançamento: ' + error.message);
 }
+async function updateProducao(id, novo) {
+  const antigo = state.producoes.find((p) => p.id === id);
+  if (!antigo) return;
+  const { error } = await sb.from('producoes').update({ produto_id: novo.produtoId, quantidade: novo.quantidade, data: novo.data }).eq('id', id);
+  if (error) { alert('Erro ao editar lançamento: ' + error.message); return; }
+  if (antigo.produtoId === novo.produtoId) {
+    const produto = state.produtos.find((p) => p.id === novo.produtoId);
+    if (produto) await updateProdutoEstoque(produto.id, Math.max(0, produto.estoqueAtual + (novo.quantidade - antigo.quantidade)));
+  } else {
+    const produtoAntigo = state.produtos.find((p) => p.id === antigo.produtoId);
+    if (produtoAntigo) await updateProdutoEstoque(produtoAntigo.id, Math.max(0, produtoAntigo.estoqueAtual - antigo.quantidade));
+    const produtoNovo = state.produtos.find((p) => p.id === novo.produtoId);
+    if (produtoNovo) await updateProdutoEstoque(produtoNovo.id, produtoNovo.estoqueAtual + novo.quantidade);
+  }
+}
 
 async function garantirRecorrentes() {
   const hojeMonth = todayStr().slice(0, 7);
@@ -431,15 +457,16 @@ function renderProducaoDono(c) {
   const porCostureira = {};
   naoPagas.forEach((p) => {
     const produto = state.produtos.find((x) => x.id === p.produtoId);
+    const nomeProduto = produto?.nome || 'Produto removido';
     const valorUnit = produto ? produto.valorMaoObra : 0;
     const valorItem = p.quantidade * valorUnit;
-    if (!porCostureira[p.costureiraId]) porCostureira[p.costureiraId] = { qtd: 0, valor: 0, ids: [], porDia: {} };
+    if (!porCostureira[p.costureiraId]) porCostureira[p.costureiraId] = { qtd: 0, valor: 0, ids: [], porProduto: {} };
     porCostureira[p.costureiraId].qtd += p.quantidade;
     porCostureira[p.costureiraId].valor += valorItem;
     porCostureira[p.costureiraId].ids.push(p.id);
-    if (!porCostureira[p.costureiraId].porDia[p.data]) porCostureira[p.costureiraId].porDia[p.data] = { qtd: 0, valor: 0 };
-    porCostureira[p.costureiraId].porDia[p.data].qtd += p.quantidade;
-    porCostureira[p.costureiraId].porDia[p.data].valor += valorItem;
+    if (!porCostureira[p.costureiraId].porProduto[nomeProduto]) porCostureira[p.costureiraId].porProduto[nomeProduto] = { qtd: 0, valor: 0 };
+    porCostureira[p.costureiraId].porProduto[nomeProduto].qtd += p.quantidade;
+    porCostureira[p.costureiraId].porProduto[nomeProduto].valor += valorItem;
   });
 
   return `
@@ -500,19 +527,18 @@ function renderProducaoDono(c) {
       <div class="produto-list">
         ${Object.entries(porCostureira).map(([costureiraId, info]) => {
           const costureira = state.costureiras.find((cc) => cc.id === costureiraId);
-          const dias = Object.keys(info.porDia).sort();
-          const periodo = dias.length ? (dias[0] === dias[dias.length - 1] ? dias[0] : `${dias[0]} até ${dias[dias.length - 1]}`) : '';
+          const produtosLista = Object.entries(info.porProduto).sort((a, b) => b[1].qtd - a[1].qtd);
           return `
             <div class="produto-card">
               <div class="produto-header">
                 <div>
                   <div class="produto-nome">${esc(costureira?.nome || 'Costureira removida')}</div>
-                  <div class="produto-sku">${info.qtd} peças (líquido) · ${periodo}</div>
+                  <div class="produto-sku">${info.qtd} peças (líquido)</div>
                 </div>
                 <div class="dre-td-num ${info.valor >= 0 ? 'dre-positivo' : 'dre-negativo'}" style="font-size:16px">${fmt(info.valor)}</div>
               </div>
               <div class="prod-breakdown">
-                ${dias.map((d) => `<div class="prod-breakdown-item"><span>${d}</span><span>${info.porDia[d].qtd} peças · ${fmt(info.porDia[d].valor)}</span></div>`).join('')}
+                ${produtosLista.map(([nome, dados]) => `<div class="prod-breakdown-item"><span>${esc(nome)}</span><span>${dados.qtd} peças · ${fmt(dados.valor)}</span></div>`).join('')}
               </div>
               <button class="confirm-btn" style="margin-top:10px" data-pagar-costureira="${costureiraId}" data-ids="${info.ids.join(',')}" data-valor="${info.valor}" data-nome="${esc(costureira?.nome || '')}">✅ Pagar ${fmt(info.valor)}</button>
             </div>
@@ -547,6 +573,23 @@ function renderCostureiraDetalhe(costureiraId) {
     porProdutoPendente[nome].valor += p.quantidade * (produto ? produto.valorMaoObra : 0);
   });
   const resumoProdutos = Object.entries(porProdutoPendente).sort((a, b) => b[1].qtd - a[1].qtd);
+
+  const entradasFiltradas = entradas.filter((p) => {
+    if (state.prodFiltroStatus === 'pendente' && p.pago) return false;
+    if (state.prodFiltroStatus === 'pago' && !p.pago) return false;
+    if (state.prodFiltroInicio && p.data < state.prodFiltroInicio) return false;
+    if (state.prodFiltroFim && p.data > state.prodFiltroFim) return false;
+    return true;
+  });
+  const porDiaFiltrado = {};
+  entradasFiltradas.forEach((p) => {
+    const produto = state.produtos.find((x) => x.id === p.produtoId);
+    const valorItem = p.quantidade * (produto ? produto.valorMaoObra : 0);
+    if (!porDiaFiltrado[p.data]) porDiaFiltrado[p.data] = { qtd: 0, valor: 0 };
+    porDiaFiltrado[p.data].qtd += p.quantidade;
+    porDiaFiltrado[p.data].valor += valorItem;
+  });
+  const resumoPorDia = Object.entries(porDiaFiltrado).sort((a, b) => b[0].localeCompare(a[0]));
 
   const tipo = window.__prodDetalheTipo || 'producao';
 
@@ -611,13 +654,64 @@ function renderCostureiraDetalhe(costureiraId) {
       </div>
     ` : ''}
 
-    <div class="section-title-wrap"><div><div class="section-title">Lançamentos</div></div></div>
-    ${entradas.length === 0 ? `<div class="empty-state">Nenhum lançamento ainda.</div>` : `
+    <div class="section-title-wrap"><div><div class="section-title">Lançamentos</div><div class="section-subtitle">Filtre por status ou período</div></div></div>
+
+    <div class="filtro-tipo-bar">
+      <button class="filtro-tipo-btn ${state.prodFiltroStatus === 'todos' ? 'active' : ''}" data-prod-filtro-status="todos">Tudo</button>
+      <button class="filtro-tipo-btn ${state.prodFiltroStatus === 'pendente' ? 'active-teal' : ''}" data-prod-filtro-status="pendente">Pendente</button>
+      <button class="filtro-tipo-btn ${state.prodFiltroStatus === 'pago' ? 'active-teal' : ''}" data-prod-filtro-status="pago">Pago</button>
+    </div>
+    <div class="form-row" style="margin-bottom:10px">
+      <input type="date" id="prodFiltroInicio" value="${state.prodFiltroInicio || ''}" />
+      <input type="date" id="prodFiltroFim" value="${state.prodFiltroFim || ''}" />
+    </div>
+    <div class="form-row" style="margin-bottom:20px">
+      <button class="icon-btn-ghost" id="filtroEstaSemana" style="flex:1">📅 Esta semana</button>
+      <button class="icon-btn-ghost" id="filtroLimpar" style="flex:1">✕ Limpar período</button>
+    </div>
+
+    <div class="section-title-wrap"><div><div class="section-title">Resumo por dia</div></div></div>
+    ${resumoPorDia.length === 0 ? `<div class="empty-state">Nenhum lançamento no filtro selecionado.</div>` : `
+      <div class="tx-list" style="margin-bottom:28px">
+        ${resumoPorDia.map(([dia, info]) => `
+          <div class="tx-row">
+            <div class="tx-dot" style="background:${info.qtd >= 0 ? 'var(--teal)' : 'var(--red)'}"></div>
+            <div style="flex:1"><div class="tx-categoria">${dia}</div></div>
+            <div class="tx-valor" style="color:${info.qtd >= 0 ? 'var(--teal)' : 'var(--red)'}">${info.qtd} peças · ${fmt(info.valor)}</div>
+          </div>
+        `).join('')}
+      </div>
+    `}
+
+    <div class="section-title-wrap"><div><div class="section-title">Detalhado</div></div></div>
+    ${entradasFiltradas.length === 0 ? `<div class="empty-state">Nenhum lançamento no filtro selecionado.</div>` : `
       <div class="tx-list">
-        ${entradas.map((p) => {
+        ${entradasFiltradas.map((p) => {
           const produto = state.produtos.find((x) => x.id === p.produtoId);
           const valor = p.quantidade * (produto ? produto.valorMaoObra : 0);
           const ehDefeito = p.quantidade < 0;
+
+          if (state.editingProducaoId === p.id) {
+            const tipoEdit = window.__editProdTipo || (ehDefeito ? 'defeito' : 'producao');
+            return `
+              <div class="form-card">
+                <div class="form-row">
+                  <button class="toggle-btn ${tipoEdit === 'producao' ? 'active-teal' : ''}" data-edit-prod-tipo="producao">✅ Produção</button>
+                  <button class="toggle-btn ${tipoEdit === 'defeito' ? 'active-pink' : ''}" data-edit-prod-tipo="defeito">⚠️ Defeito</button>
+                </div>
+                <select id="editProdProduto-${p.id}">
+                  ${state.produtos.map((prod) => `<option value="${prod.id}" ${prod.id === p.produtoId ? 'selected' : ''}>${esc(prod.nome)}${prod.sku ? ' — ' + esc(prod.sku) : ''}</option>`).join('')}
+                </select>
+                <input type="text" id="editProdQuantidade-${p.id}" value="${Math.abs(p.quantidade)}" placeholder="Quantidade" />
+                <input type="date" id="editProdData-${p.id}" value="${p.data}" />
+                <div class="form-row">
+                  <button class="confirm-btn" data-salvar-edit-producao="${p.id}">Salvar</button>
+                  <button class="toggle-btn" data-cancelar-edit-producao="${p.id}">Cancelar</button>
+                </div>
+              </div>
+            `;
+          }
+
           return `
             <div class="tx-row">
               <div class="tx-dot" style="background:${ehDefeito ? 'var(--red)' : p.pago ? 'var(--teal)' : 'var(--amber)'}"></div>
@@ -626,6 +720,7 @@ function renderCostureiraDetalhe(costureiraId) {
                 <div class="tx-desc">${p.quantidade} peças · ${fmt(valor)}${p.pago ? ' · pago' : ' · pendente'}</div>
                 <div class="tx-date">${p.data}</div>
               </div>
+              <button class="trash-btn" data-editar-producao="${p.id}">✏️</button>
               <button class="trash-btn" data-remover-producao="${p.id}">🗑</button>
             </div>
           `;
@@ -1265,6 +1360,7 @@ function attachHandlers(c) {
       state.showProducaoForm = false;
       state.costureiraDetalheId = null;
       state.showValoresPecaForm = false;
+      state.editingProducaoId = null;
       render();
     });
   });
@@ -1581,7 +1677,7 @@ function attachProducaoHandlers(c) {
   // ---- Tela de perfil da costureira ----
   if (state.costureiraDetalheId) {
     const voltar = document.getElementById('voltarCostureiras');
-    if (voltar) voltar.addEventListener('click', () => { state.costureiraDetalheId = null; state.showProducaoForm = false; render(); });
+    if (voltar) voltar.addEventListener('click', () => { state.costureiraDetalheId = null; state.showProducaoForm = false; state.editingProducaoId = null; render(); });
 
     const toggleDetalheForm = document.getElementById('toggleDetalheForm');
     if (toggleDetalheForm) toggleDetalheForm.addEventListener('click', () => { state.showProducaoForm = !state.showProducaoForm; render(); });
@@ -1611,6 +1707,56 @@ function attachProducaoHandlers(c) {
           await removeProducao(btn.dataset.removerProducao);
           render();
         }
+      });
+    });
+
+    document.querySelectorAll('[data-prod-filtro-status]').forEach((btn) => {
+      btn.addEventListener('click', () => { state.prodFiltroStatus = btn.dataset.prodFiltroStatus; render(); });
+    });
+
+    const filtroInicio = document.getElementById('prodFiltroInicio');
+    if (filtroInicio) filtroInicio.addEventListener('change', (e) => { state.prodFiltroInicio = e.target.value || null; render(); });
+    const filtroFim = document.getElementById('prodFiltroFim');
+    if (filtroFim) filtroFim.addEventListener('change', (e) => { state.prodFiltroFim = e.target.value || null; render(); });
+
+    const filtroEstaSemana = document.getElementById('filtroEstaSemana');
+    if (filtroEstaSemana) filtroEstaSemana.addEventListener('click', () => {
+      state.prodFiltroInicio = inicioDaSemana(todayStr());
+      state.prodFiltroFim = todayStr();
+      render();
+    });
+    const filtroLimpar = document.getElementById('filtroLimpar');
+    if (filtroLimpar) filtroLimpar.addEventListener('click', () => {
+      state.prodFiltroInicio = null;
+      state.prodFiltroFim = null;
+      render();
+    });
+
+    document.querySelectorAll('[data-editar-producao]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        state.editingProducaoId = btn.dataset.editarProducao;
+        window.__editProdTipo = null;
+        render();
+      });
+    });
+    document.querySelectorAll('[data-cancelar-edit-producao]').forEach((btn) => {
+      btn.addEventListener('click', () => { state.editingProducaoId = null; render(); });
+    });
+    document.querySelectorAll('[data-edit-prod-tipo]').forEach((btn) => {
+      btn.addEventListener('click', () => { window.__editProdTipo = btn.dataset.editProdTipo; render(); });
+    });
+    document.querySelectorAll('[data-salvar-edit-producao]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.salvarEditProducao;
+        const produtoId = document.getElementById(`editProdProduto-${id}`).value;
+        let quantidade = Number(document.getElementById(`editProdQuantidade-${id}`).value);
+        const data = document.getElementById(`editProdData-${id}`).value || todayStr();
+        const tipoEdit = window.__editProdTipo || 'producao';
+        if (!produtoId || !quantidade || quantidade <= 0) { alert('Selecione o produto e informe a quantidade.'); return; }
+        if (tipoEdit === 'defeito') quantidade = -quantidade;
+        await updateProducao(id, { produtoId, quantidade, data });
+        state.editingProducaoId = null;
+        await loadData();
       });
     });
     return;
