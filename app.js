@@ -397,6 +397,7 @@ function render() {
       ${tabBtn('dashboard', 'Dashboard', c.produtosStatus.filter(p => p.status !== 'ok').length)}
       ${tabBtn('financeiro', 'Financeiro')}
       ${tabBtn('estoque', 'Estoque')}
+      ${tabBtn('dre', 'DRE')}
     </div>
     <div class="content" id="tabContent"></div>
   `;
@@ -405,6 +406,7 @@ function render() {
   if (state.tab === 'dashboard') contentEl.innerHTML = renderDashboard(c);
   else if (state.tab === 'financeiro') contentEl.innerHTML = renderFinanceiro(c);
   else if (state.tab === 'estoque') contentEl.innerHTML = renderEstoque(c);
+  else if (state.tab === 'dre') contentEl.innerHTML = renderDRE(c);
 
   attachHandlers(c);
 }
@@ -562,6 +564,84 @@ function renderFinanceiro(c) {
         `;
         }).join('')}
       </div>
+    `}
+  `;
+}
+
+// ---- DRE ----
+function renderDRE(c) {
+  const txMes = c.txMes;
+  const receitaBruta = txMes.filter((t) => t.tipo === 'entrada').reduce((a, t) => a + t.valor, 0);
+  const taxasMkt = txMes.filter((t) => t.tipo === 'saida' && t.categoria === 'Taxas de marketplace').reduce((a, t) => a + t.valor, 0);
+  const receitaLiquida = receitaBruta - taxasMkt;
+  const custosVariaveis = txMes.filter((t) => t.tipo === 'saida' && t.natureza === 'variavel' && t.categoria !== 'Taxas de marketplace').reduce((a, t) => a + t.valor, 0);
+  const margemContribuicao = receitaLiquida - custosVariaveis;
+  const custosFixos = txMes.filter((t) => t.tipo === 'saida' && t.natureza === 'fixo').reduce((a, t) => a + t.valor, 0);
+  const resultado = margemContribuicao - custosFixos;
+  const pctMC = receitaBruta > 0 ? (margemContribuicao / receitaBruta) * 100 : 0;
+  const pctResultado = receitaBruta > 0 ? (resultado / receitaBruta) * 100 : 0;
+
+  const porCategoria = (filterFn) => {
+    const map = {};
+    txMes.filter(filterFn).forEach((t) => { map[t.categoria] = (map[t.categoria] || 0) + t.valor; });
+    return Object.entries(map).sort((a, b) => b[1] - a[1]);
+  };
+  const receitaPorCategoria = porCategoria((t) => t.tipo === 'entrada');
+  const variavelPorCategoria = porCategoria((t) => t.tipo === 'saida' && t.natureza === 'variavel' && t.categoria !== 'Taxas de marketplace');
+  const fixoPorCategoria = porCategoria((t) => t.tipo === 'saida' && t.natureza === 'fixo');
+
+  const subLista = (itens) => itens.length === 0 ? '' : `
+    <div class="dre-sub">
+      ${itens.map(([nome, val]) => `<div class="dre-sub-item"><span>${esc(nome)}</span><span>${fmt(val)}</span></div>`).join('')}
+    </div>
+  `;
+
+  return `
+    <input type="month" class="month-input" id="dreMonthSelect" value="${state.selectedMonth}" />
+
+    <div class="dre-intro">
+      <strong>O que é o DRE?</strong> É um resumo em cascata: mostra quanto você faturou e vai descontando, passo a passo, tudo que saiu — até chegar no que realmente sobrou (lucro) ou faltou (prejuízo) no mês.
+    </div>
+
+    ${receitaBruta === 0 && custosFixos === 0 && custosVariaveis === 0 ? `<div class="empty-state">Sem lançamentos neste mês ainda pra montar o DRE.</div>` : `
+
+    <div class="dre-line">
+      <div><div class="dre-label">Receita Bruta de Vendas</div><div class="dre-explica">Tudo que você vendeu no mês, antes de qualquer desconto</div></div>
+      <div class="dre-value" style="color:var(--teal)">${fmt(receitaBruta)}</div>
+    </div>
+    ${subLista(receitaPorCategoria)}
+
+    <div class="dre-line">
+      <div><div class="dre-label">(–) Taxas de Marketplace</div><div class="dre-explica">O que Shopee, Mercado Livre, TikTok etc. descontam de cada venda</div></div>
+      <div class="dre-value" style="color:var(--pink)">${fmt(taxasMkt)}</div>
+    </div>
+
+    <div class="dre-line dre-subtotal">
+      <div><div class="dre-label">= Receita Líquida</div><div class="dre-explica">O que sobra depois de pagar as plataformas</div></div>
+      <div class="dre-value">${fmt(receitaLiquida)}</div>
+    </div>
+
+    <div class="dre-line">
+      <div><div class="dre-label">(–) Custos Variáveis</div><div class="dre-explica">Gastos que sobem e descem com o volume de venda: tecido, aviamento, frete, ads, embalagem...</div></div>
+      <div class="dre-value" style="color:var(--pink)">${fmt(custosVariaveis)}</div>
+    </div>
+    ${subLista(variavelPorCategoria)}
+
+    <div class="dre-line dre-subtotal">
+      <div><div class="dre-label">= Margem de Contribuição</div><div class="dre-explica">O que sobra de cada venda pra pagar os custos fixos e gerar lucro (${pctMC.toFixed(1)}% da receita bruta)</div></div>
+      <div class="dre-value" style="color:${margemContribuicao >= 0 ? 'var(--teal)' : 'var(--red)'}">${fmt(margemContribuicao)}</div>
+    </div>
+
+    <div class="dre-line">
+      <div><div class="dre-label">(–) Custos Fixos</div><div class="dre-explica">Gastos que você tem todo mês, venda muito ou pouco: aluguel, salários, água, energia...</div></div>
+      <div class="dre-value" style="color:var(--pink)">${fmt(custosFixos)}</div>
+    </div>
+    ${subLista(fixoPorCategoria)}
+
+    <div class="dre-line dre-resultado">
+      <div><div class="dre-label">= Resultado do Período</div><div class="dre-explica">${resultado >= 0 ? '🎉 Lucro' : '⚠️ Prejuízo'} do mês (${pctResultado.toFixed(1)}% da receita bruta)</div></div>
+      <div class="dre-value" style="font-size:20px;color:${resultado >= 0 ? 'var(--teal)' : 'var(--red)'}">${fmt(resultado)}</div>
+    </div>
     `}
   `;
 }
@@ -797,6 +877,10 @@ function attachHandlers(c) {
   }
   if (state.tab === 'financeiro') attachFinanceiroHandlers(c);
   if (state.tab === 'estoque') attachEstoqueHandlers(c);
+  if (state.tab === 'dre') {
+    const dreMonthSelect = document.getElementById('dreMonthSelect');
+    if (dreMonthSelect) dreMonthSelect.addEventListener('change', (e) => { state.selectedMonth = e.target.value; render(); });
+  }
 }
 
 function attachFinanceiroHandlers(c) {
