@@ -44,8 +44,10 @@ function parseBRNumber(str) {
 function parseCSV(text) {
   const lines = text.split(/\r?\n/).filter((l) => l.trim().length);
   if (!lines.length) return [];
+  // detecta o delimitador UMA VEZ a partir do cabeçalho (evita confusão quando
+  // os dados têm vírgula decimal, ex: "10,00", numa linha separada por ";")
+  const delim = lines[0].includes(';') ? ';' : ',';
   const splitLine = (line) => {
-    const delim = line.includes(';') && !line.includes(',') ? ';' : ',';
     const out = []; let cur = ''; let inQ = false;
     for (let i = 0; i < line.length; i++) {
       const c = line[i];
