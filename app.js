@@ -65,9 +65,15 @@ function parseCSV(text) {
   });
 }
 function guessValueField(row) {
-  const candidates = ['valor total', 'valor', 'total', 'preço total', 'preco total', 'valor do produto', 'receita'];
+  // prioriza valores por item de linha (evita duplicar o total do pedido quando há várias variações)
+  const candidates = ['subtotal do produto', 'valor total', 'valor', 'total', 'preço total', 'preco total', 'valor do produto', 'receita'];
   for (const c of candidates) if (row[c]) return row[c];
   return null;
+}
+function guessDescricaoField(row, fallback) {
+  const candidates = ['nome do produto', 'produto', 'título', 'titulo', 'descrição', 'descricao'];
+  for (const c of candidates) if (row[c]) return String(row[c]);
+  return fallback;
 }
 
 async function parseXLSX(file) {
@@ -127,6 +133,8 @@ const state = {
   entradaOpenId: null,
   editingTxId: null,
   editingProdutoId: null,
+  selectMode: false,
+  selectedTxIds: new Set(),
 };
 
 // ==================== DATA LAYER ====================
@@ -165,6 +173,10 @@ async function addTxBatch(rows) {
 async function removeTx(id) {
   const { error } = await sb.from('transacoes').delete().eq('id', id);
   if (error) alert('Erro ao remover: ' + error.message);
+}
+async function removeTxBatch(ids) {
+  const { error } = await sb.from('transacoes').delete().in('id', ids);
+  if (error) alert('Erro ao remover lançamentos: ' + error.message);
 }
 async function updateTx(id, tx) {
   const { error } = await sb.from('transacoes').update({
@@ -281,6 +293,7 @@ function renderFinanceiro(c) {
     <div class="section-title-wrap">
       <div><div class="section-title">Financeiro</div><div class="section-subtitle">Lançamentos e importação de vendas</div></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="icon-btn-ghost" id="toggleSelect">${state.selectMode ? '✕ Cancelar' : '☑️ Selecionar'}</button>
         <button class="icon-btn-ghost" id="exportCsv">💾 Exportar</button>
         <button class="icon-btn-ghost" id="toggleUpload">📤 CSV</button>
         <button class="icon-btn" id="toggleTxForm">＋ Lançar</button>
@@ -312,6 +325,13 @@ function renderFinanceiro(c) {
       </div>
     ` : ''}
 
+    ${state.selectMode ? `
+      <div class="select-bar">
+        <button class="icon-btn-ghost" id="selectAllTx">${c.txMes.length > 0 && c.txMes.every(t => state.selectedTxIds.has(t.id)) ? 'Desmarcar todos' : 'Selecionar todos'}</button>
+        <button class="icon-btn" id="deleteSelectedTx" ${state.selectedTxIds.size === 0 ? 'disabled' : ''}>🗑 Excluir (${state.selectedTxIds.size})</button>
+      </div>
+    ` : ''}
+
     ${c.txMes.length === 0 ? `<div class="empty-state">Nenhum lançamento neste mês ainda.</div>` : `
       <div class="tx-list">
         ${c.txMes.map((t) => {
@@ -336,17 +356,20 @@ function renderFinanceiro(c) {
               </div>
             `;
           }
+          const checked = state.selectedTxIds.has(t.id);
           return `
           <div class="tx-row">
-            <div class="tx-dot" style="background:${t.tipo === 'entrada' ? 'var(--teal)' : 'var(--pink)'}"></div>
+            ${state.selectMode ? `<input type="checkbox" class="tx-checkbox" data-select-tx="${t.id}" ${checked ? 'checked' : ''} />` : `<div class="tx-dot" style="background:${t.tipo === 'entrada' ? 'var(--teal)' : 'var(--pink)'}"></div>`}
             <div style="flex:1">
               <div class="tx-categoria">${esc(t.categoria)}</div>
               ${t.descricao ? `<div class="tx-desc">${esc(t.descricao)}</div>` : ''}
               <div class="tx-date">${t.data}</div>
             </div>
             <div class="tx-valor" style="color:${t.tipo === 'entrada' ? 'var(--teal)' : 'var(--pink)'}">${t.tipo === 'entrada' ? '+' : '-'}${fmt(t.valor)}</div>
-            <button class="trash-btn" data-edit-tx="${t.id}">✏️</button>
-            <button class="trash-btn" data-remove-tx="${t.id}">🗑</button>
+            ${!state.selectMode ? `
+              <button class="trash-btn" data-edit-tx="${t.id}">✏️</button>
+              <button class="trash-btn" data-remove-tx="${t.id}">🗑</button>
+            ` : ''}
           </div>
         `;
         }).join('')}
@@ -518,6 +541,8 @@ function attachHandlers(c) {
       state.entradaOpenId = null;
       state.editingTxId = null;
       state.editingProdutoId = null;
+      state.selectMode = false;
+      state.selectedTxIds = new Set();
       render();
     });
   });
@@ -532,6 +557,40 @@ function attachFinanceiroHandlers(c) {
 
   const exportBtn = document.getElementById('exportCsv');
   if (exportBtn) exportBtn.addEventListener('click', () => exportCSV(c.txMes, state.selectedMonth));
+
+  const toggleSelect = document.getElementById('toggleSelect');
+  if (toggleSelect) toggleSelect.addEventListener('click', () => {
+    state.selectMode = !state.selectMode;
+    state.selectedTxIds = new Set();
+    render();
+  });
+
+  const selectAllBtn = document.getElementById('selectAllTx');
+  if (selectAllBtn) selectAllBtn.addEventListener('click', () => {
+    const allSelected = c.txMes.length > 0 && c.txMes.every((t) => state.selectedTxIds.has(t.id));
+    state.selectedTxIds = allSelected ? new Set() : new Set(c.txMes.map((t) => t.id));
+    render();
+  });
+
+  document.querySelectorAll('[data-select-tx]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const id = cb.dataset.selectTx;
+      if (cb.checked) state.selectedTxIds.add(id);
+      else state.selectedTxIds.delete(id);
+      render();
+    });
+  });
+
+  const deleteSelectedBtn = document.getElementById('deleteSelectedTx');
+  if (deleteSelectedBtn) deleteSelectedBtn.addEventListener('click', async () => {
+    const ids = [...state.selectedTxIds];
+    if (!ids.length) return;
+    if (!confirm(`Excluir ${ids.length} lançamento(s) selecionado(s)? Essa ação não pode ser desfeita.`)) return;
+    await removeTxBatch(ids);
+    state.selectedTxIds = new Set();
+    state.selectMode = false;
+    render();
+  });
 
   const toggleUpload = document.getElementById('toggleUpload');
   if (toggleUpload) toggleUpload.addEventListener('click', () => { state.showUpload = !state.showUpload; render(); });
@@ -563,7 +622,7 @@ function attachFinanceiroHandlers(c) {
       if (!valor) return;
       novos.push({
         tipo: 'entrada', valor, categoria: 'Venda marketplace',
-        descricao: row['produto'] || row['título'] || row['titulo'] || file.name,
+        descricao: guessDescricaoField(row, file.name),
         data: todayStr(),
       });
     });
