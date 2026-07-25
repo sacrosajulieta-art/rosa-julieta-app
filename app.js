@@ -243,17 +243,26 @@ const state = {
   showConciliacao: false,
   variantes: [],
   showVarianteForm: {},
+  materiaPrima: [],
+  ordensCorte: [],
+  ordensCorteItens: [],
+  showCompraTecidoForm: false,
+  showOrdemCorteForm: false,
+  ordemConcluindoId: null,
 };
 
 // ==================== DATA LAYER ====================
 async function loadData() {
-  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }] = await Promise.all([
+  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }] = await Promise.all([
     sb.from('transacoes').select('*').order('data', { ascending: false }),
     sb.from('produtos').select('*').order('created_at', { ascending: false }),
     sb.from('plataformas').select('*').order('nome', { ascending: true }),
     sb.from('costureiras').select('*').order('nome', { ascending: true }),
     sb.from('producoes').select('*').order('data', { ascending: false }),
     sb.from('variantes').select('*').order('nome', { ascending: true }),
+    sb.from('materia_prima').select('*').order('cor', { ascending: true }),
+    sb.from('ordens_corte').select('*').order('data_envio', { ascending: false }),
+    sb.from('ordens_corte_itens').select('*'),
   ]);
   if (e1) console.error(e1);
   if (e2) console.error(e2);
@@ -261,12 +270,18 @@ async function loadData() {
   if (e4) console.error(e4);
   if (e5) console.error(e5);
   if (e6) console.error(e6);
+  if (e7) console.error(e7);
+  if (e8) console.error(e8);
+  if (e9) console.error(e9);
   state.tx = (tx || []).map(mapTxFromDb);
   state.produtos = (produtos || []).map(mapProdutoFromDb);
   state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0) }));
   state.costureiras = (costureiras || []).map((c) => ({ id: c.id, nome: c.nome, ativa: c.ativa }));
   state.producoes = (producoes || []).map((p) => ({ id: p.id, costureiraId: p.costureira_id, produtoId: p.produto_id, quantidade: p.quantidade, data: p.data, pago: p.pago, varianteId: p.variante_id || null }));
   state.variantes = (variantes || []).map((v) => ({ id: v.id, produtoId: v.produto_id, nome: v.nome, estoqueAtual: v.estoque_atual, skuVariante: v.sku_variante }));
+  state.materiaPrima = (materiaPrima || []).map((m) => ({ id: m.id, cor: m.cor, rolosDisponiveis: m.rolos_disponiveis, custoMedioRolo: Number(m.custo_medio_rolo || 0) }));
+  state.ordensCorte = (ordensCorte || []).map((o) => ({ id: o.id, cor: o.cor, quantidadeRolos: o.quantidade_rolos, valorTecido: Number(o.valor_tecido), dataEnvio: o.data_envio, status: o.status, dataConclusao: o.data_conclusao }));
+  state.ordensCorteItens = (ordensCorteItens || []).map((i) => ({ id: i.id, ordemId: i.ordem_id, produtoId: i.produto_id, quantidade: i.quantidade }));
   state.loading = false;
   render();
 }
@@ -314,6 +329,49 @@ async function updateVarianteEstoque(id, novoEstoque) {
 async function removeVariante(id) {
   const { error } = await sb.from('variantes').delete().eq('id', id);
   if (error) alert('Erro ao remover cor: ' + error.message);
+}
+
+// ---- Matéria-prima (tecido) ----
+async function comprarTecido(cor, quantidadeRolos, valorTotal, data) {
+  const existente = state.materiaPrima.find((m) => m.cor.trim().toLowerCase() === cor.trim().toLowerCase());
+  if (existente) {
+    const novoTotalRolos = existente.rolosDisponiveis + quantidadeRolos;
+    const novoCustoMedio = novoTotalRolos > 0
+      ? (existente.custoMedioRolo * existente.rolosDisponiveis + valorTotal) / novoTotalRolos
+      : 0;
+    const { error } = await sb.from('materia_prima').update({ rolos_disponiveis: novoTotalRolos, custo_medio_rolo: novoCustoMedio }).eq('id', existente.id);
+    if (error) { alert('Erro ao registrar compra: ' + error.message); return; }
+  } else {
+    const custoMedio = quantidadeRolos > 0 ? valorTotal / quantidadeRolos : 0;
+    const { error } = await sb.from('materia_prima').insert({ cor, rolos_disponiveis: quantidadeRolos, custo_medio_rolo: custoMedio });
+    if (error) { alert('Erro ao registrar compra: ' + error.message); return; }
+  }
+  await addTx({
+    tipo: 'saida', valor: valorTotal, categoria: 'Tecido', natureza: 'variavel',
+    descricao: `${quantidadeRolos} rolo(s) — ${cor}`, data,
+  });
+}
+async function criarOrdemCorte(cor, quantidadeRolos, valorTecido, dataEnvio) {
+  const materia = state.materiaPrima.find((m) => m.cor.trim().toLowerCase() === cor.trim().toLowerCase());
+  if (!materia || materia.rolosDisponiveis < quantidadeRolos) {
+    if (!confirm('Você tem menos rolos dessa cor em estoque do que está enviando. Confirma mesmo assim?')) return false;
+  }
+  const { error } = await sb.from('ordens_corte').insert({ cor, quantidade_rolos: quantidadeRolos, valor_tecido: valorTecido, data_envio: dataEnvio, status: 'aguardando' });
+  if (error) { alert('Erro ao criar ordem de corte: ' + error.message); return false; }
+  if (materia) await sb.from('materia_prima').update({ rolos_disponiveis: Math.max(0, materia.rolosDisponiveis - quantidadeRolos) }).eq('id', materia.id);
+  return true;
+}
+async function concluirOrdemCorte(ordemId, itens) {
+  for (const item of itens) {
+    const { error } = await sb.from('ordens_corte_itens').insert({ ordem_id: ordemId, produto_id: item.produtoId, quantidade: item.quantidade });
+    if (error) { alert('Erro ao salvar item do corte: ' + error.message); return; }
+  }
+  const { error } = await sb.from('ordens_corte').update({ status: 'concluido', data_conclusao: todayStr() }).eq('id', ordemId);
+  if (error) alert('Erro ao concluir ordem: ' + error.message);
+}
+async function removeOrdemCorte(id) {
+  const { error } = await sb.from('ordens_corte').delete().eq('id', id);
+  if (error) alert('Erro ao remover ordem: ' + error.message);
 }
 async function removeTx(id) {
   const { error } = await sb.from('transacoes').delete().eq('id', id);
@@ -459,6 +517,9 @@ function setupRealtime() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'costureiras' }, loadData)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'producoes' }, loadData)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'variantes' }, loadData)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'materia_prima' }, loadData)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'ordens_corte' }, loadData)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'ordens_corte_itens' }, loadData)
     .subscribe();
 }
 
@@ -1070,6 +1131,144 @@ function renderConciliacao(c) {
     </div>
   `;
 }
+// ---- Tecido / Matéria-prima ----
+function renderTecido(c) {
+  const aguardando = state.ordensCorte.filter((o) => o.status === 'aguardando').sort((a, b) => a.dataEnvio.localeCompare(b.dataEnvio));
+  const concluidas = [...state.ordensCorte.filter((o) => o.status === 'concluido')].sort((a, b) => b.dataConclusao.localeCompare(a.dataConclusao));
+
+  return `
+    <div class="section-title-wrap">
+      <div><div class="section-title">Matéria-prima</div><div class="section-subtitle">Rolos de tecido em estoque, por cor</div></div>
+      <button class="icon-btn" id="toggleCompraTecido">＋ Comprar</button>
+    </div>
+
+    ${state.showCompraTecidoForm ? `
+      <div class="form-card">
+        <input type="text" id="tecidoCor" placeholder="Cor do tecido (ex: Preto)" />
+        <div class="form-row">
+          <input type="text" id="tecidoRolos" placeholder="Quantidade de rolos" inputmode="numeric" />
+          <input type="text" id="tecidoValor" placeholder="Valor total pago (R$)" />
+        </div>
+        <input type="date" id="tecidoData" value="${todayStr()}" />
+        <button class="confirm-btn" id="salvarCompraTecido">Registrar compra</button>
+      </div>
+    ` : ''}
+
+    ${state.materiaPrima.length === 0 ? `<div class="empty-state">Nenhum tecido cadastrado ainda.</div>` : `
+      <div class="tx-list" style="margin-bottom:28px">
+        ${state.materiaPrima.map((m) => `
+          <div class="tx-row">
+            <div class="tx-dot" style="background:${m.rolosDisponiveis > 0 ? 'var(--teal)' : 'var(--red)'}"></div>
+            <div style="flex:1"><div class="tx-categoria">${esc(m.cor)}</div><div class="tx-desc">${fmt(m.custoMedioRolo)}/rolo (média)</div></div>
+            <div class="tx-valor">${m.rolosDisponiveis} rolo(s)</div>
+          </div>
+        `).join('')}
+      </div>
+    `}
+
+    <div class="section-title-wrap">
+      <div><div class="section-title">Ordens de corte</div><div class="section-subtitle">Envio de tecido pro corte e resultado em peças</div></div>
+      <button class="icon-btn" id="toggleOrdemCorte">＋ Enviar corte</button>
+    </div>
+
+    ${state.showOrdemCorteForm ? `
+      <div class="form-card">
+        <select id="ordemCor">
+          <option value="">Selecione a cor</option>
+          ${state.materiaPrima.map((m) => `<option value="${esc(m.cor)}" data-custo="${m.custoMedioRolo}">${esc(m.cor)} (${m.rolosDisponiveis} disponível)</option>`).join('')}
+        </select>
+        <div class="form-row">
+          <input type="text" id="ordemRolos" placeholder="Quantidade de rolos enviados" inputmode="numeric" />
+          <input type="text" id="ordemValor" placeholder="Valor do tecido usado (R$)" />
+        </div>
+        <input type="date" id="ordemData" value="${todayStr()}" />
+        <button class="confirm-btn" id="salvarOrdemCorte">Enviar pro corte</button>
+      </div>
+    ` : ''}
+
+    ${aguardando.length === 0 ? '' : `
+      <div class="produto-list" style="margin-bottom:20px">
+        ${aguardando.map((o) => `
+          <div class="produto-card" style="border-color:var(--amber)55">
+            <div class="produto-header">
+              <div>
+                <div class="produto-nome">${esc(o.cor)} — ${o.quantidadeRolos} rolo(s)</div>
+                <div class="produto-sku">Enviado em ${o.dataEnvio} · ${fmt(o.valorTecido)} · 🟡 Aguardando resultado</div>
+              </div>
+              <button class="trash-btn" data-remover-ordem="${o.id}">🗑</button>
+            </div>
+            ${state.ordemConcluindoId === o.id ? `
+              <div class="entrada-box">
+                <div class="form-hint">Quantas peças de cada modelo saíram desse corte?</div>
+                ${[0, 1, 2, 3, 4].map((i) => `
+                  <div class="form-row">
+                    <select id="corteItemProduto-${o.id}-${i}">
+                      <option value="">Modelo (opcional)</option>
+                      ${state.produtos.map((p) => `<option value="${p.id}">${esc(p.nome)}</option>`).join('')}
+                    </select>
+                    <input type="text" id="corteItemQtd-${o.id}-${i}" placeholder="Peças" inputmode="numeric" />
+                  </div>
+                `).join('')}
+                <div class="form-row">
+                  <button class="confirm-btn" data-confirmar-conclusao="${o.id}">Salvar resultado</button>
+                  <button class="toggle-btn" data-cancelar-conclusao="${o.id}">Cancelar</button>
+                </div>
+              </div>
+            ` : `<button class="entrada-btn" data-abrir-conclusao="${o.id}">📋 Registrar resultado do corte</button>`}
+          </div>
+        `).join('')}
+      </div>
+    `}
+
+    <div class="section-title-wrap"><div><div class="section-title">Cortes concluídos</div></div></div>
+    ${concluidas.length === 0 ? `<div class="empty-state">Nenhum corte concluído ainda.</div>` : `
+      <div class="produto-list">
+        ${concluidas.map((o) => {
+          const itens = state.ordensCorteItens.filter((i) => i.ordemId === o.id);
+          const totalPecas = itens.reduce((a, i) => a + i.quantidade, 0);
+          const custoPorPeca = totalPecas > 0 ? o.valorTecido / totalPecas : 0;
+          const rendimento = o.quantidadeRolos > 0 ? totalPecas / o.quantidadeRolos : 0;
+          const outrasDaCor = concluidas.filter((x) => x.id !== o.id && x.cor === o.cor);
+          const rendimentosAnteriores = outrasDaCor.map((x) => {
+            const its = state.ordensCorteItens.filter((i) => i.ordemId === x.id);
+            const tot = its.reduce((a, i) => a + i.quantidade, 0);
+            return x.quantidadeRolos > 0 ? tot / x.quantidadeRolos : null;
+          }).filter((v) => v !== null);
+          const mediaAnterior = rendimentosAnteriores.length ? rendimentosAnteriores.reduce((a, v) => a + v, 0) / rendimentosAnteriores.length : null;
+
+          return `
+            <div class="produto-card">
+              <div class="produto-header">
+                <div>
+                  <div class="produto-nome">${esc(o.cor)} — ${o.quantidadeRolos} rolo(s)</div>
+                  <div class="produto-sku">${o.dataEnvio} → ${o.dataConclusao} · ${fmt(o.valorTecido)}</div>
+                </div>
+                <button class="trash-btn" data-remover-ordem="${o.id}">🗑</button>
+              </div>
+              <div class="prod-breakdown">
+                ${itens.map((i) => {
+                  const produto = state.produtos.find((p) => p.id === i.produtoId);
+                  return `<div class="prod-breakdown-item"><span>${esc(produto?.nome || 'Produto removido')}</span><span>${i.quantidade} peças</span></div>`;
+                }).join('')}
+              </div>
+              <div class="produto-meta" style="margin-top:8px">
+                Custo por peça: <strong style="color:var(--text)">${fmt(custoPorPeca)}</strong> · Rendimento: <strong style="color:var(--text)">${rendimento.toFixed(1)} peças/rolo</strong>
+                ${mediaAnterior !== null ? ` · Média anterior dessa cor: ${mediaAnterior.toFixed(1)} peças/rolo ${rendimento < mediaAnterior * 0.9 ? '⚠️ abaixo da média' : rendimento > mediaAnterior * 1.1 ? '✅ acima da média' : ''}` : ''}
+              </div>
+              <div style="margin-top:10px;display:flex;flex-direction:column;gap:6px">
+                ${itens.map((i) => {
+                  const produto = state.produtos.find((p) => p.id === i.produtoId);
+                  if (!produto || Math.abs(produto.custoUnitario - custoPorPeca) < 0.01) return '';
+                  return `<button class="entrada-btn" data-aplicar-custo="${produto.id}" data-custo="${custoPorPeca.toFixed(2)}">💲 Atualizar custo de "${esc(produto.nome)}" pra ${fmt(custoPorPeca)}</button>`;
+                }).join('')}
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `}
+  `;
+}
 // ---- Gate de acesso ----
 function renderGate(app) {
   app.innerHTML = `
@@ -1136,6 +1335,7 @@ function render() {
       ${tabBtn('dashboard', 'Dashboard', c.produtosStatus.filter(p => p.status !== 'ok').length)}
       ${tabBtn('financeiro', 'Financeiro')}
       ${tabBtn('estoque', 'Estoque')}
+      ${tabBtn('tecido', 'Tecido')}
       ${tabBtn('producao', 'Produção')}
       ${tabBtn('dre', 'DRE')}
     </div>
@@ -1146,6 +1346,7 @@ function render() {
   if (state.tab === 'dashboard') contentEl.innerHTML = renderDashboard(c);
   else if (state.tab === 'financeiro') contentEl.innerHTML = renderFinanceiro(c);
   else if (state.tab === 'estoque') contentEl.innerHTML = renderEstoque(c);
+  else if (state.tab === 'tecido') contentEl.innerHTML = renderTecido(c);
   else if (state.tab === 'producao') contentEl.innerHTML = renderProducaoDono(c);
   else if (state.tab === 'dre') contentEl.innerHTML = renderDRE(c);
 
@@ -1650,6 +1851,9 @@ function attachHandlers(c) {
       state.costureiraDetalheId = null;
       state.showValoresPecaForm = false;
       state.editingProducaoId = null;
+      state.showCompraTecidoForm = false;
+      state.showOrdemCorteForm = false;
+      state.ordemConcluindoId = null;
       render();
     });
   });
@@ -1670,6 +1874,7 @@ function attachHandlers(c) {
   }
   if (state.tab === 'financeiro') attachFinanceiroHandlers(c);
   if (state.tab === 'estoque') attachEstoqueHandlers(c);
+  if (state.tab === 'tecido') attachTecidoHandlers(c);
   if (state.tab === 'producao') attachProducaoHandlers(c);
   if (state.tab === 'dre') {
     const dreMonthSelect = document.getElementById('dreMonthSelect');
@@ -1994,6 +2199,89 @@ function attachFinanceiroHandlers(c) {
       state.editingTxId = null;
       window.__editTxTipo = null;
       render();
+    });
+  });
+}
+
+function attachTecidoHandlers(c) {
+  const toggleCompra = document.getElementById('toggleCompraTecido');
+  if (toggleCompra) toggleCompra.addEventListener('click', () => { state.showCompraTecidoForm = !state.showCompraTecidoForm; render(); });
+
+  const salvarCompra = document.getElementById('salvarCompraTecido');
+  if (salvarCompra) salvarCompra.addEventListener('click', async () => {
+    const cor = document.getElementById('tecidoCor').value.trim();
+    const rolos = Number(document.getElementById('tecidoRolos').value);
+    const valor = parseBRNumber(document.getElementById('tecidoValor').value);
+    const data = document.getElementById('tecidoData').value || todayStr();
+    if (!cor || !rolos || rolos <= 0 || !valor) { alert('Preencha cor, quantidade de rolos e valor.'); return; }
+    await comprarTecido(cor, rolos, valor, data);
+    state.showCompraTecidoForm = false;
+    render();
+  });
+
+  const toggleOrdem = document.getElementById('toggleOrdemCorte');
+  if (toggleOrdem) toggleOrdem.addEventListener('click', () => { state.showOrdemCorteForm = !state.showOrdemCorteForm; render(); });
+
+  const ordemCorSelect = document.getElementById('ordemCor');
+  if (ordemCorSelect) ordemCorSelect.addEventListener('change', (e) => {
+    const opt = e.target.selectedOptions[0];
+    const custo = opt ? Number(opt.dataset.custo || 0) : 0;
+    const rolosInput = document.getElementById('ordemRolos');
+    const valorInput = document.getElementById('ordemValor');
+    const atualizarSugestao = () => {
+      const qtd = Number(rolosInput.value) || 0;
+      if (qtd > 0 && custo > 0) valorInput.value = (qtd * custo).toFixed(2).replace('.', ',');
+    };
+    rolosInput.oninput = atualizarSugestao;
+    atualizarSugestao();
+  });
+
+  const salvarOrdem = document.getElementById('salvarOrdemCorte');
+  if (salvarOrdem) salvarOrdem.addEventListener('click', async () => {
+    const cor = document.getElementById('ordemCor').value;
+    const rolos = Number(document.getElementById('ordemRolos').value);
+    const valor = parseBRNumber(document.getElementById('ordemValor').value);
+    const data = document.getElementById('ordemData').value || todayStr();
+    if (!cor || !rolos || rolos <= 0) { alert('Selecione a cor e informe a quantidade de rolos.'); return; }
+    const ok = await criarOrdemCorte(cor, rolos, valor, data);
+    if (ok) { state.showOrdemCorteForm = false; render(); }
+  });
+
+  document.querySelectorAll('[data-remover-ordem]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (confirm('Remover essa ordem de corte?')) await removeOrdemCorte(btn.dataset.removerOrdem);
+    });
+  });
+
+  document.querySelectorAll('[data-abrir-conclusao]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.ordemConcluindoId = btn.dataset.abrirConclusao; render(); });
+  });
+  document.querySelectorAll('[data-cancelar-conclusao]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.ordemConcluindoId = null; render(); });
+  });
+  document.querySelectorAll('[data-confirmar-conclusao]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const ordemId = btn.dataset.confirmarConclusao;
+      const itens = [];
+      for (let i = 0; i < 5; i++) {
+        const produtoId = document.getElementById(`corteItemProduto-${ordemId}-${i}`)?.value;
+        const quantidade = Number(document.getElementById(`corteItemQtd-${ordemId}-${i}`)?.value);
+        if (produtoId && quantidade > 0) itens.push({ produtoId, quantidade });
+      }
+      if (!itens.length) { alert('Informe pelo menos um modelo e quantidade de peças.'); return; }
+      await concluirOrdemCorte(ordemId, itens);
+      state.ordemConcluindoId = null;
+      render();
+    });
+  });
+
+  document.querySelectorAll('[data-aplicar-custo]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const produto = state.produtos.find((p) => p.id === btn.dataset.aplicarCusto);
+      if (!produto) return;
+      const novoCusto = Number(btn.dataset.custo);
+      await updateProduto(produto.id, { nome: produto.nome, sku: produto.sku, estoqueAtual: produto.estoqueAtual, estoqueMinimo: produto.estoqueMinimo, custoUnitario: novoCusto, valorMaoObra: produto.valorMaoObra });
+      await loadData();
     });
   });
 }
