@@ -5,6 +5,12 @@ const SUPABASE_ANON_KEY = 'sb_publishable_JfxpEAafLngstJeouuaepA_RHqRUFOT';
 
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// Códigos de acesso simples — troque por códigos à sua escolha.
+// Não é uma senha de segurança bancária, é só uma trava leve pra
+// separar quem vê o app completo de quem só lança produção.
+const CODIGO_DONO = 'ROSA2026';
+const CODIGO_SUPERVISORA = 'EXPED2026';
+
 const CATEGORIAS_SAIDA = {
   'Custos fixos': [
     'Aluguel', 'Funcionários — salário', 'Funcionários — encargos/benefícios',
@@ -14,7 +20,7 @@ const CATEGORIAS_SAIDA = {
   'Custos variáveis': [
     'Tecido', 'Aviamento', 'Corte e costura (terceirizado)', 'Embalagem',
     'Frete/Logística', 'Taxas de marketplace', 'Ads/Marketing',
-    'Impostos sobre venda', 'Etiquetas/Tags', 'Reposição de estoque',
+    'Impostos sobre venda', 'Etiquetas/Tags', 'Reposição de estoque', 'Mão de obra — produção',
   ],
 };
 const NATUREZA_POR_CATEGORIA = (() => {
@@ -210,21 +216,32 @@ const state = {
   showTaxasForm: false,
   showNovaPlataforma: false,
   filtroTipo: 'todos',
+  papel: localStorage.getItem('rj_papel') || null,
+  costureiras: [],
+  producoes: [],
+  showCostureiraForm: false,
+  showProducaoForm: false,
 };
 
 // ==================== DATA LAYER ====================
 async function loadData() {
-  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }] = await Promise.all([
+  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }] = await Promise.all([
     sb.from('transacoes').select('*').order('data', { ascending: false }),
     sb.from('produtos').select('*').order('created_at', { ascending: false }),
     sb.from('plataformas').select('*').order('nome', { ascending: true }),
+    sb.from('costureiras').select('*').order('nome', { ascending: true }),
+    sb.from('producoes').select('*').order('data', { ascending: false }),
   ]);
   if (e1) console.error(e1);
   if (e2) console.error(e2);
   if (e3) console.error(e3);
+  if (e4) console.error(e4);
+  if (e5) console.error(e5);
   state.tx = (tx || []).map(mapTxFromDb);
   state.produtos = (produtos || []).map(mapProdutoFromDb);
   state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0) }));
+  state.costureiras = (costureiras || []).map((c) => ({ id: c.id, nome: c.nome, ativa: c.ativa }));
+  state.producoes = (producoes || []).map((p) => ({ id: p.id, costureiraId: p.costureira_id, produtoId: p.produto_id, quantidade: p.quantidade, data: p.data, pago: p.pago }));
   state.loading = false;
   render();
 }
@@ -233,7 +250,7 @@ function mapTxFromDb(row) {
   return { id: row.id, tipo: row.tipo, valor: Number(row.valor), categoria: row.categoria, natureza: row.natureza, descricao: row.descricao, data: row.data, recorrente: !!row.recorrente, recorrenteOrigemId: row.recorrente_origem_id || null };
 }
 function mapProdutoFromDb(row) {
-  return { id: row.id, nome: row.nome, sku: row.sku, estoqueAtual: row.estoque_atual, estoqueMinimo: row.estoque_minimo, custoUnitario: Number(row.custo_unitario), totalVendido: row.total_vendido || 0, ultimaVenda: row.ultima_venda || null };
+  return { id: row.id, nome: row.nome, sku: row.sku, estoqueAtual: row.estoque_atual, estoqueMinimo: row.estoque_minimo, custoUnitario: Number(row.custo_unitario), totalVendido: row.total_vendido || 0, ultimaVenda: row.ultima_venda || null, valorMaoObra: Number(row.valor_mao_obra || 0) };
 }
 
 async function addTx(tx) {
@@ -265,7 +282,7 @@ async function updateTx(id, tx) {
 
 async function addProduto(p) {
   const { error } = await sb.from('produtos').insert({
-    nome: p.nome, sku: p.sku || null, estoque_atual: p.estoqueAtual, estoque_minimo: p.estoqueMinimo, custo_unitario: p.custoUnitario,
+    nome: p.nome, sku: p.sku || null, estoque_atual: p.estoqueAtual, estoque_minimo: p.estoqueMinimo, custo_unitario: p.custoUnitario, valor_mao_obra: p.valorMaoObra || 0,
   });
   if (error) alert('Erro ao salvar produto: ' + error.message);
 }
@@ -283,7 +300,7 @@ async function removeProduto(id) {
 }
 async function updateProduto(id, p) {
   const { error } = await sb.from('produtos').update({
-    nome: p.nome, sku: p.sku || null, estoque_atual: p.estoqueAtual, estoque_minimo: p.estoqueMinimo, custo_unitario: p.custoUnitario,
+    nome: p.nome, sku: p.sku || null, estoque_atual: p.estoqueAtual, estoque_minimo: p.estoqueMinimo, custo_unitario: p.custoUnitario, valor_mao_obra: p.valorMaoObra || 0,
   }).eq('id', id);
   if (error) alert('Erro ao atualizar produto: ' + error.message);
 }
@@ -299,6 +316,26 @@ async function addPlataforma(nome, taxaPercentual, taxaFixa) {
 async function removePlataforma(id) {
   const { error } = await sb.from('plataformas').delete().eq('id', id);
   if (error) alert('Erro ao remover plataforma: ' + error.message);
+}
+
+// ---- Costureiras & Produção ----
+async function addCostureira(nome) {
+  const { error } = await sb.from('costureiras').insert({ nome, ativa: true });
+  if (error) alert('Erro ao adicionar costureira: ' + error.message);
+}
+async function removeCostureira(id) {
+  const { error } = await sb.from('costureiras').delete().eq('id', id);
+  if (error) alert('Erro ao remover costureira: ' + error.message);
+}
+async function registrarProducao(costureiraId, produtoId, quantidade, data) {
+  const { error } = await sb.from('producoes').insert({ costureira_id: costureiraId, produto_id: produtoId, quantidade, data, pago: false });
+  if (error) { alert('Erro ao registrar produção: ' + error.message); return; }
+  const produto = state.produtos.find((p) => p.id === produtoId);
+  if (produto) await updateProdutoEstoque(produtoId, produto.estoqueAtual + quantidade);
+}
+async function marcarProducaoPaga(ids) {
+  const { error } = await sb.from('producoes').update({ pago: true }).in('id', ids);
+  if (error) alert('Erro ao marcar produção como paga: ' + error.message);
 }
 
 async function garantirRecorrentes() {
@@ -329,6 +366,8 @@ function setupRealtime() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'transacoes' }, loadData)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'produtos' }, loadData)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'plataformas' }, loadData)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'costureiras' }, loadData)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'producoes' }, loadData)
     .subscribe();
 }
 
@@ -373,10 +412,195 @@ function getComputed() {
 }
 
 // ==================== RENDER ====================
+// ---- Produção (visão do dono) ----
+function renderProducaoDono(c) {
+  const naoPagas = state.producoes.filter((p) => !p.pago);
+  const porCostureira = {};
+  naoPagas.forEach((p) => {
+    const produto = state.produtos.find((x) => x.id === p.produtoId);
+    const valorUnit = produto ? produto.valorMaoObra : 0;
+    if (!porCostureira[p.costureiraId]) porCostureira[p.costureiraId] = { qtd: 0, valor: 0, ids: [] };
+    porCostureira[p.costureiraId].qtd += p.quantidade;
+    porCostureira[p.costureiraId].valor += p.quantidade * valorUnit;
+    porCostureira[p.costureiraId].ids.push(p.id);
+  });
+
+  return `
+    <div class="section-title-wrap">
+      <div><div class="section-title">Costureiras</div><div class="section-subtitle">Cadastre quem produz pra você</div></div>
+      <button class="icon-btn" id="toggleCostureiraForm">＋ Costureira</button>
+    </div>
+
+    ${state.showCostureiraForm ? `
+      <div class="form-card">
+        <input type="text" id="novaCostureiraNome" placeholder="Nome da costureira" />
+        <button class="confirm-btn" id="salvarCostureira">Adicionar</button>
+      </div>
+    ` : ''}
+
+    ${state.costureiras.length === 0 ? `<div class="empty-state">Nenhuma costureira cadastrada ainda.</div>` : `
+      <div class="tx-list" style="margin-bottom:28px">
+        ${state.costureiras.map((cost) => `
+          <div class="tx-row">
+            <div class="tx-dot" style="background:${cost.ativa ? 'var(--teal)' : 'var(--text-muted)'}"></div>
+            <div style="flex:1"><div class="tx-categoria">${esc(cost.nome)}</div></div>
+            <button class="trash-btn" data-remover-costureira="${cost.id}">🗑</button>
+          </div>
+        `).join('')}
+      </div>
+    `}
+
+    <div class="section-title-wrap">
+      <div><div class="section-title">Pagamento pendente</div><div class="section-subtitle">Produção ainda não paga, por costureira</div></div>
+    </div>
+
+    ${Object.keys(porCostureira).length === 0 ? `<div class="empty-state">Nenhuma produção pendente de pagamento 🎉</div>` : `
+      <div class="produto-list">
+        ${Object.entries(porCostureira).map(([costureiraId, info]) => {
+          const costureira = state.costureiras.find((c) => c.id === costureiraId);
+          return `
+            <div class="produto-card">
+              <div class="produto-header">
+                <div>
+                  <div class="produto-nome">${esc(costureira?.nome || 'Costureira removida')}</div>
+                  <div class="produto-sku">${info.qtd} peças produzidas</div>
+                </div>
+                <div class="dre-td-num dre-positivo" style="font-size:16px">${fmt(info.valor)}</div>
+              </div>
+              <button class="confirm-btn" style="margin-top:10px" data-pagar-costureira="${costureiraId}" data-ids="${info.ids.join(',')}" data-valor="${info.valor}" data-nome="${esc(costureira?.nome || '')}">✅ Pagar ${fmt(info.valor)}</button>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `}
+  `;
+}
+
+// ---- Modo Supervisora (lançamento de produção) ----
+function renderModoSupervisora(app) {
+  const costureirasAtivas = state.costureiras.filter((c) => c.ativa);
+  const hoje = todayStr();
+  const producoesRecentes = [...state.producoes]
+    .sort((a, b) => (b.data + b.id).localeCompare(a.data + a.id))
+    .slice(0, 15);
+
+  app.innerHTML = `
+    <div class="header">
+      <div>
+        <div class="brand-row"><div class="brand-dot"></div><span class="brand-name">ROSA JULIETA</span></div>
+        <div class="brand-sub">Lançar produção</div>
+      </div>
+      <button class="icon-btn-ghost" id="sairModo">Sair</button>
+    </div>
+    <div class="content">
+      ${costureirasAtivas.length === 0 ? `
+        <div class="empty-state">Nenhuma costureira cadastrada ainda. Peça pro administrador cadastrar em "Produção".</div>
+      ` : state.produtos.length === 0 ? `
+        <div class="empty-state">Nenhum produto cadastrado ainda no Estoque.</div>
+      ` : `
+        <div class="form-card">
+          <select id="prodCostureira">
+            <option value="">Selecione a costureira</option>
+            ${costureirasAtivas.map((c) => `<option value="${c.id}">${esc(c.nome)}</option>`).join('')}
+          </select>
+          <select id="prodProduto">
+            <option value="">Selecione o produto</option>
+            ${state.produtos.map((p) => `<option value="${p.id}">${esc(p.nome)}${p.sku ? ' — ' + esc(p.sku) : ''}</option>`).join('')}
+          </select>
+          <input type="text" id="prodQuantidade" placeholder="Quantidade de peças" inputmode="numeric" />
+          <input type="date" id="prodData" value="${hoje}" />
+          <button class="confirm-btn" id="salvarProducao">Registrar produção</button>
+        </div>
+      `}
+
+      <div class="section-title-wrap"><div><div class="section-title">Lançamentos recentes</div></div></div>
+      ${producoesRecentes.length === 0 ? `<div class="empty-state">Nenhum lançamento ainda.</div>` : `
+        <div class="tx-list">
+          ${producoesRecentes.map((p) => {
+            const costureira = state.costureiras.find((c) => c.id === p.costureiraId);
+            const produto = state.produtos.find((x) => x.id === p.produtoId);
+            return `
+              <div class="tx-row">
+                <div class="tx-dot" style="background:${p.pago ? 'var(--teal)' : 'var(--amber)'}"></div>
+                <div style="flex:1">
+                  <div class="tx-categoria">${esc(costureira?.nome || '—')}</div>
+                  <div class="tx-desc">${esc(produto?.nome || '—')} · ${p.quantidade} peças</div>
+                  <div class="tx-date">${p.data}${p.pago ? ' · pago' : ''}</div>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `}
+    </div>
+  `;
+
+  document.getElementById('sairModo').addEventListener('click', () => {
+    localStorage.removeItem('rj_papel');
+    state.papel = null;
+    render();
+  });
+
+  const salvarBtn = document.getElementById('salvarProducao');
+  if (salvarBtn) salvarBtn.addEventListener('click', async () => {
+    const costureiraId = document.getElementById('prodCostureira').value;
+    const produtoId = document.getElementById('prodProduto').value;
+    const quantidade = Number(document.getElementById('prodQuantidade').value);
+    const data = document.getElementById('prodData').value || hoje;
+    if (!costureiraId || !produtoId || !quantidade || quantidade <= 0) {
+      alert('Selecione a costureira, o produto e informe a quantidade.');
+      return;
+    }
+    await registrarProducao(costureiraId, produtoId, quantidade, data);
+    render();
+  });
+}
+
+// ---- Gate de acesso ----
+function renderGate(app) {
+  app.innerHTML = `
+    <div class="gate-wrap">
+      <div class="brand-row" style="justify-content:center;margin-bottom:24px">
+        <div class="brand-dot"></div><span class="brand-name">ROSA JULIETA</span>
+      </div>
+      <div class="gate-card">
+        <div class="section-title" style="margin-bottom:4px">Código de acesso</div>
+        <div class="section-subtitle" style="margin-bottom:16px">Digite o código que você recebeu</div>
+        <input type="password" id="gateCodigo" placeholder="Código" />
+        <button class="confirm-btn" id="gateEntrar" style="margin-top:10px">Entrar</button>
+        <div id="gateErro" style="color:var(--red);font-size:12px;margin-top:8px;display:none">Código inválido, tente de novo.</div>
+      </div>
+    </div>
+  `;
+  const tentar = () => {
+    const valor = document.getElementById('gateCodigo').value.trim();
+    let papel = null;
+    if (valor === CODIGO_DONO) papel = 'dono';
+    else if (valor === CODIGO_SUPERVISORA) papel = 'supervisora';
+    if (papel) {
+      localStorage.setItem('rj_papel', papel);
+      state.papel = papel;
+      render();
+    } else {
+      document.getElementById('gateErro').style.display = 'block';
+    }
+  };
+  document.getElementById('gateEntrar').addEventListener('click', tentar);
+  document.getElementById('gateCodigo').addEventListener('keydown', (e) => { if (e.key === 'Enter') tentar(); });
+}
+
 function render() {
   const app = document.getElementById('app');
   if (state.loading) {
     app.innerHTML = `<div class="loading-wrap"><div class="spinner"></div></div>`;
+    return;
+  }
+  if (!state.papel) {
+    renderGate(app);
+    return;
+  }
+  if (state.papel === 'supervisora') {
+    renderModoSupervisora(app);
     return;
   }
   const c = getComputed();
@@ -391,12 +615,14 @@ function render() {
       <div class="saldo-box">
         <div class="saldo-label">Saldo disponível</div>
         <div class="saldo-value" style="color:${positivo ? 'var(--teal)' : 'var(--red)'}">${fmt(c.saldoTotal)}</div>
+        <button class="sair-link" id="sairApp">Trocar código</button>
       </div>
     </div>
     <div class="tabs-wrap">
       ${tabBtn('dashboard', 'Dashboard', c.produtosStatus.filter(p => p.status !== 'ok').length)}
       ${tabBtn('financeiro', 'Financeiro')}
       ${tabBtn('estoque', 'Estoque')}
+      ${tabBtn('producao', 'Produção')}
       ${tabBtn('dre', 'DRE')}
     </div>
     <div class="content" id="tabContent"></div>
@@ -406,6 +632,7 @@ function render() {
   if (state.tab === 'dashboard') contentEl.innerHTML = renderDashboard(c);
   else if (state.tab === 'financeiro') contentEl.innerHTML = renderFinanceiro(c);
   else if (state.tab === 'estoque') contentEl.innerHTML = renderEstoque(c);
+  else if (state.tab === 'producao') contentEl.innerHTML = renderProducaoDono(c);
   else if (state.tab === 'dre') contentEl.innerHTML = renderDRE(c);
 
   attachHandlers(c);
@@ -659,6 +886,7 @@ function renderEstoque(c) {
           <input type="text" id="pEstoqueMinimo" placeholder="Estoque mínimo" />
         </div>
         <input type="text" id="pCusto" placeholder="Custo de produção por unidade (ex: 18,50)" />
+        <input type="text" id="pMaoObra" placeholder="Valor de mão de obra por peça (ex: 5,00)" />
         <button class="confirm-btn" id="salvarProduto">Salvar produto</button>
       </div>
     ` : ''}
@@ -679,6 +907,7 @@ function renderEstoque(c) {
                   <input type="text" id="editPEstoqueMinimo-${p.id}" placeholder="Estoque mínimo" value="${p.estoqueMinimo}" />
                 </div>
                 <input type="text" id="editPCusto-${p.id}" placeholder="Custo por unidade" value="${p.custoUnitario.toFixed(2).replace('.', ',')}" />
+                <input type="text" id="editPMaoObra-${p.id}" placeholder="Valor de mão de obra por peça" value="${(p.valorMaoObra || 0).toFixed(2).replace('.', ',')}" />
                 <div class="form-row">
                   <button class="confirm-btn" data-salvar-edit-produto="${p.id}">Salvar</button>
                   <button class="toggle-btn" data-cancelar-edit-produto="${p.id}">Cancelar</button>
@@ -839,6 +1068,15 @@ function renderDashboard(c) {
 
 // ==================== EVENT HANDLERS ====================
 function attachHandlers(c) {
+  const sairBtn = document.getElementById('sairApp');
+  if (sairBtn) sairBtn.addEventListener('click', () => {
+    if (confirm('Sair e pedir o código de acesso de novo?')) {
+      localStorage.removeItem('rj_papel');
+      state.papel = null;
+      render();
+    }
+  });
+
   // tabs
   document.querySelectorAll('[data-tab]').forEach((el) => {
     el.addEventListener('click', () => {
@@ -853,6 +1091,7 @@ function attachHandlers(c) {
       state.selectedTxIds = new Set();
       state.showTaxasForm = false;
       state.showNovaPlataforma = false;
+      state.showCostureiraForm = false;
       render();
     });
   });
@@ -873,6 +1112,7 @@ function attachHandlers(c) {
   }
   if (state.tab === 'financeiro') attachFinanceiroHandlers(c);
   if (state.tab === 'estoque') attachEstoqueHandlers(c);
+  if (state.tab === 'producao') attachProducaoHandlers(c);
   if (state.tab === 'dre') {
     const dreMonthSelect = document.getElementById('dreMonthSelect');
     if (dreMonthSelect) dreMonthSelect.addEventListener('change', (e) => { state.selectedMonth = e.target.value; render(); });
@@ -1164,6 +1404,43 @@ function attachFinanceiroHandlers(c) {
   });
 }
 
+function attachProducaoHandlers(c) {
+  const toggleForm = document.getElementById('toggleCostureiraForm');
+  if (toggleForm) toggleForm.addEventListener('click', () => { state.showCostureiraForm = !state.showCostureiraForm; render(); });
+
+  const salvarCostureira = document.getElementById('salvarCostureira');
+  if (salvarCostureira) salvarCostureira.addEventListener('click', async () => {
+    const nome = document.getElementById('novaCostureiraNome').value.trim();
+    if (!nome) { alert('Informe o nome da costureira.'); return; }
+    await addCostureira(nome);
+    state.showCostureiraForm = false;
+    render();
+  });
+
+  document.querySelectorAll('[data-remover-costureira]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (confirm('Remover essa costureira? O histórico de produção dela será apagado também.')) {
+        await removeCostureira(btn.dataset.removerCostureira);
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-pagar-costureira]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const ids = btn.dataset.ids.split(',');
+      const valor = Number(btn.dataset.valor);
+      const nome = btn.dataset.nome;
+      if (!confirm(`Confirmar pagamento de ${fmt(valor)} pra ${nome}?`)) return;
+      await marcarProducaoPaga(ids);
+      await addTx({
+        tipo: 'saida', valor, categoria: 'Mão de obra — produção', natureza: 'variavel',
+        descricao: `Produção — ${nome}`, data: todayStr(),
+      });
+      await loadData();
+    });
+  });
+}
+
 function attachEstoqueHandlers(c) {
   const toggleForm = document.getElementById('toggleProdutoForm');
   if (toggleForm) toggleForm.addEventListener('click', () => { state.showProdutoForm = !state.showProdutoForm; render(); });
@@ -1175,8 +1452,9 @@ function attachEstoqueHandlers(c) {
     const estoqueAtual = Number(document.getElementById('pEstoqueAtual').value) || 0;
     const estoqueMinimo = Number(document.getElementById('pEstoqueMinimo').value) || 0;
     const custoUnitario = parseBRNumber(document.getElementById('pCusto').value);
+    const valorMaoObra = parseBRNumber(document.getElementById('pMaoObra').value);
     if (!nome) { alert('Informe o nome do produto.'); return; }
-    await addProduto({ nome, sku, estoqueAtual, estoqueMinimo, custoUnitario });
+    await addProduto({ nome, sku, estoqueAtual, estoqueMinimo, custoUnitario, valorMaoObra });
     state.showProdutoForm = false;
     render();
   });
@@ -1210,8 +1488,9 @@ function attachEstoqueHandlers(c) {
       const estoqueAtual = Number(document.getElementById(`editPEstoqueAtual-${id}`).value) || 0;
       const estoqueMinimo = Number(document.getElementById(`editPEstoqueMinimo-${id}`).value) || 0;
       const custoUnitario = parseBRNumber(document.getElementById(`editPCusto-${id}`).value);
+      const valorMaoObra = parseBRNumber(document.getElementById(`editPMaoObra-${id}`).value);
       if (!nome) { alert('Informe o nome do produto.'); return; }
-      await updateProduto(id, { nome, sku, estoqueAtual, estoqueMinimo, custoUnitario });
+      await updateProduto(id, { nome, sku, estoqueAtual, estoqueMinimo, custoUnitario, valorMaoObra });
       state.editingProdutoId = null;
       render();
     });
