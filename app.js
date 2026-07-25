@@ -241,6 +241,7 @@ const state = {
   prodFiltroFim: null,
   prodFiltroCostureiraId: null,
   showConciliacao: false,
+  showResumoFinanceiro: false,
   variantes: [],
   showVarianteForm: {},
   materiaPrima: [],
@@ -1304,6 +1305,48 @@ function renderTecido(c) {
     `}
   `;
 }
+// ---- Resumo financeiro (custos fixos x variáveis + contas a vencer) ----
+function renderResumoFinanceiro(c) {
+  const custoTotal = c.custoFixo + c.custoVariavel || 1;
+  const pctFixo = Math.round((c.custoFixo / custoTotal) * 100);
+  const pctVariavel = 100 - pctFixo;
+
+  return `
+    <div class="form-card">
+      <div class="section-title" style="margin-bottom:2px">Custos fixos x variáveis</div>
+      <div class="section-subtitle" style="margin-bottom:12px">Baseado nos lançamentos do mês selecionado</div>
+      ${c.custoFixo + c.custoVariavel === 0 ? `<div class="empty-state">Nenhuma saída lançada neste mês ainda.</div>` : `
+        <div class="custo-box">
+          <div class="custo-bar"><div class="custo-bar-fill" style="width:${pctFixo}%"></div></div>
+          <div class="custo-legend">
+            <div class="custo-legend-item"><span class="legend-dot" style="background:var(--pink)"></span>Fixos — ${fmt(c.custoFixo)} (${pctFixo}%)</div>
+            <div class="custo-legend-item"><span class="legend-dot" style="background:var(--surface2);border:1px solid var(--border)"></span>Variáveis — ${fmt(c.custoVariavel)} (${pctVariavel}%)</div>
+          </div>
+        </div>
+      `}
+
+      <div class="section-title" style="margin-bottom:2px">Contas a vencer</div>
+      <div class="section-subtitle" style="margin-bottom:12px">Próximos 7 dias — ainda não descontadas do saldo</div>
+      ${c.contasAVencer.length === 0 ? `<div class="empty-state">Nenhuma conta vencendo nos próximos 7 dias.</div>` : `
+        <div class="alert-list">
+          ${c.contasAVencer.map((t) => `
+            <div class="alert-card" style="border-color:var(--pink)55">
+              <div class="alert-card-row">
+                <div class="alert-dot" style="background:var(--pink)"></div>
+                <div style="flex:1">
+                  <div class="alert-name">${esc(t.categoria)}</div>
+                  ${t.descricao ? `<div class="alert-meta" style="margin-top:0">${esc(t.descricao)}</div>` : ''}
+                  <div class="alert-status" style="color:var(--pink)">${t.diasParaVencer === 0 ? '📅 Vence hoje' : t.diasParaVencer === 1 ? '📅 Vence amanhã' : `📅 Vence em ${t.diasParaVencer} dias`} — ${fmt(t.valor)}</div>
+                </div>
+              </div>
+              <button class="confirm-btn" style="background:var(--teal);margin-top:8px" data-marcar-pago="${t.id}">✅ Marcar como pago</button>
+            </div>
+          `).join('')}
+        </div>
+      `}
+    </div>
+  `;
+}
 // ---- Gate de acesso ----
 function renderGate(app) {
   app.innerHTML = `
@@ -1412,6 +1455,7 @@ function renderFinanceiro(c) {
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="icon-btn-ghost" id="toggleTaxas">⚙️ Taxas</button>
         <button class="icon-btn-ghost" id="toggleConciliacao">🔄 Conciliação</button>
+        <button class="icon-btn-ghost" id="toggleResumoFinanceiro">📊 Resumo</button>
         <button class="icon-btn-ghost" id="toggleSelect">${state.selectMode ? '✕ Cancelar' : '☑️ Selecionar'}</button>
         <button class="icon-btn-ghost" id="exportCsv">💾 Exportar</button>
         <button class="icon-btn-ghost" id="toggleUpload">📤 CSV</button>
@@ -1465,6 +1509,8 @@ function renderFinanceiro(c) {
     ` : ''}
 
     ${state.showConciliacao ? renderConciliacao(c) : ''}
+
+    ${state.showResumoFinanceiro ? renderResumoFinanceiro(c) : ''}
 
     ${state.showUpload ? `
       <div class="form-card">
@@ -1751,9 +1797,6 @@ const SEMAFORO = {
 };
 
 function renderDashboard(c) {
-  const custoTotal = c.custoFixo + c.custoVariavel || 1;
-  const pctFixo = Math.round((c.custoFixo / custoTotal) * 100);
-  const pctVariavel = 100 - pctFixo;
   const alertList = c.produtosStatus
     .filter((p) => p.status !== 'ok')
     .sort((a, b) => ({ critico: 0, aguarde: 1, 'pode-cortar': 2 }[a.status] - { critico: 0, aguarde: 1, 'pode-cortar': 2 }[b.status]));
@@ -1805,40 +1848,6 @@ function renderDashboard(c) {
         ${c.pecasProntasDetalhe.map(([nome, val]) => `<div class="prod-breakdown-item"><span>👕 ${esc(nome)}</span><span>${fmt(val)}</span></div>`).join('')}
       </div>
     ` : ''}
-
-    <div class="section-title-wrap">
-      <div><div class="section-title">Custos fixos x variáveis</div><div class="section-subtitle">Baseado nos lançamentos deste mês</div></div>
-    </div>
-    ${c.custoFixo + c.custoVariavel === 0 ? `<div class="empty-state">Nenhuma saída lançada neste mês ainda.</div>` : `
-      <div class="custo-box">
-        <div class="custo-bar"><div class="custo-bar-fill" style="width:${pctFixo}%"></div></div>
-        <div class="custo-legend">
-          <div class="custo-legend-item"><span class="legend-dot" style="background:var(--pink)"></span>Fixos — ${fmt(c.custoFixo)} (${pctFixo}%)</div>
-          <div class="custo-legend-item"><span class="legend-dot" style="background:var(--surface2);border:1px solid var(--border)"></span>Variáveis — ${fmt(c.custoVariavel)} (${pctVariavel}%)</div>
-        </div>
-      </div>
-    `}
-
-    <div class="section-title-wrap">
-      <div><div class="section-title">Contas a vencer</div><div class="section-subtitle">Próximos 7 dias — ainda não descontadas do saldo</div></div>
-    </div>
-    ${c.contasAVencer.length === 0 ? `<div class="empty-state">Nenhuma conta vencendo nos próximos 7 dias.</div>` : `
-      <div class="alert-list">
-        ${c.contasAVencer.map((t) => `
-          <div class="alert-card" style="border-color:var(--pink)55">
-            <div class="alert-card-row">
-              <div class="alert-dot" style="background:var(--pink)"></div>
-              <div style="flex:1">
-                <div class="alert-name">${esc(t.categoria)}</div>
-                ${t.descricao ? `<div class="alert-meta" style="margin-top:0">${esc(t.descricao)}</div>` : ''}
-                <div class="alert-status" style="color:var(--pink)">${t.diasParaVencer === 0 ? '📅 Vence hoje' : t.diasParaVencer === 1 ? '📅 Vence amanhã' : `📅 Vence em ${t.diasParaVencer} dias`} — ${fmt(t.valor)}</div>
-              </div>
-            </div>
-            <button class="confirm-btn" style="background:var(--teal);margin-top:8px" data-marcar-pago="${t.id}">✅ Marcar como pago</button>
-          </div>
-        `).join('')}
-      </div>
-    `}
 
     <div class="section-title-wrap">
       <div><div class="section-title">Semáforo de reposição</div><div class="section-subtitle">Cruza estoque baixo com saldo disponível</div></div>
@@ -1908,6 +1917,7 @@ function attachHandlers(c) {
       state.showTaxasForm = false;
       state.showNovaPlataforma = false;
       state.showConciliacao = false;
+      state.showResumoFinanceiro = false;
       state.showCostureiraForm = false;
       state.showProducaoForm = false;
       state.costureiraDetalheId = null;
@@ -1923,16 +1933,6 @@ function attachHandlers(c) {
   if (state.tab === 'dashboard') {
     const dashboardMonthSelect = document.getElementById('dashboardMonthSelect');
     if (dashboardMonthSelect) dashboardMonthSelect.addEventListener('change', (e) => { state.selectedMonth = e.target.value; render(); });
-
-    document.querySelectorAll('[data-marcar-pago]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const id = btn.dataset.marcarPago;
-        const t = state.tx.find((x) => x.id === id);
-        if (!t) return;
-        await updateTx(id, { tipo: t.tipo, valor: t.valor, categoria: t.categoria, natureza: t.natureza, descricao: t.descricao, data: todayStr(), recorrente: t.recorrente });
-        await loadData();
-      });
-    });
   }
   if (state.tab === 'financeiro') attachFinanceiroHandlers(c);
   if (state.tab === 'estoque') attachEstoqueHandlers(c);
@@ -1967,6 +1967,19 @@ function attachFinanceiroHandlers(c) {
 
   const toggleConciliacao = document.getElementById('toggleConciliacao');
   if (toggleConciliacao) toggleConciliacao.addEventListener('click', () => { state.showConciliacao = !state.showConciliacao; render(); });
+
+  const toggleResumoFinanceiro = document.getElementById('toggleResumoFinanceiro');
+  if (toggleResumoFinanceiro) toggleResumoFinanceiro.addEventListener('click', () => { state.showResumoFinanceiro = !state.showResumoFinanceiro; render(); });
+
+  document.querySelectorAll('[data-marcar-pago]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.marcarPago;
+      const t = state.tx.find((x) => x.id === id);
+      if (!t) return;
+      await updateTx(id, { tipo: t.tipo, valor: t.valor, categoria: t.categoria, natureza: t.natureza, descricao: t.descricao, data: todayStr(), recorrente: t.recorrente });
+      await loadData();
+    });
+  });
 
   document.querySelectorAll('[data-conciliar-tx]').forEach((btn) => {
     btn.addEventListener('click', async () => {
