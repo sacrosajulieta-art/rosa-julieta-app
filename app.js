@@ -653,6 +653,8 @@ function renderDashboard(c) {
     .sort((a, b) => ({ critico: 0, aguarde: 1, 'pode-cortar': 2 }[a.status] - { critico: 0, aguarde: 1, 'pode-cortar': 2 }[b.status]));
 
   return `
+    <input type="month" class="month-input" id="dashboardMonthSelect" value="${state.selectedMonth}" />
+
     <div class="stats-grid">
       <div class="stat-card">
         <div class="stat-icon" style="background:rgba(0,212,160,0.1)">📈</div>
@@ -746,6 +748,10 @@ function attachHandlers(c) {
     });
   });
 
+  if (state.tab === 'dashboard') {
+    const dashboardMonthSelect = document.getElementById('dashboardMonthSelect');
+    if (dashboardMonthSelect) dashboardMonthSelect.addEventListener('change', (e) => { state.selectedMonth = e.target.value; render(); });
+  }
   if (state.tab === 'financeiro') attachFinanceiroHandlers(c);
   if (state.tab === 'estoque') attachEstoqueHandlers(c);
 }
