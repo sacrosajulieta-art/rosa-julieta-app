@@ -200,6 +200,7 @@ const state = {
   plataformas: [],
   showTaxasForm: false,
   showNovaPlataforma: false,
+  filtroTipo: 'todos',
 };
 
 // ==================== DATA LAYER ====================
@@ -381,6 +382,7 @@ function categoriaOptionsHtml(selected) {
 
 function renderFinanceiro(c) {
   const tipo = window.__txFormTipo || 'saida';
+  const txFiltrado = state.filtroTipo === 'todos' ? c.txMes : c.txMes.filter((t) => t.tipo === state.filtroTipo);
   return `
     <div class="section-title-wrap">
       <div><div class="section-title">Financeiro</div><div class="section-subtitle">Lançamentos e importação de vendas</div></div>
@@ -394,6 +396,12 @@ function renderFinanceiro(c) {
     </div>
 
     <input type="month" class="month-input" id="monthSelect" value="${state.selectedMonth}" />
+
+    <div class="filtro-tipo-bar">
+      <button class="filtro-tipo-btn ${state.filtroTipo === 'todos' ? 'active' : ''}" data-filtro="todos">Tudo</button>
+      <button class="filtro-tipo-btn ${state.filtroTipo === 'entrada' ? 'active-teal' : ''}" data-filtro="entrada">Entradas</button>
+      <button class="filtro-tipo-btn ${state.filtroTipo === 'saida' ? 'active-pink' : ''}" data-filtro="saida">Saídas</button>
+    </div>
 
     ${state.showTaxasForm ? `
       <div class="form-card">
@@ -461,14 +469,14 @@ function renderFinanceiro(c) {
 
     ${state.selectMode ? `
       <div class="select-bar">
-        <button class="icon-btn-ghost" id="selectAllTx">${c.txMes.length > 0 && c.txMes.every(t => state.selectedTxIds.has(t.id)) ? 'Desmarcar todos' : 'Selecionar todos'}</button>
+        <button class="icon-btn-ghost" id="selectAllTx">${txFiltrado.length > 0 && txFiltrado.every(t => state.selectedTxIds.has(t.id)) ? 'Desmarcar todos' : 'Selecionar todos'}</button>
         <button class="icon-btn" id="deleteSelectedTx" ${state.selectedTxIds.size === 0 ? 'disabled' : ''}>🗑 Excluir (${state.selectedTxIds.size})</button>
       </div>
     ` : ''}
 
-    ${c.txMes.length === 0 ? `<div class="empty-state">Nenhum lançamento neste mês ainda.</div>` : `
+    ${txFiltrado.length === 0 ? `<div class="empty-state">Nenhum lançamento ${state.filtroTipo === 'entrada' ? 'de entrada' : state.filtroTipo === 'saida' ? 'de saída' : ''} neste mês ainda.</div>` : `
       <div class="tx-list">
-        ${c.txMes.map((t) => {
+        ${txFiltrado.map((t) => {
           if (state.editingTxId === t.id) {
             const editTipo = window.__editTxTipo || t.tipo;
             return `
@@ -712,6 +720,10 @@ function attachFinanceiroHandlers(c) {
   const monthSelect = document.getElementById('monthSelect');
   if (monthSelect) monthSelect.addEventListener('change', (e) => { state.selectedMonth = e.target.value; render(); });
 
+  document.querySelectorAll('[data-filtro]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.filtroTipo = btn.dataset.filtro; render(); });
+  });
+
   const exportBtn = document.getElementById('exportCsv');
   if (exportBtn) exportBtn.addEventListener('click', () => exportCSV(c.txMes, state.selectedMonth));
 
@@ -763,8 +775,9 @@ function attachFinanceiroHandlers(c) {
 
   const selectAllBtn = document.getElementById('selectAllTx');
   if (selectAllBtn) selectAllBtn.addEventListener('click', () => {
-    const allSelected = c.txMes.length > 0 && c.txMes.every((t) => state.selectedTxIds.has(t.id));
-    state.selectedTxIds = allSelected ? new Set() : new Set(c.txMes.map((t) => t.id));
+    const txFiltrado = state.filtroTipo === 'todos' ? c.txMes : c.txMes.filter((t) => t.tipo === state.filtroTipo);
+    const allSelected = txFiltrado.length > 0 && txFiltrado.every((t) => state.selectedTxIds.has(t.id));
+    state.selectedTxIds = allSelected ? new Set() : new Set(txFiltrado.map((t) => t.id));
     render();
   });
 
