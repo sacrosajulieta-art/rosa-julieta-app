@@ -116,7 +116,9 @@ function guessPlataformaFromRow(row, plataformas) {
   for (const c of candidates) { if (row[c]) { raw = String(row[c]); break; } }
   if (!raw) return null;
   const rawLower = raw.toLowerCase();
-  return plataformas.find((p) => rawLower.includes(p.nome.toLowerCase())) || null;
+  // compara só a primeira palavra do nome cadastrado (ex: "tiktok" de "TikTok Shop",
+  // "mercado" de "Mercado Livre") — os relatórios costumam abreviar o nome da loja
+  return plataformas.find((p) => rawLower.includes(p.nome.toLowerCase().split(' ')[0])) || null;
 }
 function guessTaxaRealField(row) {
   // tenta usar os valores REAIS de taxa que a própria plataforma calculou no relatório
@@ -197,6 +199,7 @@ const state = {
   selectedTxIds: new Set(),
   plataformas: [],
   showTaxasForm: false,
+  showNovaPlataforma: false,
 };
 
 // ==================== DATA LAYER ====================
@@ -211,7 +214,7 @@ async function loadData() {
   if (e3) console.error(e3);
   state.tx = (tx || []).map(mapTxFromDb);
   state.produtos = (produtos || []).map(mapProdutoFromDb);
-  state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual) }));
+  state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0) }));
   state.loading = false;
   render();
 }
@@ -275,9 +278,17 @@ async function updateProduto(id, p) {
   if (error) alert('Erro ao atualizar produto: ' + error.message);
 }
 
-async function updatePlataformaTaxa(id, taxaPercentual) {
-  const { error } = await sb.from('plataformas').update({ taxa_percentual: taxaPercentual }).eq('id', id);
+async function updatePlataformaTaxa(id, taxaPercentual, taxaFixa) {
+  const { error } = await sb.from('plataformas').update({ taxa_percentual: taxaPercentual, taxa_fixa: taxaFixa }).eq('id', id);
   if (error) alert('Erro ao salvar taxa: ' + error.message);
+}
+async function addPlataforma(nome, taxaPercentual, taxaFixa) {
+  const { error } = await sb.from('plataformas').insert({ nome, taxa_percentual: taxaPercentual, taxa_fixa: taxaFixa });
+  if (error) alert('Erro ao adicionar plataforma: ' + error.message);
+}
+async function removePlataforma(id) {
+  const { error } = await sb.from('plataformas').delete().eq('id', id);
+  if (error) alert('Erro ao remover plataforma: ' + error.message);
 }
 
 function setupRealtime() {
@@ -386,15 +397,38 @@ function renderFinanceiro(c) {
 
     ${state.showTaxasForm ? `
       <div class="form-card">
-        <div class="form-hint">Defina a taxa média (%) de cada plataforma — usada só como estimativa quando o relatório importado não trouxer o valor real da taxa (o Shopee, por exemplo, já traz o valor exato, então nem sempre precisa da %).</div>
+        <div class="form-hint">Defina a taxa de cada plataforma: % sobre o valor da venda e/ou um valor fixo em R$ por transação (ex: Shopee costuma cobrar um fixo além da %). Usadas só como estimativa quando o relatório importado não trouxer o valor real da taxa.</div>
         ${state.plataformas.map((p) => `
-          <div class="form-row" style="align-items:center">
-            <div style="flex:1;font-size:13px;font-weight:600">${esc(p.nome)}</div>
-            <input type="text" style="max-width:90px" id="taxaInput-${p.id}" value="${p.taxaPercentual}" placeholder="0" />
-            <span style="font-size:13px;color:var(--text-muted)">%</span>
+          <div class="taxa-row">
+            <div class="taxa-row-nome">${esc(p.nome)}</div>
+            <div class="taxa-row-inputs">
+              <div class="taxa-input-group">
+                <input type="text" id="taxaPctInput-${p.id}" value="${p.taxaPercentual}" placeholder="0" />
+                <span>%</span>
+              </div>
+              <div class="taxa-input-group">
+                <span>R$</span>
+                <input type="text" id="taxaFixaInput-${p.id}" value="${p.taxaFixa}" placeholder="0" />
+              </div>
+              <button class="trash-btn" data-remover-plataforma="${p.id}">🗑</button>
+            </div>
           </div>
         `).join('')}
         <button class="confirm-btn" id="salvarTaxas">Salvar taxas</button>
+
+        <div style="border-top:1px solid var(--border);margin-top:10px;padding-top:10px">
+          ${state.showNovaPlataforma ? `
+            <input type="text" id="novaPlataformaNome" placeholder="Nome da plataforma (ex: Amazon)" style="margin-bottom:6px" />
+            <div class="form-row">
+              <input type="text" id="novaPlataformaPct" placeholder="% " />
+              <input type="text" id="novaPlataformaFixa" placeholder="R$ fixo" />
+            </div>
+            <div class="form-row" style="margin-top:6px">
+              <button class="confirm-btn" id="confirmarNovaPlataforma">Adicionar</button>
+              <button class="toggle-btn" id="cancelarNovaPlataforma">Cancelar</button>
+            </div>
+          ` : `<button class="entrada-btn" id="abrirNovaPlataforma">＋ Nova plataforma</button>`}
+        </div>
       </div>
     ` : ''}
 
@@ -403,7 +437,7 @@ function renderFinanceiro(c) {
         <div class="form-hint">Suba o relatório de vendas exportado (CSV ou Excel) do Shopee, Mercado Livre, Amazon ou TikTok Shop. Se o arquivo já identificar a plataforma por linha (ex: relatórios do Upseller), o sistema detecta sozinho. Senão, usa a opção selecionada abaixo pra tudo.</div>
         <select id="uploadPlataforma">
           <option value="">Nenhuma taxa (importar valor bruto)</option>
-          ${state.plataformas.map((p) => `<option value="${p.id}">${esc(p.nome)}${p.taxaPercentual > 0 ? ` (${p.taxaPercentual}%)` : ''}</option>`).join('')}
+          ${state.plataformas.map((p) => `<option value="${p.id}">${esc(p.nome)}${p.taxaPercentual > 0 || p.taxaFixa > 0 ? ` (${p.taxaPercentual}% + ${fmt(p.taxaFixa)})` : ''}</option>`).join('')}
         </select>
         <label class="file-label">📤 Escolher arquivo CSV ou Excel<input type="file" accept=".csv,.xlsx,.xls" id="csvInput" style="display:none" /></label>
       </div>
@@ -665,6 +699,7 @@ function attachHandlers(c) {
       state.selectMode = false;
       state.selectedTxIds = new Set();
       state.showTaxasForm = false;
+      state.showNovaPlataforma = false;
       render();
     });
   });
@@ -688,17 +723,42 @@ function attachFinanceiroHandlers(c) {
   });
 
   const toggleTaxas = document.getElementById('toggleTaxas');
-  if (toggleTaxas) toggleTaxas.addEventListener('click', () => { state.showTaxasForm = !state.showTaxasForm; render(); });
+  if (toggleTaxas) toggleTaxas.addEventListener('click', () => { state.showTaxasForm = !state.showTaxasForm; state.showNovaPlataforma = false; render(); });
 
   const salvarTaxas = document.getElementById('salvarTaxas');
   if (salvarTaxas) salvarTaxas.addEventListener('click', async () => {
     for (const p of state.plataformas) {
-      const input = document.getElementById(`taxaInput-${p.id}`);
-      const novaTaxa = parseBRNumber(input.value);
-      if (novaTaxa !== p.taxaPercentual) await updatePlataformaTaxa(p.id, novaTaxa);
+      const pctInput = document.getElementById(`taxaPctInput-${p.id}`);
+      const fixaInput = document.getElementById(`taxaFixaInput-${p.id}`);
+      const novaPct = parseBRNumber(pctInput.value);
+      const novaFixa = parseBRNumber(fixaInput.value);
+      if (novaPct !== p.taxaPercentual || novaFixa !== p.taxaFixa) await updatePlataformaTaxa(p.id, novaPct, novaFixa);
     }
     state.showTaxasForm = false;
     render();
+  });
+
+  const abrirNovaPlataforma = document.getElementById('abrirNovaPlataforma');
+  if (abrirNovaPlataforma) abrirNovaPlataforma.addEventListener('click', () => { state.showNovaPlataforma = true; render(); });
+
+  const cancelarNovaPlataforma = document.getElementById('cancelarNovaPlataforma');
+  if (cancelarNovaPlataforma) cancelarNovaPlataforma.addEventListener('click', () => { state.showNovaPlataforma = false; render(); });
+
+  const confirmarNovaPlataforma = document.getElementById('confirmarNovaPlataforma');
+  if (confirmarNovaPlataforma) confirmarNovaPlataforma.addEventListener('click', async () => {
+    const nome = document.getElementById('novaPlataformaNome').value.trim();
+    if (!nome) { alert('Informe o nome da plataforma.'); return; }
+    const pct = parseBRNumber(document.getElementById('novaPlataformaPct').value);
+    const fixa = parseBRNumber(document.getElementById('novaPlataformaFixa').value);
+    await addPlataforma(nome, pct, fixa);
+    state.showNovaPlataforma = false;
+    render();
+  });
+
+  document.querySelectorAll('[data-remover-plataforma]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (confirm('Remover essa plataforma da lista de taxas?')) await removePlataforma(btn.dataset.removerPlataforma);
+    });
   });
 
   const selectAllBtn = document.getElementById('selectAllTx');
@@ -784,6 +844,7 @@ function attachFinanceiroHandlers(c) {
       const dataLinha = guessDataField(row) || dataArquivo || todayStr();
       const plataformaLinha = guessPlataformaFromRow(row, state.plataformas) || plataforma;
       const taxaPctLinha = plataformaLinha ? plataformaLinha.taxaPercentual : 0;
+      const taxaFixaLinha = plataformaLinha ? plataformaLinha.taxaFixa : 0;
 
       novos.push({
         tipo: 'entrada', valor,
@@ -801,13 +862,13 @@ function attachFinanceiroHandlers(c) {
           descricao: `Taxa real${plataformaLinha ? ' ' + plataformaLinha.nome : ''} — ${descricaoItem}`,
           data: dataLinha,
         });
-      } else if (taxaPctLinha > 0) {
-        const taxaValor = Math.round(valor * (taxaPctLinha / 100) * 100) / 100;
+      } else if (taxaPctLinha > 0 || taxaFixaLinha > 0) {
+        const taxaValor = Math.round((valor * (taxaPctLinha / 100) + taxaFixaLinha) * 100) / 100;
         totalTaxas += taxaValor;
         totalTaxasEstimadas++;
         novos.push({
           tipo: 'saida', valor: taxaValor, categoria: 'Taxas de marketplace', natureza: 'variavel',
-          descricao: `Taxa estimada ${plataformaLinha.nome} (${taxaPctLinha}%) — ${descricaoItem}`,
+          descricao: `Taxa estimada ${plataformaLinha.nome} (${taxaPctLinha}% + ${fmt(taxaFixaLinha)}) — ${descricaoItem}`,
           data: dataLinha,
         });
       }
