@@ -1,4 +1,4 @@
-const CACHE = 'rosa-julieta-v2';
+const CACHE = 'rosa-julieta-v3';
 const ASSETS = ['./', './index.html', './styles.css', './app.js', './manifest.json', './icon-192.png', './icon-512.png'];
 const NETWORK_FIRST = ['app.js', 'index.html', 'styles.css'];
 
