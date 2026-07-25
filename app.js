@@ -590,58 +590,54 @@ function renderDRE(c) {
   const variavelPorCategoria = porCategoria((t) => t.tipo === 'saida' && t.natureza === 'variavel' && t.categoria !== 'Taxas de marketplace');
   const fixoPorCategoria = porCategoria((t) => t.tipo === 'saida' && t.natureza === 'fixo');
 
-  const subLista = (itens) => itens.length === 0 ? '' : `
-    <div class="dre-sub">
-      ${itens.map(([nome, val]) => `<div class="dre-sub-item"><span>${esc(nome)}</span><span>${fmt(val)}</span></div>`).join('')}
-    </div>
-  `;
+  const linhaSub = (nome, val) => `<tr class="dre-tr-sub"><td>${esc(nome)}</td><td class="dre-td-num">${fmt(val)}</td></tr>`;
+  const subLinhas = (itens) => itens.map(([nome, val]) => linhaSub(nome, val)).join('');
+
+  const vazio = receitaBruta === 0 && custosFixos === 0 && custosVariaveis === 0;
 
   return `
     <input type="month" class="month-input" id="dreMonthSelect" value="${state.selectedMonth}" />
 
-    <div class="dre-intro">
-      <strong>O que é o DRE?</strong> É um resumo em cascata: mostra quanto você faturou e vai descontando, passo a passo, tudo que saiu — até chegar no que realmente sobrou (lucro) ou faltou (prejuízo) no mês.
-    </div>
+    ${vazio ? `<div class="empty-state">Sem lançamentos neste mês ainda pra montar o DRE.</div>` : `
+    <table class="dre-table">
+      <tr class="dre-tr-item">
+        <td>Receita Bruta de Vendas</td>
+        <td class="dre-td-num dre-positivo">${fmt(receitaBruta)}</td>
+      </tr>
+      ${subLinhas(receitaPorCategoria)}
 
-    ${receitaBruta === 0 && custosFixos === 0 && custosVariaveis === 0 ? `<div class="empty-state">Sem lançamentos neste mês ainda pra montar o DRE.</div>` : `
+      <tr class="dre-tr-item">
+        <td>(–) Taxas de Marketplace</td>
+        <td class="dre-td-num dre-negativo">${fmt(taxasMkt)}</td>
+      </tr>
 
-    <div class="dre-line">
-      <div><div class="dre-label">Receita Bruta de Vendas</div><div class="dre-explica">Tudo que você vendeu no mês, antes de qualquer desconto</div></div>
-      <div class="dre-value" style="color:var(--teal)">${fmt(receitaBruta)}</div>
-    </div>
-    ${subLista(receitaPorCategoria)}
+      <tr class="dre-tr-subtotal">
+        <td>= Receita Líquida</td>
+        <td class="dre-td-num">${fmt(receitaLiquida)}</td>
+      </tr>
 
-    <div class="dre-line">
-      <div><div class="dre-label">(–) Taxas de Marketplace</div><div class="dre-explica">O que Shopee, Mercado Livre, TikTok etc. descontam de cada venda</div></div>
-      <div class="dre-value" style="color:var(--pink)">${fmt(taxasMkt)}</div>
-    </div>
+      <tr class="dre-tr-item">
+        <td>(–) Custos Variáveis</td>
+        <td class="dre-td-num dre-negativo">${fmt(custosVariaveis)}</td>
+      </tr>
+      ${subLinhas(variavelPorCategoria)}
 
-    <div class="dre-line dre-subtotal">
-      <div><div class="dre-label">= Receita Líquida</div><div class="dre-explica">O que sobra depois de pagar as plataformas</div></div>
-      <div class="dre-value">${fmt(receitaLiquida)}</div>
-    </div>
+      <tr class="dre-tr-subtotal">
+        <td>= Margem de Contribuição <span class="dre-pct">(${pctMC.toFixed(1)}%)</span></td>
+        <td class="dre-td-num ${margemContribuicao >= 0 ? 'dre-positivo' : 'dre-negativo'}">${fmt(margemContribuicao)}</td>
+      </tr>
 
-    <div class="dre-line">
-      <div><div class="dre-label">(–) Custos Variáveis</div><div class="dre-explica">Gastos que sobem e descem com o volume de venda: tecido, aviamento, frete, ads, embalagem...</div></div>
-      <div class="dre-value" style="color:var(--pink)">${fmt(custosVariaveis)}</div>
-    </div>
-    ${subLista(variavelPorCategoria)}
+      <tr class="dre-tr-item">
+        <td>(–) Custos Fixos</td>
+        <td class="dre-td-num dre-negativo">${fmt(custosFixos)}</td>
+      </tr>
+      ${subLinhas(fixoPorCategoria)}
 
-    <div class="dre-line dre-subtotal">
-      <div><div class="dre-label">= Margem de Contribuição</div><div class="dre-explica">O que sobra de cada venda pra pagar os custos fixos e gerar lucro (${pctMC.toFixed(1)}% da receita bruta)</div></div>
-      <div class="dre-value" style="color:${margemContribuicao >= 0 ? 'var(--teal)' : 'var(--red)'}">${fmt(margemContribuicao)}</div>
-    </div>
-
-    <div class="dre-line">
-      <div><div class="dre-label">(–) Custos Fixos</div><div class="dre-explica">Gastos que você tem todo mês, venda muito ou pouco: aluguel, salários, água, energia...</div></div>
-      <div class="dre-value" style="color:var(--pink)">${fmt(custosFixos)}</div>
-    </div>
-    ${subLista(fixoPorCategoria)}
-
-    <div class="dre-line dre-resultado">
-      <div><div class="dre-label">= Resultado do Período</div><div class="dre-explica">${resultado >= 0 ? '🎉 Lucro' : '⚠️ Prejuízo'} do mês (${pctResultado.toFixed(1)}% da receita bruta)</div></div>
-      <div class="dre-value" style="font-size:20px;color:${resultado >= 0 ? 'var(--teal)' : 'var(--red)'}">${fmt(resultado)}</div>
-    </div>
+      <tr class="dre-tr-final">
+        <td>= Resultado do Período <span class="dre-pct">(${pctResultado.toFixed(1)}%)</span></td>
+        <td class="dre-td-num ${resultado >= 0 ? 'dre-positivo' : 'dre-negativo'}">${fmt(resultado)}</td>
+      </tr>
+    </table>
     `}
   `;
 }
