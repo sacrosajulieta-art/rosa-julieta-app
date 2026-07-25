@@ -221,6 +221,7 @@ const state = {
   producoes: [],
   showCostureiraForm: false,
   showProducaoForm: false,
+  costureiraDetalheId: null,
 };
 
 // ==================== DATA LAYER ====================
@@ -337,6 +338,15 @@ async function marcarProducaoPaga(ids) {
   const { error } = await sb.from('producoes').update({ pago: true }).in('id', ids);
   if (error) alert('Erro ao marcar produção como paga: ' + error.message);
 }
+async function removeProducao(id) {
+  const p = state.producoes.find((x) => x.id === id);
+  if (p) {
+    const produto = state.produtos.find((x) => x.id === p.produtoId);
+    if (produto) await updateProdutoEstoque(produto.id, Math.max(0, produto.estoqueAtual - p.quantidade));
+  }
+  const { error } = await sb.from('producoes').delete().eq('id', id);
+  if (error) alert('Erro ao remover lançamento: ' + error.message);
+}
 
 async function garantirRecorrentes() {
   const hojeMonth = todayStr().slice(0, 7);
@@ -414,6 +424,8 @@ function getComputed() {
 // ==================== RENDER ====================
 // ---- Produção (visão do dono) ----
 function renderProducaoDono(c) {
+  if (state.costureiraDetalheId) return renderCostureiraDetalhe(state.costureiraDetalheId);
+
   const naoPagas = state.producoes.filter((p) => !p.pago);
   const porCostureira = {};
   naoPagas.forEach((p) => {
@@ -425,6 +437,8 @@ function renderProducaoDono(c) {
     porCostureira[p.costureiraId].ids.push(p.id);
   });
 
+  const tipo = window.__prodDonoTipo || 'producao';
+
   return `
     <div class="section-title-wrap">
       <div><div class="section-title">Lançar produção</div><div class="section-subtitle">Registre peças produzidas manualmente</div></div>
@@ -433,6 +447,10 @@ function renderProducaoDono(c) {
 
     ${state.showProducaoForm ? `
       <div class="form-card">
+        <div class="form-row">
+          <button class="toggle-btn ${tipo === 'producao' ? 'active-teal' : ''}" data-prod-tipo="producao">✅ Produção</button>
+          <button class="toggle-btn ${tipo === 'defeito' ? 'active-pink' : ''}" data-prod-tipo="defeito">⚠️ Defeito</button>
+        </div>
         <select id="prodDonoCostureira">
           <option value="">Selecione a costureira</option>
           ${state.costureiras.filter((c) => c.ativa).map((cost) => `<option value="${cost.id}">${esc(cost.nome)}</option>`).join('')}
@@ -443,12 +461,12 @@ function renderProducaoDono(c) {
         </select>
         <input type="text" id="prodDonoQuantidade" placeholder="Quantidade de peças" inputmode="numeric" />
         <input type="date" id="prodDonoData" value="${todayStr()}" />
-        <button class="confirm-btn" id="salvarProducaoDono">Registrar produção</button>
+        <button class="confirm-btn" id="salvarProducaoDono">${tipo === 'defeito' ? 'Registrar defeito' : 'Registrar produção'}</button>
       </div>
     ` : ''}
 
     <div class="section-title-wrap">
-      <div><div class="section-title">Costureiras</div><div class="section-subtitle">Cadastre quem produz pra você</div></div>
+      <div><div class="section-title">Costureiras</div><div class="section-subtitle">Toque numa costureira pra ver o histórico completo</div></div>
       <button class="icon-btn" id="toggleCostureiraForm">＋ Costureira</button>
     </div>
 
@@ -462,9 +480,10 @@ function renderProducaoDono(c) {
     ${state.costureiras.length === 0 ? `<div class="empty-state">Nenhuma costureira cadastrada ainda.</div>` : `
       <div class="tx-list" style="margin-bottom:28px">
         ${state.costureiras.map((cost) => `
-          <div class="tx-row">
+          <div class="tx-row" style="cursor:pointer" data-abrir-costureira="${cost.id}">
             <div class="tx-dot" style="background:${cost.ativa ? 'var(--teal)' : 'var(--text-muted)'}"></div>
             <div style="flex:1"><div class="tx-categoria">${esc(cost.nome)}</div></div>
+            <span style="color:var(--text-muted);font-size:16px">›</span>
             <button class="trash-btn" data-remover-costureira="${cost.id}">🗑</button>
           </div>
         `).join('')}
@@ -478,17 +497,102 @@ function renderProducaoDono(c) {
     ${Object.keys(porCostureira).length === 0 ? `<div class="empty-state">Nenhuma produção pendente de pagamento 🎉</div>` : `
       <div class="produto-list">
         ${Object.entries(porCostureira).map(([costureiraId, info]) => {
-          const costureira = state.costureiras.find((c) => c.id === costureiraId);
+          const costureira = state.costureiras.find((cc) => cc.id === costureiraId);
           return `
             <div class="produto-card">
               <div class="produto-header">
                 <div>
                   <div class="produto-nome">${esc(costureira?.nome || 'Costureira removida')}</div>
-                  <div class="produto-sku">${info.qtd} peças produzidas</div>
+                  <div class="produto-sku">${info.qtd} peças (líquido, já descontando defeitos)</div>
                 </div>
-                <div class="dre-td-num dre-positivo" style="font-size:16px">${fmt(info.valor)}</div>
+                <div class="dre-td-num ${info.valor >= 0 ? 'dre-positivo' : 'dre-negativo'}" style="font-size:16px">${fmt(info.valor)}</div>
               </div>
               <button class="confirm-btn" style="margin-top:10px" data-pagar-costureira="${costureiraId}" data-ids="${info.ids.join(',')}" data-valor="${info.valor}" data-nome="${esc(costureira?.nome || '')}">✅ Pagar ${fmt(info.valor)}</button>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `}
+  `;
+}
+
+function renderCostureiraDetalhe(costureiraId) {
+  const cost = state.costureiras.find((c) => c.id === costureiraId);
+  const entradas = state.producoes.filter((p) => p.costureiraId === costureiraId).sort((a, b) => b.data.localeCompare(a.data));
+  const totalPago = entradas.filter((p) => p.pago).reduce((acc, p) => {
+    const produto = state.produtos.find((x) => x.id === p.produtoId);
+    return acc + p.quantidade * (produto ? produto.valorMaoObra : 0);
+  }, 0);
+  const pendentes = entradas.filter((p) => !p.pago);
+  const totalPendenteQtd = pendentes.reduce((a, p) => a + p.quantidade, 0);
+  const totalPendenteValor = pendentes.reduce((acc, p) => {
+    const produto = state.produtos.find((x) => x.id === p.produtoId);
+    return acc + p.quantidade * (produto ? produto.valorMaoObra : 0);
+  }, 0);
+  const tipo = window.__prodDetalheTipo || 'producao';
+
+  return `
+    <button class="icon-btn-ghost" id="voltarCostureiras" style="margin-bottom:14px">← Voltar</button>
+
+    <div class="section-title-wrap">
+      <div><div class="section-title">${esc(cost?.nome || 'Costureira')}</div><div class="section-subtitle">Histórico completo de produção</div></div>
+    </div>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon" style="background:rgba(0,212,160,0.1)">💰</div>
+        <div class="stat-label">Já pago (histórico)</div>
+        <div class="stat-value">${fmt(totalPago)}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:rgba(255,182,39,0.1)">⏳</div>
+        <div class="stat-label">Pendente</div>
+        <div class="stat-value">${fmt(totalPendenteValor)}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:rgba(0,212,160,0.1)">📦</div>
+        <div class="stat-label">Peças pendentes</div>
+        <div class="stat-value">${totalPendenteQtd}</div>
+      </div>
+    </div>
+
+    <div class="section-title-wrap">
+      <div><div class="section-title">Novo lançamento</div></div>
+      <button class="icon-btn" id="toggleDetalheForm">＋ Lançar</button>
+    </div>
+
+    ${state.showProducaoForm ? `
+      <div class="form-card">
+        <div class="form-row">
+          <button class="toggle-btn ${tipo === 'producao' ? 'active-teal' : ''}" data-prod-detalhe-tipo="producao">✅ Produção</button>
+          <button class="toggle-btn ${tipo === 'defeito' ? 'active-pink' : ''}" data-prod-detalhe-tipo="defeito">⚠️ Defeito</button>
+        </div>
+        <select id="detalheProduto">
+          <option value="">Selecione o produto</option>
+          ${state.produtos.map((p) => `<option value="${p.id}">${esc(p.nome)}${p.sku ? ' — ' + esc(p.sku) : ''}</option>`).join('')}
+        </select>
+        <input type="text" id="detalheQuantidade" placeholder="Quantidade de peças" inputmode="numeric" />
+        <input type="date" id="detalheData" value="${todayStr()}" />
+        <button class="confirm-btn" id="salvarDetalheProducao" data-costureira="${costureiraId}">${tipo === 'defeito' ? 'Registrar defeito' : 'Registrar produção'}</button>
+      </div>
+    ` : ''}
+
+    <div class="section-title-wrap"><div><div class="section-title">Lançamentos</div></div></div>
+    ${entradas.length === 0 ? `<div class="empty-state">Nenhum lançamento ainda.</div>` : `
+      <div class="tx-list">
+        ${entradas.map((p) => {
+          const produto = state.produtos.find((x) => x.id === p.produtoId);
+          const valor = p.quantidade * (produto ? produto.valorMaoObra : 0);
+          const ehDefeito = p.quantidade < 0;
+          return `
+            <div class="tx-row">
+              <div class="tx-dot" style="background:${ehDefeito ? 'var(--red)' : p.pago ? 'var(--teal)' : 'var(--amber)'}"></div>
+              <div style="flex:1">
+                <div class="tx-categoria">${esc(produto?.nome || 'Produto removido')}${ehDefeito ? ' ⚠️ Defeito' : ''}</div>
+                <div class="tx-desc">${p.quantidade} peças · ${fmt(valor)}${p.pago ? ' · pago' : ' · pendente'}</div>
+                <div class="tx-date">${p.data}</div>
+              </div>
+              <button class="trash-btn" data-remover-producao="${p.id}">🗑</button>
             </div>
           `;
         }).join('')}
@@ -520,6 +624,10 @@ function renderModoSupervisora(app) {
         <div class="empty-state">Nenhum produto cadastrado ainda no Estoque.</div>
       ` : `
         <div class="form-card">
+          <div class="form-row">
+            <button class="toggle-btn ${(window.__prodSupTipo || 'producao') === 'producao' ? 'active-teal' : ''}" data-prod-sup-tipo="producao">✅ Produção</button>
+            <button class="toggle-btn ${window.__prodSupTipo === 'defeito' ? 'active-pink' : ''}" data-prod-sup-tipo="defeito">⚠️ Defeito</button>
+          </div>
           <select id="prodCostureira">
             <option value="">Selecione a costureira</option>
             ${costureirasAtivas.map((c) => `<option value="${c.id}">${esc(c.nome)}</option>`).join('')}
@@ -530,7 +638,7 @@ function renderModoSupervisora(app) {
           </select>
           <input type="text" id="prodQuantidade" placeholder="Quantidade de peças" inputmode="numeric" />
           <input type="date" id="prodData" value="${hoje}" />
-          <button class="confirm-btn" id="salvarProducao">Registrar produção</button>
+          <button class="confirm-btn" id="salvarProducao">${(window.__prodSupTipo || 'producao') === 'defeito' ? 'Registrar defeito' : 'Registrar produção'}</button>
         </div>
       `}
 
@@ -540,11 +648,12 @@ function renderModoSupervisora(app) {
           ${producoesRecentes.map((p) => {
             const costureira = state.costureiras.find((c) => c.id === p.costureiraId);
             const produto = state.produtos.find((x) => x.id === p.produtoId);
+            const ehDefeito = p.quantidade < 0;
             return `
               <div class="tx-row">
-                <div class="tx-dot" style="background:${p.pago ? 'var(--teal)' : 'var(--amber)'}"></div>
+                <div class="tx-dot" style="background:${ehDefeito ? 'var(--red)' : p.pago ? 'var(--teal)' : 'var(--amber)'}"></div>
                 <div style="flex:1">
-                  <div class="tx-categoria">${esc(costureira?.nome || '—')}</div>
+                  <div class="tx-categoria">${esc(costureira?.nome || '—')}${ehDefeito ? ' ⚠️' : ''}</div>
                   <div class="tx-desc">${esc(produto?.nome || '—')} · ${p.quantidade} peças</div>
                   <div class="tx-date">${p.data}${p.pago ? ' · pago' : ''}</div>
                 </div>
@@ -562,17 +671,23 @@ function renderModoSupervisora(app) {
     render();
   });
 
+  document.querySelectorAll('[data-prod-sup-tipo]').forEach((btn) => {
+    btn.addEventListener('click', () => { window.__prodSupTipo = btn.dataset.prodSupTipo; render(); });
+  });
+
   const salvarBtn = document.getElementById('salvarProducao');
   if (salvarBtn) salvarBtn.addEventListener('click', async () => {
     const costureiraId = document.getElementById('prodCostureira').value;
     const produtoId = document.getElementById('prodProduto').value;
-    const quantidade = Number(document.getElementById('prodQuantidade').value);
+    let quantidade = Number(document.getElementById('prodQuantidade').value);
     const data = document.getElementById('prodData').value || hoje;
     if (!costureiraId || !produtoId || !quantidade || quantidade <= 0) {
       alert('Selecione a costureira, o produto e informe a quantidade.');
       return;
     }
+    if ((window.__prodSupTipo || 'producao') === 'defeito') quantidade = -quantidade;
     await registrarProducao(costureiraId, produtoId, quantidade, data);
+    window.__prodSupTipo = 'producao';
     render();
   });
 }
@@ -1114,6 +1229,7 @@ function attachHandlers(c) {
       state.showNovaPlataforma = false;
       state.showCostureiraForm = false;
       state.showProducaoForm = false;
+      state.costureiraDetalheId = null;
       render();
     });
   });
@@ -1427,21 +1543,67 @@ function attachFinanceiroHandlers(c) {
 }
 
 function attachProducaoHandlers(c) {
+  // ---- Tela de perfil da costureira ----
+  if (state.costureiraDetalheId) {
+    const voltar = document.getElementById('voltarCostureiras');
+    if (voltar) voltar.addEventListener('click', () => { state.costureiraDetalheId = null; state.showProducaoForm = false; render(); });
+
+    const toggleDetalheForm = document.getElementById('toggleDetalheForm');
+    if (toggleDetalheForm) toggleDetalheForm.addEventListener('click', () => { state.showProducaoForm = !state.showProducaoForm; render(); });
+
+    document.querySelectorAll('[data-prod-detalhe-tipo]').forEach((btn) => {
+      btn.addEventListener('click', () => { window.__prodDetalheTipo = btn.dataset.prodDetalheTipo; render(); });
+    });
+
+    const salvarDetalhe = document.getElementById('salvarDetalheProducao');
+    if (salvarDetalhe) salvarDetalhe.addEventListener('click', async () => {
+      const costureiraId = salvarDetalhe.dataset.costureira;
+      const produtoId = document.getElementById('detalheProduto').value;
+      let quantidade = Number(document.getElementById('detalheQuantidade').value);
+      const data = document.getElementById('detalheData').value || todayStr();
+      const tipo = window.__prodDetalheTipo || 'producao';
+      if (!produtoId || !quantidade || quantidade <= 0) { alert('Selecione o produto e informe a quantidade.'); return; }
+      if (tipo === 'defeito') quantidade = -quantidade;
+      await registrarProducao(costureiraId, produtoId, quantidade, data);
+      state.showProducaoForm = false;
+      window.__prodDetalheTipo = 'producao';
+      render();
+    });
+
+    document.querySelectorAll('[data-remover-producao]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        if (confirm('Remover esse lançamento? Isso também ajusta o estoque de volta.')) {
+          await removeProducao(btn.dataset.removerProducao);
+          render();
+        }
+      });
+    });
+    return;
+  }
+
+  // ---- Tela principal de Produção ----
   const toggleProducaoForm = document.getElementById('toggleProducaoForm');
   if (toggleProducaoForm) toggleProducaoForm.addEventListener('click', () => { state.showProducaoForm = !state.showProducaoForm; render(); });
+
+  document.querySelectorAll('[data-prod-tipo]').forEach((btn) => {
+    btn.addEventListener('click', () => { window.__prodDonoTipo = btn.dataset.prodTipo; render(); });
+  });
 
   const salvarProducaoDono = document.getElementById('salvarProducaoDono');
   if (salvarProducaoDono) salvarProducaoDono.addEventListener('click', async () => {
     const costureiraId = document.getElementById('prodDonoCostureira').value;
     const produtoId = document.getElementById('prodDonoProduto').value;
-    const quantidade = Number(document.getElementById('prodDonoQuantidade').value);
+    let quantidade = Number(document.getElementById('prodDonoQuantidade').value);
     const data = document.getElementById('prodDonoData').value || todayStr();
+    const tipo = window.__prodDonoTipo || 'producao';
     if (!costureiraId || !produtoId || !quantidade || quantidade <= 0) {
       alert('Selecione a costureira, o produto e informe a quantidade.');
       return;
     }
+    if (tipo === 'defeito') quantidade = -quantidade;
     await registrarProducao(costureiraId, produtoId, quantidade, data);
     state.showProducaoForm = false;
+    window.__prodDonoTipo = 'producao';
     render();
   });
 
@@ -1457,8 +1619,17 @@ function attachProducaoHandlers(c) {
     render();
   });
 
+  document.querySelectorAll('[data-abrir-costureira]').forEach((row) => {
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('[data-remover-costureira]')) return;
+      state.costureiraDetalheId = row.dataset.abrirCostureira;
+      render();
+    });
+  });
+
   document.querySelectorAll('[data-remover-costureira]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
       if (confirm('Remover essa costureira? O histórico de produção dela será apagado também.')) {
         await removeCostureira(btn.dataset.removerCostureira);
       }
