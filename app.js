@@ -234,6 +234,7 @@ const state = {
   prodFiltroStatus: 'todos',
   prodFiltroInicio: null,
   prodFiltroFim: null,
+  prodFiltroCostureiraId: null,
 };
 
 // ==================== DATA LAYER ====================
@@ -734,9 +735,25 @@ function renderCostureiraDetalhe(costureiraId) {
 function renderModoSupervisora(app) {
   const costureirasAtivas = state.costureiras.filter((c) => c.ativa);
   const hoje = todayStr();
-  const producoesRecentes = [...state.producoes]
-    .sort((a, b) => (b.data + b.id).localeCompare(a.data + a.id))
-    .slice(0, 15);
+
+  const listaFiltrada = state.producoes.filter((p) => {
+    if (state.prodFiltroCostureiraId && p.costureiraId !== state.prodFiltroCostureiraId) return false;
+    if (state.prodFiltroStatus === 'pendente' && p.pago) return false;
+    if (state.prodFiltroStatus === 'pago' && !p.pago) return false;
+    if (state.prodFiltroInicio && p.data < state.prodFiltroInicio) return false;
+    if (state.prodFiltroFim && p.data > state.prodFiltroFim) return false;
+    return true;
+  }).sort((a, b) => (b.data + b.id).localeCompare(a.data + a.id));
+
+  const porDia = {};
+  listaFiltrada.forEach((p) => {
+    const produto = state.produtos.find((x) => x.id === p.produtoId);
+    const valorItem = p.quantidade * (produto ? produto.valorMaoObra : 0);
+    if (!porDia[p.data]) porDia[p.data] = { qtd: 0, valor: 0 };
+    porDia[p.data].qtd += p.quantidade;
+    porDia[p.data].valor += valorItem;
+  });
+  const resumoPorDia = Object.entries(porDia).sort((a, b) => b[0].localeCompare(a[0]));
 
   app.innerHTML = `
     <div class="header">
@@ -771,21 +788,79 @@ function renderModoSupervisora(app) {
         </div>
       `}
 
-      <div class="section-title-wrap"><div><div class="section-title">Lançamentos recentes</div></div></div>
-      ${producoesRecentes.length === 0 ? `<div class="empty-state">Nenhum lançamento ainda.</div>` : `
+      <div class="section-title-wrap"><div><div class="section-title">Histórico</div><div class="section-subtitle">Filtre por costureira, status ou período</div></div></div>
+
+      <select id="supFiltroCostureira" style="margin-bottom:10px">
+        <option value="">Todas as costureiras</option>
+        ${state.costureiras.map((c) => `<option value="${c.id}" ${state.prodFiltroCostureiraId === c.id ? 'selected' : ''}>${esc(c.nome)}</option>`).join('')}
+      </select>
+
+      <div class="filtro-tipo-bar">
+        <button class="filtro-tipo-btn ${state.prodFiltroStatus === 'todos' ? 'active' : ''}" data-prod-filtro-status="todos">Tudo</button>
+        <button class="filtro-tipo-btn ${state.prodFiltroStatus === 'pendente' ? 'active-teal' : ''}" data-prod-filtro-status="pendente">Pendente</button>
+        <button class="filtro-tipo-btn ${state.prodFiltroStatus === 'pago' ? 'active-teal' : ''}" data-prod-filtro-status="pago">Pago</button>
+      </div>
+      <div class="form-row" style="margin-bottom:10px">
+        <input type="date" id="prodFiltroInicio" value="${state.prodFiltroInicio || ''}" />
+        <input type="date" id="prodFiltroFim" value="${state.prodFiltroFim || ''}" />
+      </div>
+      <div class="form-row" style="margin-bottom:20px">
+        <button class="icon-btn-ghost" id="filtroEstaSemana" style="flex:1">📅 Esta semana</button>
+        <button class="icon-btn-ghost" id="filtroLimpar" style="flex:1">✕ Limpar período</button>
+      </div>
+
+      <div class="section-title-wrap"><div><div class="section-title">Resumo por dia</div></div></div>
+      ${resumoPorDia.length === 0 ? `<div class="empty-state">Nenhum lançamento no filtro selecionado.</div>` : `
+        <div class="tx-list" style="margin-bottom:28px">
+          ${resumoPorDia.map(([dia, info]) => `
+            <div class="tx-row">
+              <div class="tx-dot" style="background:${info.qtd >= 0 ? 'var(--teal)' : 'var(--red)'}"></div>
+              <div style="flex:1"><div class="tx-categoria">${dia}</div></div>
+              <div class="tx-valor" style="color:${info.qtd >= 0 ? 'var(--teal)' : 'var(--red)'}">${info.qtd} peças · ${fmt(info.valor)}</div>
+            </div>
+          `).join('')}
+        </div>
+      `}
+
+      <div class="section-title-wrap"><div><div class="section-title">Lançamentos</div></div></div>
+      ${listaFiltrada.length === 0 ? `<div class="empty-state">Nenhum lançamento no filtro selecionado.</div>` : `
         <div class="tx-list">
-          ${producoesRecentes.map((p) => {
+          ${listaFiltrada.map((p) => {
             const costureira = state.costureiras.find((c) => c.id === p.costureiraId);
             const produto = state.produtos.find((x) => x.id === p.produtoId);
             const ehDefeito = p.quantidade < 0;
+
+            if (state.editingProducaoId === p.id) {
+              const tipoEdit = window.__editProdTipo || (ehDefeito ? 'defeito' : 'producao');
+              return `
+                <div class="form-card">
+                  <div class="form-row">
+                    <button class="toggle-btn ${tipoEdit === 'producao' ? 'active-teal' : ''}" data-edit-prod-tipo="producao">✅ Produção</button>
+                    <button class="toggle-btn ${tipoEdit === 'defeito' ? 'active-pink' : ''}" data-edit-prod-tipo="defeito">⚠️ Defeito</button>
+                  </div>
+                  <select id="editProdProduto-${p.id}">
+                    ${state.produtos.map((prod) => `<option value="${prod.id}" ${prod.id === p.produtoId ? 'selected' : ''}>${esc(prod.nome)}${prod.sku ? ' — ' + esc(prod.sku) : ''}</option>`).join('')}
+                  </select>
+                  <input type="text" id="editProdQuantidade-${p.id}" value="${Math.abs(p.quantidade)}" placeholder="Quantidade" />
+                  <input type="date" id="editProdData-${p.id}" value="${p.data}" />
+                  <div class="form-row">
+                    <button class="confirm-btn" data-salvar-edit-producao="${p.id}">Salvar</button>
+                    <button class="toggle-btn" data-cancelar-edit-producao="${p.id}">Cancelar</button>
+                  </div>
+                </div>
+              `;
+            }
+
             return `
               <div class="tx-row">
                 <div class="tx-dot" style="background:${ehDefeito ? 'var(--red)' : p.pago ? 'var(--teal)' : 'var(--amber)'}"></div>
                 <div style="flex:1">
                   <div class="tx-categoria">${esc(costureira?.nome || '—')}${ehDefeito ? ' ⚠️' : ''}</div>
                   <div class="tx-desc">${esc(produto?.nome || '—')} · ${p.quantidade} peças</div>
-                  <div class="tx-date">${p.data}${p.pago ? ' · pago' : ''}</div>
+                  <div class="tx-date">${p.data}${p.pago ? ' · pago' : ' · pendente'}</div>
                 </div>
+                <button class="trash-btn" data-editar-producao="${p.id}">✏️</button>
+                <button class="trash-btn" data-remover-producao="${p.id}">🗑</button>
               </div>
             `;
           }).join('')}
@@ -818,6 +893,68 @@ function renderModoSupervisora(app) {
     await registrarProducao(costureiraId, produtoId, quantidade, data);
     window.__prodSupTipo = 'producao';
     render();
+  });
+
+  const supFiltroCostureira = document.getElementById('supFiltroCostureira');
+  if (supFiltroCostureira) supFiltroCostureira.addEventListener('change', (e) => { state.prodFiltroCostureiraId = e.target.value || null; render(); });
+
+  document.querySelectorAll('[data-prod-filtro-status]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.prodFiltroStatus = btn.dataset.prodFiltroStatus; render(); });
+  });
+
+  const filtroInicio = document.getElementById('prodFiltroInicio');
+  if (filtroInicio) filtroInicio.addEventListener('change', (e) => { state.prodFiltroInicio = e.target.value || null; render(); });
+  const filtroFim = document.getElementById('prodFiltroFim');
+  if (filtroFim) filtroFim.addEventListener('change', (e) => { state.prodFiltroFim = e.target.value || null; render(); });
+
+  const filtroEstaSemana = document.getElementById('filtroEstaSemana');
+  if (filtroEstaSemana) filtroEstaSemana.addEventListener('click', () => {
+    state.prodFiltroInicio = inicioDaSemana(todayStr());
+    state.prodFiltroFim = todayStr();
+    render();
+  });
+  const filtroLimpar = document.getElementById('filtroLimpar');
+  if (filtroLimpar) filtroLimpar.addEventListener('click', () => {
+    state.prodFiltroInicio = null;
+    state.prodFiltroFim = null;
+    render();
+  });
+
+  document.querySelectorAll('[data-editar-producao]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.editingProducaoId = btn.dataset.editarProducao;
+      window.__editProdTipo = null;
+      render();
+    });
+  });
+  document.querySelectorAll('[data-cancelar-edit-producao]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.editingProducaoId = null; render(); });
+  });
+  document.querySelectorAll('[data-edit-prod-tipo]').forEach((btn) => {
+    btn.addEventListener('click', () => { window.__editProdTipo = btn.dataset.editProdTipo; render(); });
+  });
+  document.querySelectorAll('[data-salvar-edit-producao]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.salvarEditProducao;
+      const produtoId = document.getElementById(`editProdProduto-${id}`).value;
+      let quantidade = Number(document.getElementById(`editProdQuantidade-${id}`).value);
+      const data = document.getElementById(`editProdData-${id}`).value || todayStr();
+      const tipoEdit = window.__editProdTipo || 'producao';
+      if (!produtoId || !quantidade || quantidade <= 0) { alert('Selecione o produto e informe a quantidade.'); return; }
+      if (tipoEdit === 'defeito') quantidade = -quantidade;
+      await updateProducao(id, { produtoId, quantidade, data });
+      state.editingProducaoId = null;
+      await loadData();
+    });
+  });
+
+  document.querySelectorAll('[data-remover-producao]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (confirm('Remover esse lançamento? Isso também ajusta o estoque de volta.')) {
+        await removeProducao(btn.dataset.removerProducao);
+        render();
+      }
+    });
   });
 }
 
