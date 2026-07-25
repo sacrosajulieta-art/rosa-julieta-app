@@ -132,6 +132,11 @@ function guessDataFromFilename(fileName) {
   if (y1 === y2 && mo1 === mo2 && d1 === d2) return `${y1}-${mo1}-${d1}`;
   return null;
 }
+function guessIdPedidoField(row) {
+  const candidates = ['id do pedido', 'número do pedido', 'numero do pedido', 'order id', 'nº do pedido'];
+  for (const c of candidates) if (row[c]) return String(row[c]).trim();
+  return null;
+}
 function guessPlataformaFromRow(row, plataformas) {
   const candidates = ['loja', 'plataforma', 'canal', 'marketplace'];
   let raw = null;
@@ -235,33 +240,39 @@ const state = {
   prodFiltroInicio: null,
   prodFiltroFim: null,
   prodFiltroCostureiraId: null,
+  showConciliacao: false,
+  variantes: [],
+  showVarianteForm: {},
 };
 
 // ==================== DATA LAYER ====================
 async function loadData() {
-  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }] = await Promise.all([
+  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }] = await Promise.all([
     sb.from('transacoes').select('*').order('data', { ascending: false }),
     sb.from('produtos').select('*').order('created_at', { ascending: false }),
     sb.from('plataformas').select('*').order('nome', { ascending: true }),
     sb.from('costureiras').select('*').order('nome', { ascending: true }),
     sb.from('producoes').select('*').order('data', { ascending: false }),
+    sb.from('variantes').select('*').order('nome', { ascending: true }),
   ]);
   if (e1) console.error(e1);
   if (e2) console.error(e2);
   if (e3) console.error(e3);
   if (e4) console.error(e4);
   if (e5) console.error(e5);
+  if (e6) console.error(e6);
   state.tx = (tx || []).map(mapTxFromDb);
   state.produtos = (produtos || []).map(mapProdutoFromDb);
   state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0) }));
   state.costureiras = (costureiras || []).map((c) => ({ id: c.id, nome: c.nome, ativa: c.ativa }));
-  state.producoes = (producoes || []).map((p) => ({ id: p.id, costureiraId: p.costureira_id, produtoId: p.produto_id, quantidade: p.quantidade, data: p.data, pago: p.pago }));
+  state.producoes = (producoes || []).map((p) => ({ id: p.id, costureiraId: p.costureira_id, produtoId: p.produto_id, quantidade: p.quantidade, data: p.data, pago: p.pago, varianteId: p.variante_id || null }));
+  state.variantes = (variantes || []).map((v) => ({ id: v.id, produtoId: v.produto_id, nome: v.nome, estoqueAtual: v.estoque_atual, skuVariante: v.sku_variante }));
   state.loading = false;
   render();
 }
 
 function mapTxFromDb(row) {
-  return { id: row.id, tipo: row.tipo, valor: Number(row.valor), categoria: row.categoria, natureza: row.natureza, descricao: row.descricao, data: row.data, recorrente: !!row.recorrente, recorrenteOrigemId: row.recorrente_origem_id || null };
+  return { id: row.id, tipo: row.tipo, valor: Number(row.valor), categoria: row.categoria, natureza: row.natureza, descricao: row.descricao, data: row.data, recorrente: !!row.recorrente, recorrenteOrigemId: row.recorrente_origem_id || null, idPedido: row.id_pedido || null, conciliado: !!row.conciliado };
 }
 function mapProdutoFromDb(row) {
   return { id: row.id, nome: row.nome, sku: row.sku, estoqueAtual: row.estoque_atual, estoqueMinimo: row.estoque_minimo, custoUnitario: Number(row.custo_unitario), totalVendido: row.total_vendido || 0, ultimaVenda: row.ultima_venda || null, valorMaoObra: Number(row.valor_mao_obra || 0) };
@@ -275,9 +286,34 @@ async function addTx(tx) {
 }
 async function addTxBatch(rows) {
   const { error } = await sb.from('transacoes').insert(rows.map((tx) => ({
-    tipo: tx.tipo, valor: tx.valor, categoria: tx.categoria, natureza: tx.natureza || null, descricao: tx.descricao || null, data: tx.data,
+    tipo: tx.tipo, valor: tx.valor, categoria: tx.categoria, natureza: tx.natureza || null, descricao: tx.descricao || null, data: tx.data, id_pedido: tx.idPedido || null,
   })));
   if (error) alert('Erro ao importar: ' + error.message);
+}
+async function marcarTxConciliada(id, conciliado) {
+  const { error } = await sb.from('transacoes').update({ conciliado }).eq('id', id);
+  if (error) alert('Erro ao atualizar conciliação: ' + error.message);
+}
+
+// ---- Variantes de cor ----
+function variantesDoProduto(produtoId) {
+  return state.variantes.filter((v) => v.produtoId === produtoId);
+}
+function estoqueEfetivo(produto) {
+  const vs = variantesDoProduto(produto.id);
+  return vs.length ? vs.reduce((a, v) => a + v.estoqueAtual, 0) : produto.estoqueAtual;
+}
+async function addVariante(produtoId, nome, skuVariante) {
+  const { error } = await sb.from('variantes').insert({ produto_id: produtoId, nome, estoque_atual: 0, sku_variante: skuVariante || null });
+  if (error) alert('Erro ao adicionar cor: ' + error.message);
+}
+async function updateVarianteEstoque(id, novoEstoque) {
+  const { error } = await sb.from('variantes').update({ estoque_atual: Math.max(0, novoEstoque) }).eq('id', id);
+  if (error) alert('Erro ao atualizar estoque da cor: ' + error.message);
+}
+async function removeVariante(id) {
+  const { error } = await sb.from('variantes').delete().eq('id', id);
+  if (error) alert('Erro ao remover cor: ' + error.message);
 }
 async function removeTx(id) {
   const { error } = await sb.from('transacoes').delete().eq('id', id);
@@ -341,11 +377,16 @@ async function removeCostureira(id) {
   const { error } = await sb.from('costureiras').delete().eq('id', id);
   if (error) alert('Erro ao remover costureira: ' + error.message);
 }
-async function registrarProducao(costureiraId, produtoId, quantidade, data) {
-  const { error } = await sb.from('producoes').insert({ costureira_id: costureiraId, produto_id: produtoId, quantidade, data, pago: false });
+async function registrarProducao(costureiraId, produtoId, quantidade, data, varianteId) {
+  const { error } = await sb.from('producoes').insert({ costureira_id: costureiraId, produto_id: produtoId, quantidade, data, pago: false, variante_id: varianteId || null });
   if (error) { alert('Erro ao registrar produção: ' + error.message); return; }
-  const produto = state.produtos.find((p) => p.id === produtoId);
-  if (produto) await updateProdutoEstoque(produtoId, produto.estoqueAtual + quantidade);
+  if (varianteId) {
+    const variante = state.variantes.find((v) => v.id === varianteId);
+    if (variante) await updateVarianteEstoque(varianteId, variante.estoqueAtual + quantidade);
+  } else {
+    const produto = state.produtos.find((p) => p.id === produtoId);
+    if (produto) await updateProdutoEstoque(produtoId, produto.estoqueAtual + quantidade);
+  }
 }
 async function marcarProducaoPaga(ids) {
   const { error } = await sb.from('producoes').update({ pago: true }).in('id', ids);
@@ -354,8 +395,13 @@ async function marcarProducaoPaga(ids) {
 async function removeProducao(id) {
   const p = state.producoes.find((x) => x.id === id);
   if (p) {
-    const produto = state.produtos.find((x) => x.id === p.produtoId);
-    if (produto) await updateProdutoEstoque(produto.id, Math.max(0, produto.estoqueAtual - p.quantidade));
+    if (p.varianteId) {
+      const variante = state.variantes.find((v) => v.id === p.varianteId);
+      if (variante) await updateVarianteEstoque(variante.id, variante.estoqueAtual - p.quantidade);
+    } else {
+      const produto = state.produtos.find((x) => x.id === p.produtoId);
+      if (produto) await updateProdutoEstoque(produto.id, Math.max(0, produto.estoqueAtual - p.quantidade));
+    }
   }
   const { error } = await sb.from('producoes').delete().eq('id', id);
   if (error) alert('Erro ao remover lançamento: ' + error.message);
@@ -365,6 +411,12 @@ async function updateProducao(id, novo) {
   if (!antigo) return;
   const { error } = await sb.from('producoes').update({ produto_id: novo.produtoId, quantidade: novo.quantidade, data: novo.data }).eq('id', id);
   if (error) { alert('Erro ao editar lançamento: ' + error.message); return; }
+  // lançamentos com cor (variante) não trocam de produto na edição — só ajusta a quantidade na mesma cor
+  if (antigo.varianteId) {
+    const variante = state.variantes.find((v) => v.id === antigo.varianteId);
+    if (variante) await updateVarianteEstoque(variante.id, Math.max(0, variante.estoqueAtual + (novo.quantidade - antigo.quantidade)));
+    return;
+  }
   if (antigo.produtoId === novo.produtoId) {
     const produto = state.produtos.find((p) => p.id === novo.produtoId);
     if (produto) await updateProdutoEstoque(produto.id, Math.max(0, produto.estoqueAtual + (novo.quantidade - antigo.quantidade)));
@@ -406,6 +458,7 @@ function setupRealtime() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'plataformas' }, loadData)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'costureiras' }, loadData)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'producoes' }, loadData)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'variantes' }, loadData)
     .subscribe();
 }
 
@@ -421,14 +474,15 @@ function getComputed() {
   const custoVariavel = txMes.filter((t) => t.tipo === 'saida' && t.natureza === 'variavel').reduce((a, t) => a + t.valor, 0);
 
   const produtosStatus = state.produtos.map((p) => {
-    const precisaRepor = p.estoqueAtual <= p.estoqueMinimo;
-    const qtdSugerida = Math.max(p.estoqueMinimo * 2 - p.estoqueAtual, p.estoqueMinimo || 1);
+    const estoqueReal = estoqueEfetivo(p);
+    const precisaRepor = estoqueReal <= p.estoqueMinimo;
+    const qtdSugerida = Math.max(p.estoqueMinimo * 2 - estoqueReal, p.estoqueMinimo || 1);
     const custoRepor = qtdSugerida * p.custoUnitario;
     let status = 'ok';
-    if (p.estoqueAtual <= 0) status = 'critico';
+    if (estoqueReal <= 0) status = 'critico';
     else if (precisaRepor) status = saldoTotal >= custoRepor ? 'pode-cortar' : 'aguarde';
     const diasSemVender = p.ultimaVenda ? Math.floor((Date.now() - new Date(p.ultimaVenda + 'T00:00:00').getTime()) / 86400000) : null;
-    return { ...p, precisaRepor, qtdSugerida, custoRepor, status, diasSemVender };
+    return { ...p, estoqueAtual: estoqueReal, precisaRepor, qtdSugerida, custoRepor, status, diasSemVender };
   });
 
   const PARADO_DIAS = 30;
@@ -647,8 +701,14 @@ function renderCostureiraDetalhe(costureiraId) {
         </div>
         <select id="detalheProduto">
           <option value="">Selecione o produto</option>
-          ${state.produtos.map((p) => `<option value="${p.id}">${esc(p.nome)}${p.sku ? ' — ' + esc(p.sku) : ''}</option>`).join('')}
+          ${state.produtos.map((p) => `<option value="${p.id}" ${window.__prodFormProdutoId === p.id ? 'selected' : ''}>${esc(p.nome)}${p.sku ? ' — ' + esc(p.sku) : ''}</option>`).join('')}
         </select>
+        ${window.__prodFormProdutoId && variantesDoProduto(window.__prodFormProdutoId).length > 0 ? `
+          <select id="detalheVariante">
+            <option value="">Selecione a cor</option>
+            ${variantesDoProduto(window.__prodFormProdutoId).map((v) => `<option value="${v.id}">${esc(v.nome)}</option>`).join('')}
+          </select>
+        ` : ''}
         <input type="text" id="detalheQuantidade" placeholder="Quantidade de peças" inputmode="numeric" />
         <input type="date" id="detalheData" value="${todayStr()}" />
         <button class="confirm-btn" id="salvarDetalheProducao" data-costureira="${costureiraId}">${tipo === 'defeito' ? 'Registrar defeito' : 'Registrar produção'}</button>
@@ -717,7 +777,7 @@ function renderCostureiraDetalhe(costureiraId) {
             <div class="tx-row">
               <div class="tx-dot" style="background:${ehDefeito ? 'var(--red)' : p.pago ? 'var(--teal)' : 'var(--amber)'}"></div>
               <div style="flex:1">
-                <div class="tx-categoria">${esc(produto?.nome || 'Produto removido')}${ehDefeito ? ' ⚠️ Defeito' : ''}</div>
+                <div class="tx-categoria">${esc(produto?.nome || 'Produto removido')}${p.varianteId ? ` — ${esc(state.variantes.find((v) => v.id === p.varianteId)?.nome || '')}` : ''}${ehDefeito ? ' ⚠️ Defeito' : ''}</div>
                 <div class="tx-desc">${p.quantidade} peças · ${fmt(valor)}${p.pago ? ' · pago' : ' · pendente'}</div>
                 <div class="tx-date">${p.data}</div>
               </div>
@@ -780,8 +840,14 @@ function renderModoSupervisora(app) {
           </select>
           <select id="prodProduto">
             <option value="">Selecione o produto</option>
-            ${state.produtos.map((p) => `<option value="${p.id}">${esc(p.nome)}${p.sku ? ' — ' + esc(p.sku) : ''}</option>`).join('')}
+            ${state.produtos.map((p) => `<option value="${p.id}" ${window.__prodFormProdutoId === p.id ? 'selected' : ''}>${esc(p.nome)}${p.sku ? ' — ' + esc(p.sku) : ''}</option>`).join('')}
           </select>
+          ${window.__prodFormProdutoId && variantesDoProduto(window.__prodFormProdutoId).length > 0 ? `
+            <select id="prodVariante">
+              <option value="">Selecione a cor</option>
+              ${variantesDoProduto(window.__prodFormProdutoId).map((v) => `<option value="${v.id}">${esc(v.nome)}</option>`).join('')}
+            </select>
+          ` : ''}
           <input type="text" id="prodQuantidade" placeholder="Quantidade de peças" inputmode="numeric" />
           <input type="date" id="prodData" value="${hoje}" />
           <button class="confirm-btn" id="salvarProducao">${(window.__prodSupTipo || 'producao') === 'defeito' ? 'Registrar defeito' : 'Registrar produção'}</button>
@@ -856,7 +922,7 @@ function renderModoSupervisora(app) {
                 <div class="tx-dot" style="background:${ehDefeito ? 'var(--red)' : p.pago ? 'var(--teal)' : 'var(--amber)'}"></div>
                 <div style="flex:1">
                   <div class="tx-categoria">${esc(costureira?.nome || '—')}${ehDefeito ? ' ⚠️' : ''}</div>
-                  <div class="tx-desc">${esc(produto?.nome || '—')} · ${p.quantidade} peças</div>
+                  <div class="tx-desc">${esc(produto?.nome || '—')}${p.varianteId ? ` — ${esc(state.variantes.find((v) => v.id === p.varianteId)?.nome || '')}` : ''} · ${p.quantidade} peças</div>
                   <div class="tx-date">${p.data}${p.pago ? ' · pago' : ' · pendente'}</div>
                 </div>
                 <button class="trash-btn" data-editar-producao="${p.id}">✏️</button>
@@ -879,19 +945,26 @@ function renderModoSupervisora(app) {
     btn.addEventListener('click', () => { window.__prodSupTipo = btn.dataset.prodSupTipo; render(); });
   });
 
+  const prodProdutoSelect = document.getElementById('prodProduto');
+  if (prodProdutoSelect) prodProdutoSelect.addEventListener('change', (e) => { window.__prodFormProdutoId = e.target.value; render(); });
+
   const salvarBtn = document.getElementById('salvarProducao');
   if (salvarBtn) salvarBtn.addEventListener('click', async () => {
     const costureiraId = document.getElementById('prodCostureira').value;
     const produtoId = document.getElementById('prodProduto').value;
+    const varianteSelect = document.getElementById('prodVariante');
+    const varianteId = varianteSelect ? varianteSelect.value : '';
     let quantidade = Number(document.getElementById('prodQuantidade').value);
     const data = document.getElementById('prodData').value || hoje;
     if (!costureiraId || !produtoId || !quantidade || quantidade <= 0) {
       alert('Selecione a costureira, o produto e informe a quantidade.');
       return;
     }
+    if (varianteSelect && !varianteId) { alert('Selecione a cor.'); return; }
     if ((window.__prodSupTipo || 'producao') === 'defeito') quantidade = -quantidade;
-    await registrarProducao(costureiraId, produtoId, quantidade, data);
+    await registrarProducao(costureiraId, produtoId, quantidade, data, varianteId || null);
     window.__prodSupTipo = 'producao';
+    window.__prodFormProdutoId = null;
     render();
   });
 
@@ -958,6 +1031,45 @@ function renderModoSupervisora(app) {
   });
 }
 
+// ---- Conciliação ----
+function renderConciliacao(c) {
+  const pendentes = state.tx.filter((t) => t.tipo === 'entrada' && !t.conciliado).sort((a, b) => a.data.localeCompare(b.data));
+  const totalPendente = pendentes.reduce((a, t) => a + t.valor, 0);
+  const hoje = todayStr();
+
+  return `
+    <div class="form-card">
+      <div class="form-hint">Vendas ainda não confirmadas como recebidas da plataforma. Confirme manualmente quando o dinheiro cair, ou importe o relatório de repasse/liquidação da plataforma pra tentar casar automaticamente pelo número do pedido.</div>
+
+      <label class="file-label">📤 Importar relatório de repasse (CSV ou Excel)<input type="file" accept=".csv,.xlsx,.xls" id="repasseInput" style="display:none" /></label>
+
+      <div style="margin-top:14px;font-size:12.5px;color:var(--text-muted)">
+        ${pendentes.length} venda(s) pendente(s) · total ${fmt(totalPendente)}
+      </div>
+
+      ${pendentes.length === 0 ? `<div class="empty-state" style="margin-top:10px">Tudo conciliado 🎉</div>` : `
+        <div class="tx-list" style="margin-top:10px">
+          ${pendentes.slice(0, 50).map((t) => {
+            const dias = Math.floor((new Date(hoje + 'T00:00:00') - new Date(t.data + 'T00:00:00')) / 86400000);
+            return `
+              <div class="tx-row">
+                <div class="tx-dot" style="background:var(--amber)"></div>
+                <div style="flex:1">
+                  <div class="tx-categoria">${esc(t.categoria)}</div>
+                  <div class="tx-desc">${esc(t.descricao || '')}${t.idPedido ? ` · Pedido ${esc(t.idPedido)}` : ''}</div>
+                  <div class="tx-date">${t.data} · há ${dias} dia(s)</div>
+                </div>
+                <div class="tx-valor" style="color:var(--teal)">${fmt(t.valor)}</div>
+                <button class="trash-btn" data-conciliar-tx="${t.id}">✅</button>
+              </div>
+            `;
+          }).join('')}
+        </div>
+        ${pendentes.length > 50 ? `<div class="form-hint" style="margin-top:8px">Mostrando as 50 mais antigas.</div>` : ''}
+      `}
+    </div>
+  `;
+}
 // ---- Gate de acesso ----
 function renderGate(app) {
   app.innerHTML = `
@@ -1063,6 +1175,7 @@ function renderFinanceiro(c) {
       <div><div class="section-title">Financeiro</div><div class="section-subtitle">Lançamentos e importação de vendas</div></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="icon-btn-ghost" id="toggleTaxas">⚙️ Taxas</button>
+        <button class="icon-btn-ghost" id="toggleConciliacao">🔄 Conciliação</button>
         <button class="icon-btn-ghost" id="toggleSelect">${state.selectMode ? '✕ Cancelar' : '☑️ Selecionar'}</button>
         <button class="icon-btn-ghost" id="exportCsv">💾 Exportar</button>
         <button class="icon-btn-ghost" id="toggleUpload">📤 CSV</button>
@@ -1114,6 +1227,8 @@ function renderFinanceiro(c) {
         </div>
       </div>
     ` : ''}
+
+    ${state.showConciliacao ? renderConciliacao(c) : ''}
 
     ${state.showUpload ? `
       <div class="form-card">
@@ -1318,6 +1433,10 @@ function renderEstoque(c) {
             `;
           }
 
+          const vs = variantesDoProduto(p.id);
+          const temVariantes = vs.length > 0;
+          const showVarForm = state.showVarianteForm[p.id];
+
           return `
             <div class="produto-card" style="border-color:${statusColor}55">
               <div class="produto-header">
@@ -1330,14 +1449,46 @@ function renderEstoque(c) {
                   <button class="trash-btn" data-remove-produto="${p.id}">🗑</button>
                 </div>
               </div>
-              <div class="produto-stock-row">
-                <button class="step-btn" data-step="-1" data-produto="${p.id}" data-atual="${p.estoqueAtual}">-</button>
-                <div class="stock-value">${p.estoqueAtual} <span class="stock-unit">un</span></div>
-                <button class="step-btn" data-step="1" data-produto="${p.id}" data-atual="${p.estoqueAtual}">+</button>
-                <div class="produto-meta">mín. ${p.estoqueMinimo} · ${fmt(p.custoUnitario)}/un</div>
-              </div>
+
+              ${temVariantes ? `
+                <div class="variantes-box">
+                  ${vs.map((v) => `
+                    <div class="variante-row">
+                      <span class="variante-nome">${esc(v.nome)}</span>
+                      <button class="step-btn" data-var-step="-1" data-variante="${v.id}" data-atual="${v.estoqueAtual}">-</button>
+                      <span class="variante-qtd">${v.estoqueAtual}</span>
+                      <button class="step-btn" data-var-step="1" data-variante="${v.id}" data-atual="${v.estoqueAtual}">+</button>
+                      <button class="trash-btn" data-remover-variante="${v.id}">🗑</button>
+                    </div>
+                  `).join('')}
+                  <div class="produto-meta" style="margin-top:6px">Total: ${p.estoqueAtual} un · mín. ${p.estoqueMinimo} · ${fmt(p.custoUnitario)}/un</div>
+                </div>
+              ` : `
+                <div class="produto-stock-row">
+                  <button class="step-btn" data-step="-1" data-produto="${p.id}" data-atual="${p.estoqueAtual}">-</button>
+                  <div class="stock-value">${p.estoqueAtual} <span class="stock-unit">un</span></div>
+                  <button class="step-btn" data-step="1" data-produto="${p.id}" data-atual="${p.estoqueAtual}">+</button>
+                  <div class="produto-meta">mín. ${p.estoqueMinimo} · ${fmt(p.custoUnitario)}/un</div>
+                </div>
+              `}
+
+              ${showVarForm ? `
+                <div class="entrada-box">
+                  <div class="form-row">
+                    <input type="text" id="novaVarNome-${p.id}" placeholder="Nome da cor (ex: Preto)" />
+                    <input type="text" id="novaVarSku-${p.id}" placeholder="SKU da cor (opcional)" />
+                  </div>
+                  <div class="form-row">
+                    <button class="confirm-btn" data-confirmar-variante="${p.id}">Adicionar cor</button>
+                    <button class="toggle-btn" data-cancelar-variante="${p.id}">Cancelar</button>
+                  </div>
+                </div>
+              ` : `<button class="entrada-btn" data-abrir-variante="${p.id}">🎨 ${temVariantes ? 'Adicionar outra cor' : 'Separar por cor'}</button>`}
+
               ${p.totalVendido > 0 ? `<div class="produto-vendido">🏷️ ${p.totalVendido} un vendidas no total</div>` : ''}
-              ${entradaOpen ? `
+              ${temVariantes ? `
+                <div class="form-hint" style="margin-top:10px">Esse produto tem cores separadas — ajuste o estoque de cada cor acima com os +/-, ou lance produção na aba Produção.</div>
+              ` : entradaOpen ? `
                 <div class="entrada-box">
                   <div class="form-hint">Peças recebidas do corte/costura. O custo é lançado automaticamente como saída no financeiro.</div>
                   <div class="form-row">
@@ -1493,6 +1644,7 @@ function attachHandlers(c) {
       state.selectedTxIds = new Set();
       state.showTaxasForm = false;
       state.showNovaPlataforma = false;
+      state.showConciliacao = false;
       state.showCostureiraForm = false;
       state.showProducaoForm = false;
       state.costureiraDetalheId = null;
@@ -1545,6 +1697,40 @@ function attachFinanceiroHandlers(c) {
 
   const toggleTaxas = document.getElementById('toggleTaxas');
   if (toggleTaxas) toggleTaxas.addEventListener('click', () => { state.showTaxasForm = !state.showTaxasForm; state.showNovaPlataforma = false; render(); });
+
+  const toggleConciliacao = document.getElementById('toggleConciliacao');
+  if (toggleConciliacao) toggleConciliacao.addEventListener('click', () => { state.showConciliacao = !state.showConciliacao; render(); });
+
+  document.querySelectorAll('[data-conciliar-tx]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      await marcarTxConciliada(btn.dataset.conciliarTx, true);
+      await loadData();
+    });
+  });
+
+  const repasseInput = document.getElementById('repasseInput');
+  if (repasseInput) repasseInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const isExcel = /\.xlsx?$/i.test(file.name);
+    let rows;
+    try {
+      rows = isExcel ? await parseXLSX(file) : parseCSV(await file.text());
+    } catch (err) {
+      alert('Não consegui ler esse arquivo.');
+      return;
+    }
+    const idsDoArquivo = rows.map((row) => guessIdPedidoField(row)).filter(Boolean).map((id) => id.trim().toLowerCase());
+    if (!idsDoArquivo.length) {
+      alert('Não encontrei uma coluna de "ID do pedido" nesse arquivo. Me manda o nome das colunas que eu ajusto o reconhecimento.');
+      return;
+    }
+    const idsSet = new Set(idsDoArquivo);
+    const candidatos = state.tx.filter((t) => t.tipo === 'entrada' && !t.conciliado && t.idPedido && idsSet.has(t.idPedido.trim().toLowerCase()));
+    for (const t of candidatos) await marcarTxConciliada(t.id, true);
+    await loadData();
+    alert(`${candidatos.length} venda(s) confirmada(s) como recebida(s) a partir desse relatório.`);
+  });
 
   const salvarTaxas = document.getElementById('salvarTaxas');
   if (salvarTaxas) salvarTaxas.addEventListener('click', async () => {
@@ -1667,12 +1853,14 @@ function attachFinanceiroHandlers(c) {
       const plataformaLinha = guessPlataformaFromRow(row, state.plataformas) || plataforma;
       const taxaPctLinha = plataformaLinha ? plataformaLinha.taxaPercentual : 0;
       const taxaFixaLinha = plataformaLinha ? plataformaLinha.taxaFixa : 0;
+      const idPedidoLinha = guessIdPedidoField(row);
 
       novos.push({
         tipo: 'entrada', valor,
         categoria: plataformaLinha ? `Venda ${plataformaLinha.nome}` : 'Venda marketplace',
         descricao: descricaoItem,
         data: dataLinha,
+        idPedido: idPedidoLinha,
       });
 
       const taxaReal = guessTaxaRealField(row);
@@ -1823,18 +2011,25 @@ function attachProducaoHandlers(c) {
       btn.addEventListener('click', () => { window.__prodDetalheTipo = btn.dataset.prodDetalheTipo; render(); });
     });
 
+    const detalheProdutoSelect = document.getElementById('detalheProduto');
+    if (detalheProdutoSelect) detalheProdutoSelect.addEventListener('change', (e) => { window.__prodFormProdutoId = e.target.value; render(); });
+
     const salvarDetalhe = document.getElementById('salvarDetalheProducao');
     if (salvarDetalhe) salvarDetalhe.addEventListener('click', async () => {
       const costureiraId = salvarDetalhe.dataset.costureira;
       const produtoId = document.getElementById('detalheProduto').value;
+      const varianteSelect = document.getElementById('detalheVariante');
+      const varianteId = varianteSelect ? varianteSelect.value : '';
       let quantidade = Number(document.getElementById('detalheQuantidade').value);
       const data = document.getElementById('detalheData').value || todayStr();
       const tipo = window.__prodDetalheTipo || 'producao';
       if (!produtoId || !quantidade || quantidade <= 0) { alert('Selecione o produto e informe a quantidade.'); return; }
+      if (varianteSelect && !varianteId) { alert('Selecione a cor.'); return; }
       if (tipo === 'defeito') quantidade = -quantidade;
-      await registrarProducao(costureiraId, produtoId, quantidade, data);
+      await registrarProducao(costureiraId, produtoId, quantidade, data, varianteId || null);
       state.showProducaoForm = false;
       window.__prodDetalheTipo = 'producao';
+      window.__prodFormProdutoId = null;
       render();
     });
 
@@ -1978,6 +2173,42 @@ function attachEstoqueHandlers(c) {
     await addProduto({ nome, sku, estoqueAtual, estoqueMinimo, custoUnitario, valorMaoObra });
     state.showProdutoForm = false;
     render();
+  });
+
+  document.querySelectorAll('[data-abrir-variante]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.showVarianteForm = { ...state.showVarianteForm, [btn.dataset.abrirVariante]: true };
+      render();
+    });
+  });
+  document.querySelectorAll('[data-cancelar-variante]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.showVarianteForm = { ...state.showVarianteForm, [btn.dataset.cancelarVariante]: false };
+      render();
+    });
+  });
+  document.querySelectorAll('[data-confirmar-variante]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const produtoId = btn.dataset.confirmarVariante;
+      const nome = document.getElementById(`novaVarNome-${produtoId}`).value.trim();
+      const sku = document.getElementById(`novaVarSku-${produtoId}`).value.trim();
+      if (!nome) { alert('Informe o nome da cor.'); return; }
+      await addVariante(produtoId, nome, sku);
+      state.showVarianteForm = { ...state.showVarianteForm, [produtoId]: false };
+      render();
+    });
+  });
+  document.querySelectorAll('[data-var-step]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const delta = Number(btn.dataset.varStep);
+      const atual = Number(btn.dataset.atual);
+      await updateVarianteEstoque(btn.dataset.variante, atual + delta);
+    });
+  });
+  document.querySelectorAll('[data-remover-variante]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (confirm('Remover essa cor? O estoque dela some junto.')) await removeVariante(btn.dataset.removerVariante);
+    });
   });
 
   document.querySelectorAll('[data-step]').forEach((btn) => {
