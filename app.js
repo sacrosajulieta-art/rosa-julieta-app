@@ -242,6 +242,7 @@ const state = {
   prodFiltroCostureiraId: null,
   showConciliacao: false,
   showResumoFinanceiro: false,
+  showProdutosParados: false,
   variantes: [],
   showVarianteForm: {},
   materiaPrima: [],
@@ -1673,8 +1674,34 @@ function renderEstoque(c) {
   return `
     <div class="section-title-wrap">
       <div><div class="section-title">Estoque</div><div class="section-subtitle">Cadastre seus SKUs pra ativar o semáforo de reposição</div></div>
-      <button class="icon-btn" id="toggleProdutoForm">＋ Produto</button>
+      <div style="display:flex;gap:8px">
+        <button class="icon-btn-ghost" id="toggleProdutosParados">⏸️ Parados${c.produtosParados.length > 0 ? ` (${c.produtosParados.length})` : ''}</button>
+        <button class="icon-btn" id="toggleProdutoForm">＋ Produto</button>
+      </div>
     </div>
+
+    ${state.showProdutosParados ? `
+      <div class="form-card">
+        <div class="section-title" style="margin-bottom:2px">Produtos parados</div>
+        <div class="section-subtitle" style="margin-bottom:12px">Sem vender há 30 dias ou mais</div>
+        ${c.produtosParados.length === 0 ? `<div class="empty-state">Nenhum produto parado no momento 🎉</div>` : `
+          <div class="alert-list">
+            ${c.produtosParados.map((p) => `
+              <div class="alert-card" style="border-color:var(--amber)55">
+                <div class="alert-card-row">
+                  <div class="alert-dot" style="background:var(--amber)"></div>
+                  <div style="flex:1">
+                    <div class="alert-name">${esc(p.nome)}</div>
+                    <div class="alert-status" style="color:var(--amber)">${p.diasSemVender === null ? '⏸️ Nunca vendeu' : `⏸️ ${p.diasSemVender} dias sem vender`}</div>
+                    <div class="alert-meta">Estoque: ${p.estoqueAtual} un · ${fmt(p.custoUnitario)}/un parado</div>
+                  </div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        `}
+      </div>
+    ` : ''}
 
     ${state.showProdutoForm ? `
       <div class="form-card">
@@ -1875,26 +1902,6 @@ function renderDashboard(c) {
         `).join('')}
       </div>
     `}
-
-    <div class="section-title-wrap">
-      <div><div class="section-title">Produtos parados</div><div class="section-subtitle">Sem vender há 30 dias ou mais</div></div>
-    </div>
-    ${c.produtosParados.length === 0 ? `<div class="empty-state">Nenhum produto parado no momento 🎉</div>` : `
-      <div class="alert-list">
-        ${c.produtosParados.map((p) => `
-          <div class="alert-card" style="border-color:var(--amber)55">
-            <div class="alert-card-row">
-              <div class="alert-dot" style="background:var(--amber)"></div>
-              <div style="flex:1">
-                <div class="alert-name">${esc(p.nome)}</div>
-                <div class="alert-status" style="color:var(--amber)">${p.diasSemVender === null ? '⏸️ Nunca vendeu' : `⏸️ ${p.diasSemVender} dias sem vender`}</div>
-                <div class="alert-meta">Estoque: ${p.estoqueAtual} un · ${fmt(p.custoUnitario)}/un parado</div>
-              </div>
-            </div>
-          </div>
-        `).join('')}
-      </div>
-    `}
   `;
 }
 
@@ -1925,6 +1932,7 @@ function attachHandlers(c) {
       state.showNovaPlataforma = false;
       state.showConciliacao = false;
       state.showResumoFinanceiro = false;
+      state.showProdutosParados = false;
       state.showCostureiraForm = false;
       state.showProducaoForm = false;
       state.costureiraDetalheId = null;
@@ -2555,6 +2563,9 @@ function attachProducaoHandlers(c) {
 function attachEstoqueHandlers(c) {
   const toggleForm = document.getElementById('toggleProdutoForm');
   if (toggleForm) toggleForm.addEventListener('click', () => { state.showProdutoForm = !state.showProdutoForm; render(); });
+
+  const toggleParados = document.getElementById('toggleProdutosParados');
+  if (toggleParados) toggleParados.addEventListener('click', () => { state.showProdutosParados = !state.showProdutosParados; render(); });
 
   const salvarProduto = document.getElementById('salvarProduto');
   if (salvarProduto) salvarProduto.addEventListener('click', async () => {
