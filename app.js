@@ -254,11 +254,13 @@ const state = {
   insumos: [],
   showCompraInsumoForm: false,
   showBaixaInsumoId: null,
+  distribuicoes: [],
+  distribuindoOrdemId: null,
 };
 
 // ==================== DATA LAYER ====================
 async function loadData() {
-  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }] = await Promise.all([
+  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }] = await Promise.all([
     sb.from('transacoes').select('*').order('data', { ascending: false }),
     sb.from('produtos').select('*').order('created_at', { ascending: false }),
     sb.from('plataformas').select('*').order('nome', { ascending: true }),
@@ -269,6 +271,7 @@ async function loadData() {
     sb.from('ordens_corte').select('*').order('data_envio', { ascending: false }),
     sb.from('ordens_corte_itens').select('*'),
     sb.from('insumos').select('*').order('nome', { ascending: true }),
+    sb.from('distribuicoes').select('*').order('data', { ascending: false }),
   ]);
   if (e1) console.error(e1);
   if (e2) console.error(e2);
@@ -280,6 +283,7 @@ async function loadData() {
   if (e8) console.error(e8);
   if (e9) console.error(e9);
   if (e10) console.error(e10);
+  if (e11) console.error(e11);
   state.tx = (tx || []).map(mapTxFromDb);
   state.produtos = (produtos || []).map(mapProdutoFromDb);
   state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0) }));
@@ -288,8 +292,9 @@ async function loadData() {
   state.variantes = (variantes || []).map((v) => ({ id: v.id, produtoId: v.produto_id, nome: v.nome, estoqueAtual: v.estoque_atual, skuVariante: v.sku_variante }));
   state.materiaPrima = (materiaPrima || []).map((m) => ({ id: m.id, cor: m.cor, rolosDisponiveis: m.rolos_disponiveis, custoMedioRolo: Number(m.custo_medio_rolo || 0) }));
   state.ordensCorte = (ordensCorte || []).map((o) => ({ id: o.id, cor: o.cor, quantidadeRolos: o.quantidade_rolos, valorTecido: Number(o.valor_tecido), dataEnvio: o.data_envio, status: o.status, dataConclusao: o.data_conclusao, tipo: o.tipo || 'principal', valorCorte: Number(o.valor_corte || 0) }));
-  state.ordensCorteItens = (ordensCorteItens || []).map((i) => ({ id: i.id, ordemId: i.ordem_id, produtoId: i.produto_id, quantidade: i.quantidade }));
+  state.ordensCorteItens = (ordensCorteItens || []).map((i) => ({ id: i.id, ordemId: i.ordem_id, produtoId: i.produto_id, quantidade: i.quantidade, varianteId: i.variante_id || null }));
   state.insumos = (insumos || []).map((i) => ({ id: i.id, nome: i.nome, unidade: i.unidade, quantidadeDisponivel: Number(i.quantidade_disponivel), custoMedioUnitario: Number(i.custo_medio_unitario) }));
+  state.distribuicoes = (distribuicoes || []).map((d) => ({ id: d.id, ordemItemId: d.ordem_item_id, produtoId: d.produto_id, varianteId: d.variante_id || null, costureiraId: d.costureira_id, quantidadeDistribuida: d.quantidade_distribuida, quantidadeDevolvida: d.quantidade_devolvida, data: d.data }));
   state.loading = false;
   render();
 }
@@ -425,6 +430,33 @@ async function removeInsumo(id) {
   const { error } = await sb.from('insumos').delete().eq('id', id);
   if (error) alert('Erro ao remover insumo: ' + error.message);
 }
+
+// ---- Distribuição de peças cortadas pras costureiras ----
+async function distribuirPecas(ordemItemId, produtoId, varianteId, costureiraId, quantidade, data) {
+  const { error } = await sb.from('distribuicoes').insert({
+    ordem_item_id: ordemItemId, produto_id: produtoId, variante_id: varianteId || null,
+    costureira_id: costureiraId, quantidade_distribuida: quantidade, quantidade_devolvida: 0, data,
+  });
+  if (error) alert('Erro ao distribuir peças: ' + error.message);
+}
+async function removeDistribuicao(id) {
+  const { error } = await sb.from('distribuicoes').delete().eq('id', id);
+  if (error) alert('Erro ao remover distribuição: ' + error.message);
+}
+// baixa automática (FIFO) do que a costureira tem em mãos, quando ela devolve peças prontas
+async function baixarDistribuicoesFIFO(costureiraId, produtoId, varianteId, quantidadeDevolvida) {
+  let restante = quantidadeDevolvida;
+  const abertas = state.distribuicoes
+    .filter((d) => d.costureiraId === costureiraId && d.produtoId === produtoId && (d.varianteId || null) === (varianteId || null) && d.quantidadeDevolvida < d.quantidadeDistribuida)
+    .sort((a, b) => a.data.localeCompare(b.data));
+  for (const d of abertas) {
+    if (restante <= 0) break;
+    const disponivel = d.quantidadeDistribuida - d.quantidadeDevolvida;
+    const abate = Math.min(disponivel, restante);
+    await sb.from('distribuicoes').update({ quantidade_devolvida: d.quantidadeDevolvida + abate }).eq('id', d.id);
+    restante -= abate;
+  }
+}
 async function removeTx(id) {
   const { error } = await sb.from('transacoes').delete().eq('id', id);
   if (error) alert('Erro ao remover: ' + error.message);
@@ -497,6 +529,7 @@ async function registrarProducao(costureiraId, produtoId, quantidade, data, vari
     const produto = state.produtos.find((p) => p.id === produtoId);
     if (produto) await updateProdutoEstoque(produtoId, produto.estoqueAtual + quantidade);
   }
+  if (quantidade > 0) await baixarDistribuicoesFIFO(costureiraId, produtoId, varianteId, quantidade);
 }
 async function marcarProducaoPaga(ids) {
   const { error } = await sb.from('producoes').update({ pago: true }).in('id', ids);
@@ -573,6 +606,7 @@ function setupRealtime() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'ordens_corte' }, loadData)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'ordens_corte_itens' }, loadData)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'insumos' }, loadData)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'distribuicoes' }, loadData)
     .subscribe();
 }
 
@@ -775,10 +809,37 @@ function renderCostureiraDetalhe(costureiraId) {
   });
   const resumoPorDia = Object.entries(porDiaFiltrado).sort((a, b) => b[0].localeCompare(a[0]));
 
+  // peças cortadas que essa costureira ainda tem em mãos (distribuído - já devolvido)
+  const emMaos = {};
+  state.distribuicoes.filter((d) => d.costureiraId === costureiraId).forEach((d) => {
+    const restante = d.quantidadeDistribuida - d.quantidadeDevolvida;
+    if (restante <= 0) return;
+    const produto = state.produtos.find((p) => p.id === d.produtoId);
+    const variante = d.varianteId ? state.variantes.find((v) => v.id === d.varianteId) : null;
+    const chave = `${produto?.nome || 'Produto removido'}${variante ? ' — ' + variante.nome : ''}`;
+    emMaos[chave] = (emMaos[chave] || 0) + restante;
+  });
+  const emMaosLista = Object.entries(emMaos).sort((a, b) => b[1] - a[1]);
+
   const tipo = window.__prodDetalheTipo || 'producao';
 
   return `
     <button class="icon-btn-ghost" id="voltarCostureiras" style="margin-bottom:14px">← Voltar</button>
+
+    ${emMaosLista.length > 0 ? `
+      <div class="section-title-wrap">
+        <div><div class="section-title">Peças em mãos</div><div class="section-subtitle">Cortadas e distribuídas, ainda não devolvidas prontas</div></div>
+      </div>
+      <div class="tx-list" style="margin-bottom:20px">
+        ${emMaosLista.map(([nome, qtd]) => `
+          <div class="tx-row">
+            <div class="tx-dot" style="background:var(--amber)"></div>
+            <div style="flex:1"><div class="tx-categoria">${esc(nome)}</div></div>
+            <div class="tx-valor" style="color:var(--amber)">${qtd} peças</div>
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
 
     <div class="section-title-wrap">
       <div><div class="section-title">${esc(cost?.nome || 'Costureira')}</div><div class="section-subtitle">Histórico completo de produção</div></div>
@@ -1344,6 +1405,38 @@ function renderTecido(c) {
                   return `<button class="entrada-btn" data-aplicar-custo="${produto.id}" data-custo="${custoPorPeca.toFixed(2)}">💲 Atualizar custo de "${esc(produto.nome)}" pra ${fmt(custoPorPeca)}</button>`;
                 }).join('')}
               </div>
+
+              ${state.distribuindoOrdemId === o.id ? `
+                <div class="entrada-box">
+                  <div class="form-hint">Quem ficou com quantas peças de cada modelo?</div>
+                  ${itens.map((i) => {
+                    const produto = state.produtos.find((p) => p.id === i.produtoId);
+                    const jaDistribuido = state.distribuicoes.filter((d) => d.ordemItemId === i.id).reduce((a, d) => a + d.quantidadeDistribuida, 0);
+                    const restante = i.quantidade - jaDistribuido;
+                    const vs = produto ? variantesDoProduto(produto.id) : [];
+                    return `
+                      <div style="border-top:1px solid var(--border);padding-top:8px;margin-top:4px">
+                        <div class="form-hint" style="margin-bottom:6px">${esc(produto?.nome || '')} — distribuído ${jaDistribuido}/${i.quantidade} (restam ${restante})</div>
+                        <div class="form-row">
+                          <select id="distCostureira-${i.id}">
+                            <option value="">Costureira</option>
+                            ${state.costureiras.filter((c) => c.ativa).map((c) => `<option value="${c.id}">${esc(c.nome)}</option>`).join('')}
+                          </select>
+                          <input type="text" id="distQtd-${i.id}" placeholder="Quantidade" inputmode="numeric" />
+                        </div>
+                        ${vs.length > 0 ? `
+                          <select id="distVariante-${i.id}">
+                            <option value="">Sem cor específica</option>
+                            ${vs.map((v) => `<option value="${v.id}">${esc(v.nome)}</option>`).join('')}
+                          </select>
+                        ` : ''}
+                        <button class="entrada-btn" data-confirmar-distribuicao="${i.id}" data-produto="${i.produtoId}">＋ Adicionar distribuição</button>
+                      </div>
+                    `;
+                  }).join('')}
+                  <button class="toggle-btn" data-fechar-distribuicao="1" style="margin-top:8px">Fechar</button>
+                </div>
+              ` : `<button class="entrada-btn" data-abrir-distribuicao="${o.id}">👥 Distribuir peças pras costureiras</button>`}
             </div>
           `;
         }).join('')}
@@ -2037,6 +2130,7 @@ function attachHandlers(c) {
       state.ordemConcluindoId = null;
       state.showCompraInsumoForm = false;
       state.showBaixaInsumoId = null;
+      state.distribuindoOrdemId = null;
       render();
     });
   });
@@ -2531,6 +2625,26 @@ function attachTecidoHandlers(c) {
   document.querySelectorAll('[data-remover-insumo]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       if (confirm('Remover esse insumo?')) await removeInsumo(btn.dataset.removerInsumo);
+    });
+  });
+
+  document.querySelectorAll('[data-abrir-distribuicao]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.distribuindoOrdemId = btn.dataset.abrirDistribuicao; render(); });
+  });
+  document.querySelectorAll('[data-fechar-distribuicao]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.distribuindoOrdemId = null; render(); });
+  });
+  document.querySelectorAll('[data-confirmar-distribuicao]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const itemId = btn.dataset.confirmarDistribuicao;
+      const produtoId = btn.dataset.produto;
+      const costureiraId = document.getElementById(`distCostureira-${itemId}`).value;
+      const quantidade = Number(document.getElementById(`distQtd-${itemId}`).value);
+      const varianteSelect = document.getElementById(`distVariante-${itemId}`);
+      const varianteId = varianteSelect ? varianteSelect.value : '';
+      if (!costureiraId || !quantidade || quantidade <= 0) { alert('Selecione a costureira e informe a quantidade.'); return; }
+      await distribuirPecas(itemId, produtoId, varianteId || null, costureiraId, quantidade, todayStr());
+      render();
     });
   });
 }
