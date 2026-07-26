@@ -446,6 +446,11 @@ async function removeDistribuicao(id) {
 
 // ---- Ficha de corte em PDF (duas vias: Costureira e Expedição) ----
 function gerarFichaCortePDF(distribuicao, ordem) {
+  if (!window.jspdf || !window.jspdf.jsPDF) {
+    alert('A biblioteca de PDF ainda não carregou. Aguarda alguns segundos e tenta de novo, ou feche e abra o app.');
+    return;
+  }
+  try {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
 
@@ -538,6 +543,10 @@ function gerarFichaCortePDF(distribuicao, ordem) {
 
   const nomeArquivo = `ficha-corte-${(costureira?.nome || 'costureira').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${distribuicao.data}.pdf`;
   doc.save(nomeArquivo);
+  } catch (err) {
+    console.error(err);
+    alert('Não consegui gerar o PDF: ' + err.message);
+  }
 }
 // baixa automática (FIFO) do que a costureira tem em mãos, quando ela devolve peças prontas
 async function baixarDistribuicoesFIFO(costureiraId, produtoId, varianteId, quantidadeDevolvida) {
