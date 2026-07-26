@@ -334,7 +334,7 @@ async function removeVariante(id) {
 }
 
 // ---- Matéria-prima (tecido) ----
-async function comprarTecido(cor, quantidadeRolos, valorTotal, data) {
+async function comprarTecido(cor, quantidadeRolos, valorTotal, data, lancarFinanceiro) {
   const existente = state.materiaPrima.find((m) => m.cor.trim().toLowerCase() === cor.trim().toLowerCase());
   if (existente) {
     const novoTotalRolos = existente.rolosDisponiveis + quantidadeRolos;
@@ -348,10 +348,12 @@ async function comprarTecido(cor, quantidadeRolos, valorTotal, data) {
     const { error } = await sb.from('materia_prima').insert({ cor, rolos_disponiveis: quantidadeRolos, custo_medio_rolo: custoMedio });
     if (error) { alert('Erro ao registrar compra: ' + error.message); return; }
   }
-  await addTx({
-    tipo: 'saida', valor: valorTotal, categoria: 'Tecido', natureza: 'variavel',
-    descricao: `${quantidadeRolos} rolo(s) — ${cor}`, data,
-  });
+  if (lancarFinanceiro) {
+    await addTx({
+      tipo: 'saida', valor: valorTotal, categoria: 'Tecido', natureza: 'variavel',
+      descricao: `${quantidadeRolos} rolo(s) — ${cor}`, data,
+    });
+  }
 }
 async function criarOrdemCorte(cor, quantidadeRolos, valorTecido, dataEnvio, tipo, valorCorte) {
   if (tipo === 'principal') {
@@ -447,8 +449,8 @@ async function removeCostureira(id) {
   const { error } = await sb.from('costureiras').delete().eq('id', id);
   if (error) alert('Erro ao remover costureira: ' + error.message);
 }
-async function registrarProducao(costureiraId, produtoId, quantidade, data, varianteId) {
-  const { error } = await sb.from('producoes').insert({ costureira_id: costureiraId, produto_id: produtoId, quantidade, data, pago: false, variante_id: varianteId || null });
+async function registrarProducao(costureiraId, produtoId, quantidade, data, varianteId, jaPago) {
+  const { error } = await sb.from('producoes').insert({ costureira_id: costureiraId, produto_id: produtoId, quantidade, data, pago: !!jaPago, variante_id: varianteId || null });
   if (error) { alert('Erro ao registrar produção: ' + error.message); return; }
   if (varianteId) {
     const variante = state.variantes.find((v) => v.id === varianteId);
@@ -797,6 +799,7 @@ function renderCostureiraDetalhe(costureiraId) {
         ` : ''}
         <input type="text" id="detalheQuantidade" placeholder="Quantidade de peças" inputmode="numeric" />
         <input type="date" id="detalheData" value="${todayStr()}" />
+        <label class="checkbox-label"><input type="checkbox" id="detalheJaPago" /> 💰 Já foi pago antes (não lançar no financeiro)</label>
         <button class="confirm-btn" id="salvarDetalheProducao" data-costureira="${costureiraId}">${tipo === 'defeito' ? 'Registrar defeito' : 'Registrar produção'}</button>
       </div>
     ` : ''}
@@ -1175,6 +1178,7 @@ function renderTecido(c) {
           <input type="text" id="tecidoValor" placeholder="Valor total pago (R$)" />
         </div>
         <input type="date" id="tecidoData" value="${todayStr()}" />
+        <label class="checkbox-label"><input type="checkbox" id="tecidoHistorico" /> 📦 Já tinha esse tecido antes do sistema (não lançar despesa)</label>
         <button class="confirm-btn" id="salvarCompraTecido">Registrar compra</button>
       </div>
     ` : ''}
@@ -2310,8 +2314,9 @@ function attachTecidoHandlers(c) {
     const rolos = Number(document.getElementById('tecidoRolos').value);
     const valor = parseBRNumber(document.getElementById('tecidoValor').value);
     const data = document.getElementById('tecidoData').value || todayStr();
+    const historico = document.getElementById('tecidoHistorico')?.checked;
     if (!cor || !rolos || rolos <= 0 || !valor) { alert('Preencha cor, quantidade de rolos e valor.'); return; }
-    await comprarTecido(cor, rolos, valor, data);
+    await comprarTecido(cor, rolos, valor, data, !historico);
     state.showCompraTecidoForm = false;
     render();
   });
@@ -2426,10 +2431,11 @@ function attachProducaoHandlers(c) {
       let quantidade = Number(document.getElementById('detalheQuantidade').value);
       const data = document.getElementById('detalheData').value || todayStr();
       const tipo = window.__prodDetalheTipo || 'producao';
+      const jaPago = document.getElementById('detalheJaPago')?.checked;
       if (!produtoId || !quantidade || quantidade <= 0) { alert('Selecione o produto e informe a quantidade.'); return; }
       if (varianteSelect && !varianteId) { alert('Selecione a cor.'); return; }
       if (tipo === 'defeito') quantidade = -quantidade;
-      await registrarProducao(costureiraId, produtoId, quantidade, data, varianteId || null);
+      await registrarProducao(costureiraId, produtoId, quantidade, data, varianteId || null, jaPago);
       state.showProducaoForm = false;
       window.__prodDetalheTipo = 'producao';
       window.__prodFormProdutoId = null;
