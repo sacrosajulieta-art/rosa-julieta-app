@@ -251,11 +251,14 @@ const state = {
   showCompraTecidoForm: false,
   showOrdemCorteForm: false,
   ordemConcluindoId: null,
+  insumos: [],
+  showCompraInsumoForm: false,
+  showBaixaInsumoId: null,
 };
 
 // ==================== DATA LAYER ====================
 async function loadData() {
-  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }] = await Promise.all([
+  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }] = await Promise.all([
     sb.from('transacoes').select('*').order('data', { ascending: false }),
     sb.from('produtos').select('*').order('created_at', { ascending: false }),
     sb.from('plataformas').select('*').order('nome', { ascending: true }),
@@ -265,6 +268,7 @@ async function loadData() {
     sb.from('materia_prima').select('*').order('cor', { ascending: true }),
     sb.from('ordens_corte').select('*').order('data_envio', { ascending: false }),
     sb.from('ordens_corte_itens').select('*'),
+    sb.from('insumos').select('*').order('nome', { ascending: true }),
   ]);
   if (e1) console.error(e1);
   if (e2) console.error(e2);
@@ -275,6 +279,7 @@ async function loadData() {
   if (e7) console.error(e7);
   if (e8) console.error(e8);
   if (e9) console.error(e9);
+  if (e10) console.error(e10);
   state.tx = (tx || []).map(mapTxFromDb);
   state.produtos = (produtos || []).map(mapProdutoFromDb);
   state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0) }));
@@ -284,6 +289,7 @@ async function loadData() {
   state.materiaPrima = (materiaPrima || []).map((m) => ({ id: m.id, cor: m.cor, rolosDisponiveis: m.rolos_disponiveis, custoMedioRolo: Number(m.custo_medio_rolo || 0) }));
   state.ordensCorte = (ordensCorte || []).map((o) => ({ id: o.id, cor: o.cor, quantidadeRolos: o.quantidade_rolos, valorTecido: Number(o.valor_tecido), dataEnvio: o.data_envio, status: o.status, dataConclusao: o.data_conclusao, tipo: o.tipo || 'principal', valorCorte: Number(o.valor_corte || 0) }));
   state.ordensCorteItens = (ordensCorteItens || []).map((i) => ({ id: i.id, ordemId: i.ordem_id, produtoId: i.produto_id, quantidade: i.quantidade }));
+  state.insumos = (insumos || []).map((i) => ({ id: i.id, nome: i.nome, unidade: i.unidade, quantidadeDisponivel: Number(i.quantidade_disponivel), custoMedioUnitario: Number(i.custo_medio_unitario) }));
   state.loading = false;
   render();
 }
@@ -386,6 +392,38 @@ async function concluirOrdemCorte(ordemId, itens) {
 async function removeOrdemCorte(id) {
   const { error } = await sb.from('ordens_corte').delete().eq('id', id);
   if (error) alert('Erro ao remover ordem: ' + error.message);
+}
+
+// ---- Insumos (aviamentos, embalagem, etiquetas...) ----
+async function comprarInsumo(nome, unidade, quantidade, valorTotal, categoria, data, lancarFinanceiro) {
+  const existente = state.insumos.find((i) => i.nome.trim().toLowerCase() === nome.trim().toLowerCase());
+  if (existente) {
+    const novaQtd = existente.quantidadeDisponivel + quantidade;
+    const novoCusto = novaQtd > 0 ? (existente.custoMedioUnitario * existente.quantidadeDisponivel + valorTotal) / novaQtd : 0;
+    const { error } = await sb.from('insumos').update({ quantidade_disponivel: novaQtd, custo_medio_unitario: novoCusto }).eq('id', existente.id);
+    if (error) { alert('Erro ao registrar compra: ' + error.message); return; }
+  } else {
+    const custo = quantidade > 0 ? valorTotal / quantidade : 0;
+    const { error } = await sb.from('insumos').insert({ nome, unidade, quantidade_disponivel: quantidade, custo_medio_unitario: custo });
+    if (error) { alert('Erro ao registrar compra: ' + error.message); return; }
+  }
+  if (lancarFinanceiro) {
+    await addTx({
+      tipo: 'saida', valor: valorTotal, categoria, natureza: 'variavel',
+      descricao: `${quantidade} ${unidade} — ${nome}`, data,
+    });
+  }
+}
+async function baixarInsumo(id, quantidadeUsada) {
+  const insumo = state.insumos.find((i) => i.id === id);
+  if (!insumo) return;
+  const nova = Math.max(0, insumo.quantidadeDisponivel - quantidadeUsada);
+  const { error } = await sb.from('insumos').update({ quantidade_disponivel: nova }).eq('id', id);
+  if (error) alert('Erro ao dar baixa: ' + error.message);
+}
+async function removeInsumo(id) {
+  const { error } = await sb.from('insumos').delete().eq('id', id);
+  if (error) alert('Erro ao remover insumo: ' + error.message);
 }
 async function removeTx(id) {
   const { error } = await sb.from('transacoes').delete().eq('id', id);
@@ -534,6 +572,7 @@ function setupRealtime() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'materia_prima' }, loadData)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'ordens_corte' }, loadData)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'ordens_corte_itens' }, loadData)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'insumos' }, loadData)
     .subscribe();
 }
 
@@ -575,13 +614,15 @@ function getComputed() {
     .filter((t) => t.diasParaVencer <= JANELA_VENCIMENTO)
     .sort((a, b) => a.diasParaVencer - b.diasParaVencer);
 
-  // valor real do estoque: matéria-prima parada + peças prontas (pelo custo, não preço de venda)
-  const valorMateriaPrima = state.materiaPrima.reduce((a, m) => a + m.rolosDisponiveis * m.custoMedioRolo, 0);
+  // valor real do estoque: matéria-prima + insumos parados + peças prontas (pelo custo, não preço de venda)
+  const valorInsumos = state.insumos.reduce((a, i) => a + i.quantidadeDisponivel * i.custoMedioUnitario, 0);
+  const valorMateriaPrima = state.materiaPrima.reduce((a, m) => a + m.rolosDisponiveis * m.custoMedioRolo, 0) + valorInsumos;
   const valorPecasProntas = produtosStatus.reduce((a, p) => a + p.estoqueAtual * p.custoUnitario, 0);
   const valorEstoqueTotal = valorMateriaPrima + valorPecasProntas;
   const materiaPrimaDetalhe = state.materiaPrima
     .filter((m) => m.rolosDisponiveis > 0)
     .map((m) => [`${m.cor} (${m.rolosDisponiveis} rolo(s))`, m.rolosDisponiveis * m.custoMedioRolo])
+    .concat(state.insumos.filter((i) => i.quantidadeDisponivel > 0).map((i) => [`${i.nome} (${i.quantidadeDisponivel} ${i.unidade})`, i.quantidadeDisponivel * i.custoMedioUnitario]))
     .sort((a, b) => b[1] - a[1]);
   const pecasProntasDetalhe = produtosStatus
     .filter((p) => p.estoqueAtual > 0)
@@ -1308,6 +1349,55 @@ function renderTecido(c) {
         }).join('')}
       </div>
     `}
+
+    <div class="section-title-wrap">
+      <div><div class="section-title">Outros insumos</div><div class="section-subtitle">Zíper, elástico, bojo, etiqueta, saquinho...</div></div>
+      <button class="icon-btn" id="toggleCompraInsumo">＋ Comprar</button>
+    </div>
+
+    ${state.showCompraInsumoForm ? `
+      <div class="form-card">
+        <input type="text" id="insumoNome" placeholder="Nome (ex: Zíper 20cm, Bojo P, Etiqueta)" />
+        <div class="form-row">
+          <input type="text" id="insumoQuantidade" placeholder="Quantidade" inputmode="decimal" />
+          <select id="insumoUnidade">
+            <option value="un">unidade</option>
+            <option value="m">metro</option>
+            <option value="cm">cm</option>
+            <option value="par">par</option>
+            <option value="pacote">pacote</option>
+          </select>
+        </div>
+        <input type="text" id="insumoValor" placeholder="Valor total pago (R$)" />
+        <select id="insumoCategoria">
+          <option value="Aviamento">Aviamento (zíper, elástico, bojo...)</option>
+          <option value="Embalagem">Embalagem (saquinho, caixa...)</option>
+          <option value="Etiquetas/Tags">Etiquetas/Tags</option>
+        </select>
+        <input type="date" id="insumoData" value="${todayStr()}" />
+        <label class="checkbox-label"><input type="checkbox" id="insumoHistorico" /> 📦 Já tinha antes do sistema (não lançar despesa)</label>
+        <button class="confirm-btn" id="salvarCompraInsumo">Registrar compra</button>
+      </div>
+    ` : ''}
+
+    ${state.insumos.length === 0 ? `<div class="empty-state">Nenhum insumo cadastrado ainda.</div>` : `
+      <div class="tx-list">
+        ${state.insumos.map((i) => `
+          <div class="tx-row">
+            <div class="tx-dot" style="background:${i.quantidadeDisponivel > 0 ? 'var(--teal)' : 'var(--red)'}"></div>
+            <div style="flex:1"><div class="tx-categoria">${esc(i.nome)}</div><div class="tx-desc">${fmt(i.custoMedioUnitario)}/${esc(i.unidade)} (média)</div></div>
+            ${state.showBaixaInsumoId === i.id ? `
+              <input type="text" id="baixaQtd-${i.id}" placeholder="Qtd usada" style="width:70px;margin-right:6px" />
+              <button class="confirm-btn" style="width:auto;padding:8px 10px" data-confirmar-baixa="${i.id}">OK</button>
+            ` : `
+              <div class="tx-valor" style="margin-right:6px">${i.quantidadeDisponivel} ${esc(i.unidade)}</div>
+              <button class="trash-btn" data-abrir-baixa="${i.id}">➖</button>
+            `}
+            <button class="trash-btn" data-remover-insumo="${i.id}">🗑</button>
+          </div>
+        `).join('')}
+      </div>
+    `}
   `;
 }
 // ---- Resumo financeiro (custos fixos x variáveis + contas a vencer) ----
@@ -1418,7 +1508,7 @@ function render() {
       ${tabBtn('dashboard', 'Dashboard', c.produtosStatus.filter(p => p.status !== 'ok').length)}
       ${tabBtn('financeiro', 'Financeiro', c.contasAVencer.length)}
       ${tabBtn('estoque', 'Estoque')}
-      ${tabBtn('tecido', 'Tecido')}
+      ${tabBtn('tecido', 'Materiais')}
       ${tabBtn('producao', 'Produção')}
       ${tabBtn('dre', 'DRE')}
     </div>
@@ -1866,7 +1956,7 @@ function renderDashboard(c) {
     <div class="stats-grid">
       <div class="stat-card">
         <div class="stat-icon" style="background:rgba(255,182,39,0.1)">🧵</div>
-        <div class="stat-label">Matéria-prima</div>
+        <div class="stat-label">Tecido + insumos</div>
         <div class="stat-value">${fmt(c.valorMateriaPrima)}</div>
       </div>
       <div class="stat-card">
@@ -1945,6 +2035,8 @@ function attachHandlers(c) {
       state.showCompraTecidoForm = false;
       state.showOrdemCorteForm = false;
       state.ordemConcluindoId = null;
+      state.showCompraInsumoForm = false;
+      state.showBaixaInsumoId = null;
       render();
     });
   });
@@ -2402,6 +2494,43 @@ function attachTecidoHandlers(c) {
       const novoCusto = Number(btn.dataset.custo);
       await updateProduto(produto.id, { nome: produto.nome, sku: produto.sku, estoqueAtual: produto.estoqueAtual, estoqueMinimo: produto.estoqueMinimo, custoUnitario: novoCusto, valorMaoObra: produto.valorMaoObra });
       await loadData();
+    });
+  });
+
+  const toggleCompraInsumo = document.getElementById('toggleCompraInsumo');
+  if (toggleCompraInsumo) toggleCompraInsumo.addEventListener('click', () => { state.showCompraInsumoForm = !state.showCompraInsumoForm; render(); });
+
+  const salvarCompraInsumo = document.getElementById('salvarCompraInsumo');
+  if (salvarCompraInsumo) salvarCompraInsumo.addEventListener('click', async () => {
+    const nome = document.getElementById('insumoNome').value.trim();
+    const quantidade = parseBRNumber(document.getElementById('insumoQuantidade').value);
+    const unidade = document.getElementById('insumoUnidade').value;
+    const valor = parseBRNumber(document.getElementById('insumoValor').value);
+    const categoria = document.getElementById('insumoCategoria').value;
+    const data = document.getElementById('insumoData').value || todayStr();
+    const historico = document.getElementById('insumoHistorico')?.checked;
+    if (!nome || !quantidade || quantidade <= 0 || !valor) { alert('Preencha nome, quantidade e valor.'); return; }
+    await comprarInsumo(nome, unidade, quantidade, valor, categoria, data, !historico);
+    state.showCompraInsumoForm = false;
+    render();
+  });
+
+  document.querySelectorAll('[data-abrir-baixa]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.showBaixaInsumoId = btn.dataset.abrirBaixa; render(); });
+  });
+  document.querySelectorAll('[data-confirmar-baixa]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.confirmarBaixa;
+      const qtd = parseBRNumber(document.getElementById(`baixaQtd-${id}`).value);
+      if (!qtd || qtd <= 0) { alert('Informe a quantidade usada.'); return; }
+      await baixarInsumo(id, qtd);
+      state.showBaixaInsumoId = null;
+      render();
+    });
+  });
+  document.querySelectorAll('[data-remover-insumo]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (confirm('Remover esse insumo?')) await removeInsumo(btn.dataset.removerInsumo);
     });
   });
 }
