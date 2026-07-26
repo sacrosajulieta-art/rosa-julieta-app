@@ -2644,7 +2644,7 @@ function attachTecidoHandlers(c) {
       const varianteId = varianteSelect ? varianteSelect.value : '';
       if (!costureiraId || !quantidade || quantidade <= 0) { alert('Selecione a costureira e informe a quantidade.'); return; }
       await distribuirPecas(itemId, produtoId, varianteId || null, costureiraId, quantidade, todayStr());
-      render();
+      await loadData();
     });
   });
 }
