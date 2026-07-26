@@ -443,6 +443,102 @@ async function removeDistribuicao(id) {
   const { error } = await sb.from('distribuicoes').delete().eq('id', id);
   if (error) alert('Erro ao remover distribuição: ' + error.message);
 }
+
+// ---- Ficha de corte em PDF (duas vias: Costureira e Expedição) ----
+function gerarFichaCortePDF(distribuicao, ordem) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+
+  const produto = state.produtos.find((p) => p.id === distribuicao.produtoId);
+  const variante = distribuicao.varianteId ? state.variantes.find((v) => v.id === distribuicao.varianteId) : null;
+  const costureira = state.costureiras.find((c) => c.id === distribuicao.costureiraId);
+  const nomeModelo = produto ? produto.nome : '—';
+  const cor = variante ? variante.nome : (ordem ? ordem.cor : '—');
+  const valorPeca = produto ? produto.valorMaoObra : 0;
+  const totalPagar = valorPeca * distribuicao.quantidadeDistribuida;
+  const dataCorte = ordem ? ordem.dataConclusao || ordem.dataEnvio : distribuicao.data;
+
+  const desenharVia = (viaLabel, comConferencia) => {
+    let y = 15;
+    const margemEsq = 15;
+    const largura = 180;
+
+    doc.setFontSize(9);
+    doc.text(viaLabel, margemEsq, y);
+    y += 6;
+
+    doc.setFontSize(13);
+    doc.setFont(undefined, 'bold');
+    doc.text('FICHA DE CORTE – ROSA JULIETA', margemEsq, y);
+    doc.setFont(undefined, 'normal');
+    y += 9;
+
+    doc.setFontSize(10);
+    doc.text(`NOME COSTUREIRA: ${costureira ? costureira.nome.toUpperCase() : '—'}`, margemEsq, y);
+    doc.text(`DATA ENVIO: ${distribuicao.data}`, margemEsq + 110, y);
+    y += 6;
+    doc.text('NUMERO ETIQUETA COMPOSIÇÃO: _______________', margemEsq, y);
+    y += 9;
+
+    doc.setFont(undefined, 'bold');
+    doc.text('1. IDENTIFICAÇÃO E CONTROLE DE SAÍDA DA PEÇA', margemEsq, y);
+    doc.setFont(undefined, 'normal');
+    y += 6;
+    doc.text(`Nome do Modelo: ${nomeModelo}`, margemEsq, y); y += 5.5;
+    doc.text(`SKU: ${produto?.sku || '—'}`, margemEsq, y); y += 5.5;
+    doc.text(`Data do Corte: ${dataCorte}`, margemEsq, y); y += 5.5;
+    doc.text(`Quantidade Total de Peças: ${distribuicao.quantidadeDistribuida} UNIDADES`, margemEsq, y); y += 5.5;
+    doc.text(`Cor: ${cor}`, margemEsq, y); y += 9;
+
+    doc.setFont(undefined, 'bold');
+    doc.text('2. CONTROLE DE ENTREGA', margemEsq, y);
+    doc.setFont(undefined, 'normal');
+    y += 6;
+    for (let i = 1; i <= 6; i++) {
+      doc.text(`Entrega ${i} — Data: _______________  Quantidade: _______________`, margemEsq, y);
+      y += 6.5;
+    }
+    doc.text('TOTAL DE PEÇAS ENTREGUES: _______________', margemEsq, y);
+    y += 9;
+
+    doc.setFont(undefined, 'bold');
+    doc.text('3. CONTROLE DE DEFEITOS', margemEsq, y);
+    doc.setFont(undefined, 'normal');
+    y += 6;
+    doc.text('Quantidade Peças com Defeito: _______________', margemEsq, y); y += 6;
+    doc.text('Tipo de Defeito: _____________________________________________________', margemEsq, y); y += 9;
+
+    if (comConferencia) {
+      doc.setFont(undefined, 'bold');
+      doc.text('4. CONFERÊNCIA NA DEVOLUÇÃO (GALPÃO)', margemEsq, y);
+      doc.setFont(undefined, 'normal');
+      y += 6;
+      doc.text('Quantidade Entregue: _______   Aprovada: _______   Reprovada: _______', margemEsq, y);
+      y += 9;
+    }
+
+    doc.setFont(undefined, 'bold');
+    doc.text('5. CONTROLE DE PAGAMENTO', margemEsq, y);
+    doc.setFont(undefined, 'normal');
+    y += 6;
+    doc.text(`Valor por Peça: ${fmt(valorPeca)}`, margemEsq, y); y += 5.5;
+    doc.text(`Total a Pagar (se tudo aprovado): ${fmt(totalPagar)}`, margemEsq, y); y += 5.5;
+    doc.setFontSize(8.5);
+    doc.text('OBS: O pagamento será realizado apenas sobre as peças conferidas e aprovadas.', margemEsq, y);
+    doc.setFontSize(10);
+    y += 10;
+    doc.text('Data da Entrega Total do Corte: _____ / _____ / _________', margemEsq, y);
+    y += 12;
+    doc.text('Assinatura: _________________________________________________', margemEsq, y);
+  };
+
+  desenharVia('1ª via — Costureira', false);
+  doc.addPage();
+  desenharVia('2ª via — Expedição', true);
+
+  const nomeArquivo = `ficha-corte-${(costureira?.nome || 'costureira').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${distribuicao.data}.pdf`;
+  doc.save(nomeArquivo);
+}
 // baixa automática (FIFO) do que a costureira tem em mãos, quando ela devolve peças prontas
 async function baixarDistribuicoesFIFO(costureiraId, produtoId, varianteId, quantidadeDevolvida) {
   let restante = quantidadeDevolvida;
@@ -1431,6 +1527,18 @@ function renderTecido(c) {
                           </select>
                         ` : ''}
                         <button class="entrada-btn" data-confirmar-distribuicao="${i.id}" data-produto="${i.produtoId}">＋ Adicionar distribuição</button>
+                        ${state.distribuicoes.filter((d) => d.ordemItemId === i.id).map((d) => {
+                          const cost = state.costureiras.find((c) => c.id === d.costureiraId);
+                          const varianteNome = d.varianteId ? state.variantes.find((v) => v.id === d.varianteId)?.nome : null;
+                          return `
+                            <div class="tx-row" style="margin-top:6px">
+                              <div class="tx-dot" style="background:var(--teal)"></div>
+                              <div style="flex:1"><div class="tx-categoria">${esc(cost?.nome || '—')}${varianteNome ? ' — ' + esc(varianteNome) : ''}</div><div class="tx-desc">${d.quantidadeDistribuida} peças · ${d.data}</div></div>
+                              <button class="trash-btn" data-imprimir-ficha="${d.id}" data-ordem="${o.id}">🖨️</button>
+                              <button class="trash-btn" data-remover-distribuicao="${d.id}">🗑</button>
+                            </div>
+                          `;
+                        }).join('')}
                       </div>
                     `;
                   }).join('')}
@@ -2645,6 +2753,23 @@ function attachTecidoHandlers(c) {
       if (!costureiraId || !quantidade || quantidade <= 0) { alert('Selecione a costureira e informe a quantidade.'); return; }
       await distribuirPecas(itemId, produtoId, varianteId || null, costureiraId, quantidade, todayStr());
       await loadData();
+    });
+  });
+
+  document.querySelectorAll('[data-imprimir-ficha]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const distribuicao = state.distribuicoes.find((d) => d.id === btn.dataset.imprimirFicha);
+      const ordem = state.ordensCorte.find((o) => o.id === btn.dataset.ordem);
+      if (distribuicao) gerarFichaCortePDF(distribuicao, ordem);
+    });
+  });
+
+  document.querySelectorAll('[data-remover-distribuicao]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (confirm('Remover essa distribuição?')) {
+        await removeDistribuicao(btn.dataset.removerDistribuicao);
+        await loadData();
+      }
     });
   });
 }
