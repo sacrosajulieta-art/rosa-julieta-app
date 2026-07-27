@@ -1393,7 +1393,12 @@ function renderMateriais(c) {
 
     ${state.showCompraTecidoForm ? `
       <div class="form-card">
-        <input type="text" id="tecidoCor" placeholder="Cor do tecido (ex: Preto)" />
+        <select id="tecidoCorSelect">
+          <option value="">Selecione a cor...</option>
+          ${state.materiaPrima.map((m) => `<option value="${esc(m.cor)}">${esc(m.cor)} (${m.rolosDisponiveis} em estoque)</option>`).join('')}
+          <option value="__nova__">➕ Nova cor</option>
+        </select>
+        ${window.__tecidoCorNova ? `<input type="text" id="tecidoCorNova" placeholder="Nome da nova cor" />` : ''}
 
         <div class="form-hint">🧮 Sabe só o peso total comprado? Calcule a quantidade de rolos automaticamente (peso médio ajustável, cada rolo costuma pesar entre 19,5kg e 20kg).</div>
         <div class="form-row">
@@ -2788,7 +2793,11 @@ function attachFinanceiroHandlers(c) {
 
 function attachTecidoHandlers(c) {
   const toggleCompra = document.getElementById('toggleCompraTecido');
-  if (toggleCompra) toggleCompra.addEventListener('click', () => { state.showCompraTecidoForm = !state.showCompraTecidoForm; render(); });
+  if (toggleCompra) toggleCompra.addEventListener('click', () => {
+    state.showCompraTecidoForm = !state.showCompraTecidoForm;
+    window.__tecidoCorNova = false;
+    render();
+  });
 
   const calcularRolosPeso = document.getElementById('calcularRolosPeso');
   if (calcularRolosPeso) calcularRolosPeso.addEventListener('click', () => {
@@ -2817,15 +2826,25 @@ function attachTecidoHandlers(c) {
   if (tecidoRolosInput) tecidoRolosInput.addEventListener('input', atualizarPreviewCustoTecido);
   if (tecidoValorInput) tecidoValorInput.addEventListener('input', atualizarPreviewCustoTecido);
 
+  const tecidoCorSelect = document.getElementById('tecidoCorSelect');
+  if (tecidoCorSelect) tecidoCorSelect.addEventListener('change', (e) => {
+    window.__tecidoCorNova = e.target.value === '__nova__';
+    render();
+  });
+
   const salvarCompra = document.getElementById('salvarCompraTecido');
   if (salvarCompra) salvarCompra.addEventListener('click', async () => {
-    const cor = document.getElementById('tecidoCor').value.trim();
+    const corSelecionada = document.getElementById('tecidoCorSelect').value;
+    const cor = corSelecionada === '__nova__'
+      ? document.getElementById('tecidoCorNova').value.trim()
+      : corSelecionada.trim();
     const rolos = Number(document.getElementById('tecidoRolos').value);
     const valor = parseBRNumber(document.getElementById('tecidoValor').value);
     const data = document.getElementById('tecidoData').value || todayStr();
     const historico = document.getElementById('tecidoHistorico')?.checked;
-    if (!cor || !rolos || rolos <= 0 || !valor) { alert('Preencha cor, quantidade de rolos e valor.'); return; }
+    if (!cor || !rolos || rolos <= 0 || !valor) { alert('Selecione ou digite a cor, e preencha quantidade de rolos e valor.'); return; }
     await comprarTecido(cor, rolos, valor, data, !historico);
+    window.__tecidoCorNova = false;
     state.showCompraTecidoForm = false;
     render();
   });
