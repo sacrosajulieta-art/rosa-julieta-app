@@ -1278,7 +1278,7 @@ function renderModoSupervisora(app) {
     await registrarProducao(costureiraId, produtoId, quantidade, data, varianteId || null);
     window.__prodSupTipo = 'producao';
     window.__prodFormProdutoId = null;
-    render();
+    await loadData();
   });
 
   const supFiltroCostureira = document.getElementById('supFiltroCostureira');
@@ -1338,7 +1338,7 @@ function renderModoSupervisora(app) {
     btn.addEventListener('click', async () => {
       if (confirm('Remover esse lançamento? Isso também ajusta o estoque de volta.')) {
         await removeProducao(btn.dataset.removerProducao);
-        render();
+        await loadData();
       }
     });
   });
@@ -2535,7 +2535,7 @@ function attachFinanceiroHandlers(c) {
       if (novaPct !== p.taxaPercentual || novaFixa !== p.taxaFixa) await updatePlataformaTaxa(p.id, novaPct, novaFixa);
     }
     state.showTaxasForm = false;
-    render();
+    await loadData();
   });
 
   const abrirNovaPlataforma = document.getElementById('abrirNovaPlataforma');
@@ -2552,12 +2552,15 @@ function attachFinanceiroHandlers(c) {
     const fixa = parseBRNumber(document.getElementById('novaPlataformaFixa').value);
     await addPlataforma(nome, pct, fixa);
     state.showNovaPlataforma = false;
-    render();
+    await loadData();
   });
 
   document.querySelectorAll('[data-remover-plataforma]').forEach((btn) => {
     btn.addEventListener('click', async () => {
-      if (confirm('Remover essa plataforma da lista de taxas?')) await removePlataforma(btn.dataset.removerPlataforma);
+      if (confirm('Remover essa plataforma da lista de taxas?')) {
+        await removePlataforma(btn.dataset.removerPlataforma);
+        await loadData();
+      }
     });
   });
 
@@ -2586,7 +2589,7 @@ function attachFinanceiroHandlers(c) {
     await removeTxBatch(ids);
     state.selectedTxIds = new Set();
     state.selectMode = false;
-    render();
+    await loadData();
   });
 
   const toggleUpload = document.getElementById('toggleUpload');
@@ -2712,7 +2715,7 @@ function attachFinanceiroHandlers(c) {
     }
 
     state.showUpload = false;
-    render();
+    await loadData();
 
     const qtdVendas = novos.filter((n) => n.tipo === 'entrada').length;
     let resumo = `${qtdVendas} venda(s) importada(s).`;
@@ -2745,7 +2748,8 @@ function attachFinanceiroHandlers(c) {
     if (!valor || !categoria) { alert('Preencha valor e categoria.'); return; }
     const natureza = tipo === 'saida' ? (NATUREZA_POR_CATEGORIA[categoria] || 'variavel') : null;
     await addTx({ tipo, valor, categoria, natureza, descricao, data, recorrente });
-    if (recorrente) { await loadData(); await garantirRecorrentes(); }
+    await loadData();
+    if (recorrente) { await garantirRecorrentes(); await loadData(); }
     state.showTxForm = false;
     window.__txFormTipo = 'saida';
     render();
@@ -2754,6 +2758,7 @@ function attachFinanceiroHandlers(c) {
   document.querySelectorAll('[data-remove-tx]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       await removeTx(btn.dataset.removeTx);
+      await loadData();
     });
   });
 
@@ -2783,7 +2788,8 @@ function attachFinanceiroHandlers(c) {
       if (!valor || !categoria) { alert('Preencha valor e categoria.'); return; }
       const natureza = tipo === 'saida' ? (NATUREZA_POR_CATEGORIA[categoria] || 'variavel') : null;
       await updateTx(id, { tipo, valor, categoria, natureza, descricao, data, recorrente });
-      if (recorrente) { await loadData(); await garantirRecorrentes(); }
+      await loadData();
+      if (recorrente) { await garantirRecorrentes(); await loadData(); }
       state.editingTxId = null;
       window.__editTxTipo = null;
       render();
@@ -2856,7 +2862,7 @@ function attachTecidoHandlers(c) {
     window.__tecidoCorSelecionada = '';
     window.__tecidoCorNovaTexto = '';
     state.showCompraTecidoForm = false;
-    render();
+    await loadData();
   });
 
   document.querySelectorAll('[data-calcular-rolos-peso-mp]').forEach((btn) => {
@@ -2973,18 +2979,21 @@ function attachTecidoHandlers(c) {
       const valor = parseBRNumber(document.getElementById('ordemValor').value);
       if (!cor || !rolos || rolos <= 0) { alert('Selecione a cor e informe a quantidade de rolos.'); return; }
       const ok = await criarOrdemCorte(cor, rolos, valor, data, 'principal', valorCorte);
-      if (ok) { state.showOrdemCorteForm = false; window.__ordemTipo = 'principal'; render(); }
+      if (ok) { state.showOrdemCorteForm = false; window.__ordemTipo = 'principal'; await loadData(); }
     } else {
       const cor = document.getElementById('ordemCorRetalho').value.trim() || 'Retalhos';
       if (!valorCorte || valorCorte <= 0) { alert('Informe o valor pago pelo corte dos retalhos.'); return; }
       const ok = await criarOrdemCorte(cor, 0, 0, data, 'retalho', valorCorte);
-      if (ok) { state.showOrdemCorteForm = false; window.__ordemTipo = 'principal'; render(); }
+      if (ok) { state.showOrdemCorteForm = false; window.__ordemTipo = 'principal'; await loadData(); }
     }
   });
 
   document.querySelectorAll('[data-remover-ordem]').forEach((btn) => {
     btn.addEventListener('click', async () => {
-      if (confirm('Remover essa ordem de corte?')) await removeOrdemCorte(btn.dataset.removerOrdem);
+      if (confirm('Remover essa ordem de corte?')) {
+        await removeOrdemCorte(btn.dataset.removerOrdem);
+        await loadData();
+      }
     });
   });
 
@@ -3006,7 +3015,7 @@ function attachTecidoHandlers(c) {
       if (!itens.length) { alert('Informe pelo menos um modelo e quantidade de peças.'); return; }
       await concluirOrdemCorte(ordemId, itens);
       state.ordemConcluindoId = null;
-      render();
+      await loadData();
     });
   });
 
@@ -3035,7 +3044,7 @@ function attachTecidoHandlers(c) {
     if (!nome || !quantidade || quantidade <= 0 || !valor) { alert('Preencha nome, quantidade e valor.'); return; }
     await comprarInsumo(nome, unidade, quantidade, valor, categoria, data, !historico);
     state.showCompraInsumoForm = false;
-    render();
+    await loadData();
   });
 
   document.querySelectorAll('[data-abrir-baixa]').forEach((btn) => {
@@ -3048,12 +3057,15 @@ function attachTecidoHandlers(c) {
       if (!qtd || qtd <= 0) { alert('Informe a quantidade usada.'); return; }
       await baixarInsumo(id, qtd);
       state.showBaixaInsumoId = null;
-      render();
+      await loadData();
     });
   });
   document.querySelectorAll('[data-remover-insumo]').forEach((btn) => {
     btn.addEventListener('click', async () => {
-      if (confirm('Remover esse insumo?')) await removeInsumo(btn.dataset.removerInsumo);
+      if (confirm('Remover esse insumo?')) {
+        await removeInsumo(btn.dataset.removerInsumo);
+        await loadData();
+      }
     });
   });
 
@@ -3128,14 +3140,14 @@ function attachProducaoHandlers(c) {
       state.showProducaoForm = false;
       window.__prodDetalheTipo = 'producao';
       window.__prodFormProdutoId = null;
-      render();
+      await loadData();
     });
 
     document.querySelectorAll('[data-remover-producao]').forEach((btn) => {
       btn.addEventListener('click', async () => {
         if (confirm('Remover esse lançamento? Isso também ajusta o estoque de volta.')) {
           await removeProducao(btn.dataset.removerProducao);
-          render();
+          await loadData();
         }
       });
     });
@@ -3207,7 +3219,7 @@ function attachProducaoHandlers(c) {
       }
     }
     state.showValoresPecaForm = false;
-    render();
+    await loadData();
   });
 
   const toggleForm = document.getElementById('toggleCostureiraForm');
@@ -3219,7 +3231,7 @@ function attachProducaoHandlers(c) {
     if (!nome) { alert('Informe o nome da costureira.'); return; }
     await addCostureira(nome);
     state.showCostureiraForm = false;
-    render();
+    await loadData();
   });
 
   document.querySelectorAll('[data-abrir-costureira]').forEach((row) => {
@@ -3235,6 +3247,7 @@ function attachProducaoHandlers(c) {
       e.stopPropagation();
       if (confirm('Remover essa costureira? O histórico de produção dela será apagado também.')) {
         await removeCostureira(btn.dataset.removerCostureira);
+        await loadData();
       }
     });
   });
@@ -3273,7 +3286,7 @@ function attachEstoqueHandlers(c) {
     if (!nome) { alert('Informe o nome do produto.'); return; }
     await addProduto({ nome, sku, estoqueAtual, estoqueMinimo, custoUnitario, valorMaoObra });
     state.showProdutoForm = false;
-    render();
+    await loadData();
   });
 
   document.querySelectorAll('[data-abrir-variante]').forEach((btn) => {
@@ -3296,7 +3309,7 @@ function attachEstoqueHandlers(c) {
       if (!nome) { alert('Informe o nome da cor.'); return; }
       await addVariante(produtoId, nome, sku);
       state.showVarianteForm = { ...state.showVarianteForm, [produtoId]: false };
-      render();
+      await loadData();
     });
   });
   document.querySelectorAll('[data-var-step]').forEach((btn) => {
@@ -3304,11 +3317,15 @@ function attachEstoqueHandlers(c) {
       const delta = Number(btn.dataset.varStep);
       const atual = Number(btn.dataset.atual);
       await updateVarianteEstoque(btn.dataset.variante, atual + delta);
+      await loadData();
     });
   });
   document.querySelectorAll('[data-remover-variante]').forEach((btn) => {
     btn.addEventListener('click', async () => {
-      if (confirm('Remover essa cor? O estoque dela some junto.')) await removeVariante(btn.dataset.removerVariante);
+      if (confirm('Remover essa cor? O estoque dela some junto.')) {
+        await removeVariante(btn.dataset.removerVariante);
+        await loadData();
+      }
     });
   });
 
@@ -3318,12 +3335,16 @@ function attachEstoqueHandlers(c) {
       const atual = Number(btn.dataset.atual);
       const novo = Math.max(0, atual + delta);
       await updateProdutoEstoque(btn.dataset.produto, novo);
+      await loadData();
     });
   });
 
   document.querySelectorAll('[data-remove-produto]').forEach((btn) => {
     btn.addEventListener('click', async () => {
-      if (confirm('Remover este produto?')) await removeProduto(btn.dataset.removeProduto);
+      if (confirm('Remover este produto?')) {
+        await removeProduto(btn.dataset.removeProduto);
+        await loadData();
+      }
     });
   });
 
@@ -3345,7 +3366,7 @@ function attachEstoqueHandlers(c) {
       if (!nome) { alert('Informe o nome do produto.'); return; }
       await updateProduto(id, { nome, sku, estoqueAtual, estoqueMinimo, custoUnitario, valorMaoObra });
       state.editingProdutoId = null;
-      render();
+      await loadData();
     });
   });
 
@@ -3371,7 +3392,7 @@ function attachEstoqueHandlers(c) {
         descricao: `${produto.nome} — ${qtd} un recebidas`, data: todayStr(),
       });
       state.entradaOpenId = null;
-      render();
+      await loadData();
     });
   });
 }
