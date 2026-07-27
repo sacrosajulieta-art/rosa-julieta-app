@@ -256,6 +256,8 @@ const state = {
   showBaixaInsumoId: null,
   distribuicoes: [],
   distribuindoOrdemId: null,
+  editingMateriaPrimaId: null,
+  editingOrdemCorteId: null,
 };
 
 // ==================== DATA LAYER ====================
@@ -366,6 +368,10 @@ async function comprarTecido(cor, quantidadeRolos, valorTotal, data, lancarFinan
     });
   }
 }
+async function updateMateriaPrima(id, cor, rolosDisponiveis, custoMedioRolo) {
+  const { error } = await sb.from('materia_prima').update({ cor, rolos_disponiveis: rolosDisponiveis, custo_medio_rolo: custoMedioRolo }).eq('id', id);
+  if (error) alert('Erro ao atualizar matéria-prima: ' + error.message);
+}
 async function criarOrdemCorte(cor, quantidadeRolos, valorTecido, dataEnvio, tipo, valorCorte) {
   if (tipo === 'principal') {
     const materia = state.materiaPrima.find((m) => m.cor.trim().toLowerCase() === cor.trim().toLowerCase());
@@ -397,6 +403,12 @@ async function concluirOrdemCorte(ordemId, itens) {
 async function removeOrdemCorte(id) {
   const { error } = await sb.from('ordens_corte').delete().eq('id', id);
   if (error) alert('Erro ao remover ordem: ' + error.message);
+}
+async function updateOrdemCorte(id, { cor, quantidadeRolos, valorTecido, valorCorte, dataEnvio }) {
+  const { error } = await sb.from('ordens_corte').update({
+    cor, quantidade_rolos: quantidadeRolos, valor_tecido: valorTecido, valor_corte: valorCorte, data_envio: dataEnvio,
+  }).eq('id', id);
+  if (error) alert('Erro ao atualizar ordem de corte: ' + error.message);
 }
 
 // ---- Insumos (aviamentos, embalagem, etiquetas...) ----
@@ -1392,13 +1404,31 @@ function renderTecido(c) {
 
     ${state.materiaPrima.length === 0 ? `<div class="empty-state">Nenhum tecido cadastrado ainda.</div>` : `
       <div class="tx-list" style="margin-bottom:28px">
-        ${state.materiaPrima.map((m) => `
+        ${state.materiaPrima.map((m) => {
+          if (state.editingMateriaPrimaId === m.id) {
+            return `
+              <div class="form-card">
+                <input type="text" id="editMpCor-${m.id}" placeholder="Cor" value="${esc(m.cor)}" />
+                <div class="form-row">
+                  <input type="text" id="editMpRolos-${m.id}" placeholder="Rolos disponíveis" value="${m.rolosDisponiveis}" />
+                  <input type="text" id="editMpCusto-${m.id}" placeholder="Custo médio por rolo (R$)" value="${m.custoMedioRolo.toFixed(2).replace('.', ',')}" />
+                </div>
+                <div class="form-row">
+                  <button class="confirm-btn" data-salvar-edit-mp="${m.id}">Salvar</button>
+                  <button class="toggle-btn" data-cancelar-edit-mp="${m.id}">Cancelar</button>
+                </div>
+              </div>
+            `;
+          }
+          return `
           <div class="tx-row">
             <div class="tx-dot" style="background:${m.rolosDisponiveis > 0 ? 'var(--teal)' : 'var(--red)'}"></div>
             <div style="flex:1"><div class="tx-categoria">${esc(m.cor)}</div><div class="tx-desc">${fmt(m.custoMedioRolo)}/rolo (média)</div></div>
-            <div class="tx-valor">${m.rolosDisponiveis} rolo(s)</div>
+            <div class="tx-valor" style="margin-right:6px">${m.rolosDisponiveis} rolo(s)</div>
+            <button class="trash-btn" data-editar-mp="${m.id}">✏️</button>
           </div>
-        `).join('')}
+        `;
+        }).join('')}
       </div>
     `}
 
@@ -1435,14 +1465,37 @@ function renderTecido(c) {
 
     ${aguardando.length === 0 ? '' : `
       <div class="produto-list" style="margin-bottom:20px">
-        ${aguardando.map((o) => `
+        ${aguardando.map((o) => {
+          if (state.editingOrdemCorteId === o.id) {
+            return `
+              <div class="form-card">
+                <input type="text" id="editOrdemCor-${o.id}" placeholder="Cor" value="${esc(o.cor)}" />
+                <div class="form-row">
+                  <input type="text" id="editOrdemRolos-${o.id}" placeholder="Rolos" value="${o.quantidadeRolos}" />
+                  <input type="text" id="editOrdemValorTecido-${o.id}" placeholder="Valor do tecido (R$)" value="${o.valorTecido.toFixed(2).replace('.', ',')}" />
+                </div>
+                <div class="form-row">
+                  <input type="text" id="editOrdemValorCorte-${o.id}" placeholder="Valor do corte (R$)" value="${o.valorCorte.toFixed(2).replace('.', ',')}" />
+                  <input type="date" id="editOrdemData-${o.id}" value="${o.dataEnvio}" />
+                </div>
+                <div class="form-row">
+                  <button class="confirm-btn" data-salvar-edit-ordem="${o.id}">Salvar</button>
+                  <button class="toggle-btn" data-cancelar-edit-ordem="${o.id}">Cancelar</button>
+                </div>
+              </div>
+            `;
+          }
+          return `
           <div class="produto-card" style="border-color:var(--amber)55">
             <div class="produto-header">
               <div>
                 <div class="produto-nome">${o.tipo === 'retalho' ? '♻️ ' : ''}${esc(o.cor)}${o.quantidadeRolos > 0 ? ` — ${o.quantidadeRolos} rolo(s)` : ''}</div>
                 <div class="produto-sku">Enviado em ${o.dataEnvio} · ${o.valorTecido > 0 ? fmt(o.valorTecido) + ' tecido' : ''}${o.valorCorte > 0 ? `${o.valorTecido > 0 ? ' + ' : ''}${fmt(o.valorCorte)} corte` : ''} · 🟡 Aguardando resultado</div>
               </div>
-              <button class="trash-btn" data-remover-ordem="${o.id}">🗑</button>
+              <div style="display:flex;gap:2px">
+                <button class="trash-btn" data-editar-ordem="${o.id}">✏️</button>
+                <button class="trash-btn" data-remover-ordem="${o.id}">🗑</button>
+              </div>
             </div>
             ${state.ordemConcluindoId === o.id ? `
               <div class="entrada-box">
@@ -1463,7 +1516,8 @@ function renderTecido(c) {
               </div>
             ` : `<button class="entrada-btn" data-abrir-conclusao="${o.id}">📋 Registrar resultado do corte</button>`}
           </div>
-        `).join('')}
+        `;
+        }).join('')}
       </div>
     `}
 
@@ -1471,6 +1525,25 @@ function renderTecido(c) {
     ${concluidas.length === 0 ? `<div class="empty-state">Nenhum corte concluído ainda.</div>` : `
       <div class="produto-list">
         ${concluidas.map((o) => {
+          if (state.editingOrdemCorteId === o.id) {
+            return `
+              <div class="form-card">
+                <input type="text" id="editOrdemCor-${o.id}" placeholder="Cor" value="${esc(o.cor)}" />
+                <div class="form-row">
+                  <input type="text" id="editOrdemRolos-${o.id}" placeholder="Rolos" value="${o.quantidadeRolos}" />
+                  <input type="text" id="editOrdemValorTecido-${o.id}" placeholder="Valor do tecido (R$)" value="${o.valorTecido.toFixed(2).replace('.', ',')}" />
+                </div>
+                <div class="form-row">
+                  <input type="text" id="editOrdemValorCorte-${o.id}" placeholder="Valor do corte (R$)" value="${o.valorCorte.toFixed(2).replace('.', ',')}" />
+                  <input type="date" id="editOrdemData-${o.id}" value="${o.dataEnvio}" />
+                </div>
+                <div class="form-row">
+                  <button class="confirm-btn" data-salvar-edit-ordem="${o.id}">Salvar</button>
+                  <button class="toggle-btn" data-cancelar-edit-ordem="${o.id}">Cancelar</button>
+                </div>
+              </div>
+            `;
+          }
           const itens = state.ordensCorteItens.filter((i) => i.ordemId === o.id);
           const totalPecas = itens.reduce((a, i) => a + i.quantidade, 0);
           const custoTotal = o.valorTecido + o.valorCorte;
@@ -1491,7 +1564,10 @@ function renderTecido(c) {
                   <div class="produto-nome">${o.tipo === 'retalho' ? '♻️ ' : ''}${esc(o.cor)}${o.quantidadeRolos > 0 ? ` — ${o.quantidadeRolos} rolo(s)` : ''}</div>
                   <div class="produto-sku">${o.dataEnvio} → ${o.dataConclusao} · ${o.valorTecido > 0 ? fmt(o.valorTecido) + ' tecido' : ''}${o.valorCorte > 0 ? `${o.valorTecido > 0 ? ' + ' : ''}${fmt(o.valorCorte)} corte` : ''}</div>
                 </div>
-                <button class="trash-btn" data-remover-ordem="${o.id}">🗑</button>
+                <div style="display:flex;gap:2px">
+                  <button class="trash-btn" data-editar-ordem="${o.id}">✏️</button>
+                  <button class="trash-btn" data-remover-ordem="${o.id}">🗑</button>
+                </div>
               </div>
               <div class="prod-breakdown">
                 ${itens.map((i) => {
@@ -2248,6 +2324,8 @@ function attachHandlers(c) {
       state.showCompraInsumoForm = false;
       state.showBaixaInsumoId = null;
       state.distribuindoOrdemId = null;
+      state.editingMateriaPrimaId = null;
+      state.editingOrdemCorteId = null;
       render();
     });
   });
@@ -2622,6 +2700,46 @@ function attachTecidoHandlers(c) {
     await comprarTecido(cor, rolos, valor, data, !historico);
     state.showCompraTecidoForm = false;
     render();
+  });
+
+  document.querySelectorAll('[data-editar-mp]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.editingMateriaPrimaId = btn.dataset.editarMp; render(); });
+  });
+  document.querySelectorAll('[data-cancelar-edit-mp]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.editingMateriaPrimaId = null; render(); });
+  });
+  document.querySelectorAll('[data-salvar-edit-mp]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.salvarEditMp;
+      const cor = document.getElementById(`editMpCor-${id}`).value.trim();
+      const rolos = Number(document.getElementById(`editMpRolos-${id}`).value) || 0;
+      const custo = parseBRNumber(document.getElementById(`editMpCusto-${id}`).value);
+      if (!cor) { alert('Informe a cor.'); return; }
+      await updateMateriaPrima(id, cor, rolos, custo);
+      state.editingMateriaPrimaId = null;
+      await loadData();
+    });
+  });
+
+  document.querySelectorAll('[data-editar-ordem]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.editingOrdemCorteId = btn.dataset.editarOrdem; render(); });
+  });
+  document.querySelectorAll('[data-cancelar-edit-ordem]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.editingOrdemCorteId = null; render(); });
+  });
+  document.querySelectorAll('[data-salvar-edit-ordem]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.salvarEditOrdem;
+      const cor = document.getElementById(`editOrdemCor-${id}`).value.trim();
+      const quantidadeRolos = Number(document.getElementById(`editOrdemRolos-${id}`).value) || 0;
+      const valorTecido = parseBRNumber(document.getElementById(`editOrdemValorTecido-${id}`).value);
+      const valorCorte = parseBRNumber(document.getElementById(`editOrdemValorCorte-${id}`).value);
+      const dataEnvio = document.getElementById(`editOrdemData-${id}`).value;
+      if (!cor) { alert('Informe a cor.'); return; }
+      await updateOrdemCorte(id, { cor, quantidadeRolos, valorTecido, valorCorte, dataEnvio });
+      state.editingOrdemCorteId = null;
+      await loadData();
+    });
   });
 
   const toggleOrdem = document.getElementById('toggleOrdemCorte');
