@@ -259,6 +259,7 @@ const state = {
   editingMateriaPrimaId: null,
   editingOrdemCorteId: null,
   showTabOrderForm: false,
+  showTotalDefeitos: false,
 };
 
 // ==================== DATA LAYER ====================
@@ -672,7 +673,7 @@ async function registrarProducao(costureiraId, produtoId, quantidade, data, vari
     const produto = state.produtos.find((p) => p.id === produtoId);
     if (produto) await updateProdutoEstoque(produtoId, produto.estoqueAtual + quantidade);
   }
-  if (quantidade > 0) await baixarDistribuicoesFIFO(costureiraId, produtoId, varianteId, quantidade);
+  if (quantidade !== 0) await baixarDistribuicoesFIFO(costureiraId, produtoId, varianteId, Math.abs(quantidade));
 }
 async function marcarProducaoPaga(ids) {
   const { error } = await sb.from('producoes').update({ pago: true }).in('id', ids);
@@ -830,7 +831,62 @@ function renderProducaoDono(c) {
     porCostureira[p.costureiraId].porProduto[nomeProduto].valor += valorItem;
   });
 
+  // defeitos da loja toda: total geral + por costureira + por modelo
+  const todosDefeitos = state.producoes.filter((p) => p.quantidade < 0);
+  const totalDefeitosLoja = todosDefeitos.reduce((a, p) => a + Math.abs(p.quantidade), 0);
+  const defeitosPorCostureira = {};
+  const defeitosPorProduto = {};
+  todosDefeitos.forEach((p) => {
+    const costureira = state.costureiras.find((cc) => cc.id === p.costureiraId);
+    const nomeCost = costureira?.nome || 'Costureira removida';
+    defeitosPorCostureira[nomeCost] = (defeitosPorCostureira[nomeCost] || 0) + Math.abs(p.quantidade);
+    const produto = state.produtos.find((x) => x.id === p.produtoId);
+    const nomeProd = produto?.nome || 'Produto removido';
+    defeitosPorProduto[nomeProd] = (defeitosPorProduto[nomeProd] || 0) + Math.abs(p.quantidade);
+  });
+  const rankingDefeitosCostureira = Object.entries(defeitosPorCostureira).sort((a, b) => b[1] - a[1]);
+  const rankingDefeitosProduto = Object.entries(defeitosPorProduto).sort((a, b) => b[1] - a[1]);
+
   return `
+    <div class="section-title-wrap">
+      <div><div class="section-title">Defeitos da loja</div><div class="section-subtitle">Total de peças perdidas por defeito, todas as costureiras</div></div>
+      <button class="icon-btn-ghost" id="toggleTotalDefeitos">${state.showTotalDefeitos ? '✕ Fechar' : `⚠️ Ver total (${totalDefeitosLoja})`}</button>
+    </div>
+
+    ${state.showTotalDefeitos ? `
+      <div class="form-card">
+        <div class="stats-grid" style="margin-bottom:16px">
+          <div class="stat-card">
+            <div class="stat-icon" style="background:rgba(255,71,87,0.1)">⚠️</div>
+            <div class="stat-label">Total de defeitos</div>
+            <div class="stat-value" style="color:var(--red)">${totalDefeitosLoja}</div>
+          </div>
+        </div>
+        ${totalDefeitosLoja === 0 ? `<div class="empty-state">Nenhum defeito registrado ainda 🎉</div>` : `
+          <div class="section-title" style="margin-bottom:2px">Por costureira</div>
+          <div class="tx-list" style="margin-bottom:20px">
+            ${rankingDefeitosCostureira.map(([nome, qtd]) => `
+              <div class="tx-row">
+                <div class="tx-dot" style="background:var(--red)"></div>
+                <div style="flex:1"><div class="tx-categoria">${esc(nome)}</div></div>
+                <div class="tx-valor" style="color:var(--red)">${qtd} peças</div>
+              </div>
+            `).join('')}
+          </div>
+          <div class="section-title" style="margin-bottom:2px">Por modelo</div>
+          <div class="tx-list">
+            ${rankingDefeitosProduto.map(([nome, qtd]) => `
+              <div class="tx-row">
+                <div class="tx-dot" style="background:var(--red)"></div>
+                <div style="flex:1"><div class="tx-categoria">${esc(nome)}</div></div>
+                <div class="tx-valor" style="color:var(--red)">${qtd} peças</div>
+              </div>
+            `).join('')}
+          </div>
+        `}
+      </div>
+    ` : ''}
+
     <div class="section-title-wrap">
       <div><div class="section-title">Valores por peça (SKU)</div><div class="section-subtitle">Quanto você paga por peça de cada modelo</div></div>
       <button class="icon-btn-ghost" id="toggleValoresPeca">${state.showValoresPecaForm ? '✕ Fechar' : '💲 Ver/editar'}</button>
@@ -964,6 +1020,17 @@ function renderCostureiraDetalhe(costureiraId) {
   });
   const emMaosLista = Object.entries(emMaos).sort((a, b) => b[1] - a[1]);
 
+  // defeitos: total de peças perdidas por defeito, dessa costureira
+  const defeitos = entradas.filter((p) => p.quantidade < 0);
+  const totalDefeitosQtd = defeitos.reduce((a, p) => a + Math.abs(p.quantidade), 0);
+  const porProdutoDefeito = {};
+  defeitos.forEach((p) => {
+    const produto = state.produtos.find((x) => x.id === p.produtoId);
+    const nome = produto?.nome || 'Produto removido';
+    porProdutoDefeito[nome] = (porProdutoDefeito[nome] || 0) + Math.abs(p.quantidade);
+  });
+  const resumoDefeitos = Object.entries(porProdutoDefeito).sort((a, b) => b[1] - a[1]);
+
   const tipo = window.__prodDetalheTipo || 'producao';
 
   return `
@@ -1004,7 +1071,27 @@ function renderCostureiraDetalhe(costureiraId) {
         <div class="stat-label">Peças pendentes</div>
         <div class="stat-value">${totalPendenteQtd}</div>
       </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:rgba(255,71,87,0.1)">⚠️</div>
+        <div class="stat-label">Defeitos (total)</div>
+        <div class="stat-value" style="color:var(--red)">${totalDefeitosQtd}</div>
+      </div>
     </div>
+
+    ${resumoDefeitos.length > 0 ? `
+      <div class="section-title-wrap">
+        <div><div class="section-title">Defeitos por modelo</div><div class="section-subtitle">Histórico completo dessa costureira</div></div>
+      </div>
+      <div class="tx-list" style="margin-bottom:28px">
+        ${resumoDefeitos.map(([nome, qtd]) => `
+          <div class="tx-row">
+            <div class="tx-dot" style="background:var(--red)"></div>
+            <div style="flex:1"><div class="tx-categoria">${esc(nome)}</div></div>
+            <div class="tx-valor" style="color:var(--red)">${qtd} peças</div>
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
 
     <div class="section-title-wrap">
       <div><div class="section-title">Resumo da semana (pendente)</div><div class="section-subtitle">Total por modelo, pronto pro fechamento de sexta</div></div>
@@ -2454,6 +2541,7 @@ function attachHandlers(c) {
       state.showProducaoForm = false;
       state.costureiraDetalheId = null;
       state.showValoresPecaForm = false;
+      state.showTotalDefeitos = false;
       state.editingProducaoId = null;
       state.showCompraTecidoForm = false;
       state.showOrdemCorteForm = false;
@@ -3236,6 +3324,9 @@ function attachProducaoHandlers(c) {
   }
 
   // ---- Tela principal de Produção ----
+  const toggleTotalDefeitos = document.getElementById('toggleTotalDefeitos');
+  if (toggleTotalDefeitos) toggleTotalDefeitos.addEventListener('click', () => { state.showTotalDefeitos = !state.showTotalDefeitos; render(); });
+
   const toggleValoresPeca = document.getElementById('toggleValoresPeca');
   if (toggleValoresPeca) toggleValoresPeca.addEventListener('click', () => { state.showValoresPecaForm = !state.showValoresPecaForm; render(); });
 
