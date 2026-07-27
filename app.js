@@ -294,7 +294,7 @@ async function loadData() {
   state.producoes = (producoes || []).map((p) => ({ id: p.id, costureiraId: p.costureira_id, produtoId: p.produto_id, quantidade: p.quantidade, data: p.data, pago: p.pago, varianteId: p.variante_id || null }));
   state.variantes = (variantes || []).map((v) => ({ id: v.id, produtoId: v.produto_id, nome: v.nome, estoqueAtual: v.estoque_atual, skuVariante: v.sku_variante }));
   state.materiaPrima = (materiaPrima || []).map((m) => ({ id: m.id, cor: m.cor, rolosDisponiveis: m.rolos_disponiveis, custoMedioRolo: Number(m.custo_medio_rolo || 0) }));
-  state.ordensCorte = (ordensCorte || []).map((o) => ({ id: o.id, cor: o.cor, quantidadeRolos: o.quantidade_rolos, valorTecido: Number(o.valor_tecido), dataEnvio: o.data_envio, status: o.status, dataConclusao: o.data_conclusao, tipo: o.tipo || 'principal', valorCorte: Number(o.valor_corte || 0) }));
+  state.ordensCorte = (ordensCorte || []).map((o) => ({ id: o.id, cor: o.cor, quantidadeRolos: o.quantidade_rolos, valorTecido: Number(o.valor_tecido), dataEnvio: o.data_envio, status: o.status, dataConclusao: o.data_conclusao, tipo: o.tipo || 'principal', valorCorte: Number(o.valor_corte || 0), transacaoCorteId: o.transacao_corte_id || null }));
   state.ordensCorteItens = (ordensCorteItens || []).map((i) => ({ id: i.id, ordemId: i.ordem_id, produtoId: i.produto_id, quantidade: i.quantidade, varianteId: i.variante_id || null }));
   state.insumos = (insumos || []).map((i) => ({ id: i.id, nome: i.nome, unidade: i.unidade, quantidadeDisponivel: Number(i.quantidade_disponivel), custoMedioUnitario: Number(i.custo_medio_unitario) }));
   state.distribuicoes = (distribuicoes || []).map((d) => ({ id: d.id, ordemItemId: d.ordem_item_id, produtoId: d.produto_id, varianteId: d.variante_id || null, costureiraId: d.costureira_id, quantidadeDistribuida: d.quantidade_distribuida, quantidadeDevolvida: d.quantidade_devolvida, data: d.data }));
@@ -310,10 +310,11 @@ function mapProdutoFromDb(row) {
 }
 
 async function addTx(tx) {
-  const { error } = await sb.from('transacoes').insert({
+  const { data, error } = await sb.from('transacoes').insert({
     tipo: tx.tipo, valor: tx.valor, categoria: tx.categoria, natureza: tx.natureza || null, descricao: tx.descricao || null, data: tx.data, recorrente: !!tx.recorrente,
-  });
-  if (error) alert('Erro ao salvar: ' + error.message);
+  }).select().single();
+  if (error) { alert('Erro ao salvar: ' + error.message); return null; }
+  return data;
 }
 async function addTxBatch(rows) {
   const { error } = await sb.from('transacoes').insert(rows.map((tx) => ({
@@ -385,15 +386,16 @@ async function criarOrdemCorte(cor, quantidadeRolos, valorTecido, dataEnvio, tip
     }
     if (materia) await sb.from('materia_prima').update({ rolos_disponiveis: Math.max(0, materia.rolosDisponiveis - quantidadeRolos) }).eq('id', materia.id);
   }
-  const { error } = await sb.from('ordens_corte').insert({
+  const { data: ordemCriada, error } = await sb.from('ordens_corte').insert({
     cor, quantidade_rolos: quantidadeRolos, valor_tecido: valorTecido, data_envio: dataEnvio, status: 'aguardando', tipo, valor_corte: valorCorte || 0,
-  });
+  }).select().single();
   if (error) { alert('Erro ao criar ordem de corte: ' + error.message); return false; }
   if (valorCorte > 0) {
-    await addTx({
+    const tx = await addTx({
       tipo: 'saida', valor: valorCorte, categoria: 'Corte e costura (terceirizado)', natureza: 'variavel',
       descricao: `${tipo === 'retalho' ? 'Corte de retalhos' : 'Corte'} — ${cor}`, data: dataEnvio,
     });
+    if (tx) await sb.from('ordens_corte').update({ transacao_corte_id: tx.id }).eq('id', ordemCriada.id);
   }
   return true;
 }
@@ -406,12 +408,30 @@ async function concluirOrdemCorte(ordemId, itens) {
   if (error) alert('Erro ao concluir ordem: ' + error.message);
 }
 async function removeOrdemCorte(id) {
+  const ordem = state.ordensCorte.find((o) => o.id === id);
+  if (ordem && ordem.transacaoCorteId) await removeTx(ordem.transacaoCorteId);
   const { error } = await sb.from('ordens_corte').delete().eq('id', id);
   if (error) alert('Erro ao remover ordem: ' + error.message);
 }
 async function updateOrdemCorte(id, { cor, quantidadeRolos, valorTecido, valorCorte, dataEnvio }) {
+  const ordem = state.ordensCorte.find((o) => o.id === id);
+  let transacaoCorteId = ordem ? ordem.transacaoCorteId : null;
+  const descricao = `${ordem && ordem.tipo === 'retalho' ? 'Corte de retalhos' : 'Corte'} — ${cor}`;
+
+  if (transacaoCorteId) {
+    if (valorCorte > 0) {
+      await updateTx(transacaoCorteId, { tipo: 'saida', valor: valorCorte, categoria: 'Corte e costura (terceirizado)', natureza: 'variavel', descricao, data: dataEnvio, recorrente: false });
+    } else {
+      await removeTx(transacaoCorteId);
+      transacaoCorteId = null;
+    }
+  } else if (valorCorte > 0) {
+    const tx = await addTx({ tipo: 'saida', valor: valorCorte, categoria: 'Corte e costura (terceirizado)', natureza: 'variavel', descricao, data: dataEnvio });
+    if (tx) transacaoCorteId = tx.id;
+  }
+
   const { error } = await sb.from('ordens_corte').update({
-    cor, quantidade_rolos: quantidadeRolos, valor_tecido: valorTecido, valor_corte: valorCorte, data_envio: dataEnvio,
+    cor, quantidade_rolos: quantidadeRolos, valor_tecido: valorTecido, valor_corte: valorCorte, data_envio: dataEnvio, transacao_corte_id: transacaoCorteId,
   }).eq('id', id);
   if (error) alert('Erro ao atualizar ordem de corte: ' + error.message);
 }
