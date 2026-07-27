@@ -2183,12 +2183,13 @@ function renderEstoque(c) {
         <input type="text" id="pMaoObra" placeholder="Valor de mão de obra por peça (ex: 5,00)" />
 
         <div class="form-hint">🎨 Esse produto tem cores? Cadastre já aqui (opcional). Se preencher, o estoque de cada cor começa zerado — o "Estoque atual" acima é ignorado e você ajusta cor por cor depois de salvar.</div>
-        ${[0, 1, 2, 3, 4].map((i) => `
+        ${Array.from({ length: window.__numCoresNovoProduto || 5 }, (_, i) => `
           <div class="form-row">
-            <input type="text" id="pCorNome-${i}" placeholder="Nome da cor" />
-            <input type="text" id="pCorSku-${i}" placeholder="SKU da cor (opcional)" />
+            <input type="text" id="pCorNome-${i}" placeholder="Nome da cor" value="${esc(window.__coresNovoProdutoValores?.[i]?.nome || '')}" />
+            <input type="text" id="pCorSku-${i}" placeholder="SKU da cor (opcional)" value="${esc(window.__coresNovoProdutoValores?.[i]?.sku || '')}" />
           </div>
         `).join('')}
+        <button class="entrada-btn" type="button" id="adicionarLinhaCor">＋ Mais uma cor</button>
 
         <button class="confirm-btn" id="salvarProduto">Salvar produto</button>
       </div>
@@ -3280,10 +3281,33 @@ function attachProducaoHandlers(c) {
 
 function attachEstoqueHandlers(c) {
   const toggleForm = document.getElementById('toggleProdutoForm');
-  if (toggleForm) toggleForm.addEventListener('click', () => { state.showProdutoForm = !state.showProdutoForm; render(); });
+  if (toggleForm) toggleForm.addEventListener('click', () => {
+    state.showProdutoForm = !state.showProdutoForm;
+    window.__numCoresNovoProduto = 5;
+    window.__coresNovoProdutoValores = [];
+    render();
+  });
 
   const toggleParados = document.getElementById('toggleProdutosParados');
   if (toggleParados) toggleParados.addEventListener('click', () => { state.showProdutosParados = !state.showProdutosParados; render(); });
+
+  function capturarCoresDigitadas() {
+    const valores = [];
+    for (let i = 0; i < (window.__numCoresNovoProduto || 5); i++) {
+      valores.push({
+        nome: document.getElementById(`pCorNome-${i}`)?.value || '',
+        sku: document.getElementById(`pCorSku-${i}`)?.value || '',
+      });
+    }
+    return valores;
+  }
+
+  const adicionarLinhaCor = document.getElementById('adicionarLinhaCor');
+  if (adicionarLinhaCor) adicionarLinhaCor.addEventListener('click', () => {
+    window.__coresNovoProdutoValores = capturarCoresDigitadas();
+    window.__numCoresNovoProduto = (window.__numCoresNovoProduto || 5) + 5;
+    render();
+  });
 
   const salvarProduto = document.getElementById('salvarProduto');
   if (salvarProduto) salvarProduto.addEventListener('click', async () => {
@@ -3296,7 +3320,7 @@ function attachEstoqueHandlers(c) {
     if (!nome) { alert('Informe o nome do produto.'); return; }
 
     const cores = [];
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < (window.__numCoresNovoProduto || 5); i++) {
       const corNome = document.getElementById(`pCorNome-${i}`)?.value.trim();
       const corSku = document.getElementById(`pCorSku-${i}`)?.value.trim();
       if (corNome) cores.push({ nome: corNome, sku: corSku });
@@ -3307,6 +3331,8 @@ function attachEstoqueHandlers(c) {
       for (const cor of cores) await addVariante(produtoCriado.id, cor.nome, cor.sku);
     }
     state.showProdutoForm = false;
+    window.__numCoresNovoProduto = 5;
+    window.__coresNovoProdutoValores = [];
     await loadData();
   });
 
