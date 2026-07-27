@@ -373,6 +373,10 @@ async function updateMateriaPrima(id, cor, rolosDisponiveis, custoMedioRolo) {
   const { error } = await sb.from('materia_prima').update({ cor, rolos_disponiveis: rolosDisponiveis, custo_medio_rolo: custoMedioRolo }).eq('id', id);
   if (error) alert('Erro ao atualizar matéria-prima: ' + error.message);
 }
+async function removeMateriaPrima(id) {
+  const { error } = await sb.from('materia_prima').delete().eq('id', id);
+  if (error) alert('Erro ao remover matéria-prima: ' + error.message);
+}
 async function criarOrdemCorte(cor, quantidadeRolos, valorTecido, dataEnvio, tipo, valorCorte) {
   if (tipo === 'principal') {
     const materia = state.materiaPrima.find((m) => m.cor.trim().toLowerCase() === cor.trim().toLowerCase());
@@ -1424,11 +1428,12 @@ function renderMateriais(c) {
                 </div>
                 <button class="entrada-btn" type="button" data-calcular-rolos-peso-mp="${m.id}">🧮 Calcular rolos</button>
 
+                <input type="text" id="editMpRolos-${m.id}" placeholder="Rolos disponíveis" value="${m.rolosDisponiveis}" />
+                <div class="form-hint">Preencha o valor TOTAL pago por esses rolos — o custo médio por rolo é calculado sozinho.</div>
                 <div class="form-row">
-                  <input type="text" id="editMpRolos-${m.id}" placeholder="Rolos disponíveis" value="${m.rolosDisponiveis}" />
+                  <input type="text" id="editMpValorTotal-${m.id}" placeholder="Valor total pago (R$)" inputmode="decimal" />
                   <input type="text" id="editMpCusto-${m.id}" placeholder="Custo médio por rolo (R$)" value="${m.custoMedioRolo.toFixed(2).replace('.', ',')}" />
                 </div>
-                <div class="form-hint">Se souber o valor TOTAL pago por esses rolos, dá pra dividir você mesma (valor total ÷ quantidade de rolos) e colocar o resultado no campo "Custo médio por rolo" acima.</div>
                 <div class="form-row">
                   <button class="confirm-btn" data-salvar-edit-mp="${m.id}">Salvar</button>
                   <button class="toggle-btn" data-cancelar-edit-mp="${m.id}">Cancelar</button>
@@ -1442,6 +1447,7 @@ function renderMateriais(c) {
             <div style="flex:1"><div class="tx-categoria">${esc(m.cor)}</div><div class="tx-desc">${fmt(m.custoMedioRolo)}/rolo (média)</div></div>
             <div class="tx-valor" style="margin-right:6px">${m.rolosDisponiveis} rolo(s)</div>
             <button class="trash-btn" data-editar-mp="${m.id}">✏️</button>
+            <button class="trash-btn" data-remover-mp="${m.id}">🗑</button>
           </div>
         `;
         }).join('')}
@@ -2832,6 +2838,32 @@ function attachTecidoHandlers(c) {
       if (!pesoTotal || pesoTotal <= 0) { alert('Informe o peso total, em kg.'); return; }
       const rolosEstimados = Math.round(pesoTotal / pesoRolo);
       document.getElementById(`editMpRolos-${id}`).value = rolosEstimados;
+    });
+  });
+
+  // custo médio por rolo = valor total ÷ quantidade de rolos, recalculado ao digitar
+  if (state.editingMateriaPrimaId) {
+    const id = state.editingMateriaPrimaId;
+    const valorInput = document.getElementById(`editMpValorTotal-${id}`);
+    const rolosInput = document.getElementById(`editMpRolos-${id}`);
+    const custoInput = document.getElementById(`editMpCusto-${id}`);
+    if (valorInput && rolosInput && custoInput) {
+      const recalcularCustoMp = () => {
+        const valor = parseBRNumber(valorInput.value);
+        const rolos = Number(rolosInput.value) || 0;
+        if (valor > 0 && rolos > 0) custoInput.value = (valor / rolos).toFixed(2).replace('.', ',');
+      };
+      valorInput.addEventListener('input', recalcularCustoMp);
+      rolosInput.addEventListener('input', recalcularCustoMp);
+    }
+  }
+
+  document.querySelectorAll('[data-remover-mp]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (confirm('Remover esse tecido do cadastro de matéria-prima? Cortes já registrados com ele não são afetados.')) {
+        await removeMateriaPrima(btn.dataset.removerMp);
+        await loadData();
+      }
     });
   });
 
