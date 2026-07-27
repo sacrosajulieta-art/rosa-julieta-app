@@ -1390,10 +1390,19 @@ function renderMateriais(c) {
     ${state.showCompraTecidoForm ? `
       <div class="form-card">
         <input type="text" id="tecidoCor" placeholder="Cor do tecido (ex: Preto)" />
+
+        <div class="form-hint">🧮 Sabe só o peso total comprado? Calcule a quantidade de rolos automaticamente (peso médio ajustável, cada rolo costuma pesar entre 19,5kg e 20kg).</div>
+        <div class="form-row">
+          <input type="text" id="tecidoPesoTotal" placeholder="Peso total comprado (kg)" inputmode="decimal" />
+          <input type="text" id="tecidoPesoRolo" placeholder="Peso médio por rolo (kg)" value="19,75" inputmode="decimal" />
+        </div>
+        <button class="entrada-btn" type="button" id="calcularRolosPeso">🧮 Calcular quantidade de rolos</button>
+
         <div class="form-row">
           <input type="text" id="tecidoRolos" placeholder="Quantidade de rolos" inputmode="numeric" />
           <input type="text" id="tecidoValor" placeholder="Valor total pago (R$)" />
         </div>
+        <div class="form-hint" id="tecidoPreviewCusto" style="display:none"></div>
         <input type="date" id="tecidoData" value="${todayStr()}" />
         <label class="checkbox-label"><input type="checkbox" id="tecidoHistorico" /> 📦 Já tinha esse tecido antes do sistema (não lançar despesa)</label>
         <button class="confirm-btn" id="salvarCompraTecido">Registrar compra</button>
@@ -1407,10 +1416,19 @@ function renderMateriais(c) {
             return `
               <div class="form-card">
                 <input type="text" id="editMpCor-${m.id}" placeholder="Cor" value="${esc(m.cor)}" />
+
+                <div class="form-hint">🧮 Sabe o peso total em estoque? Calcule a quantidade de rolos (peso médio ajustável, 19,5kg a 20kg por rolo).</div>
+                <div class="form-row">
+                  <input type="text" id="editMpPesoTotal-${m.id}" placeholder="Peso total (kg)" inputmode="decimal" />
+                  <input type="text" id="editMpPesoRolo-${m.id}" placeholder="Peso médio/rolo (kg)" value="19,75" inputmode="decimal" />
+                </div>
+                <button class="entrada-btn" type="button" data-calcular-rolos-peso-mp="${m.id}">🧮 Calcular rolos</button>
+
                 <div class="form-row">
                   <input type="text" id="editMpRolos-${m.id}" placeholder="Rolos disponíveis" value="${m.rolosDisponiveis}" />
                   <input type="text" id="editMpCusto-${m.id}" placeholder="Custo médio por rolo (R$)" value="${m.custoMedioRolo.toFixed(2).replace('.', ',')}" />
                 </div>
+                <div class="form-hint">Se souber o valor TOTAL pago por esses rolos, dá pra dividir você mesma (valor total ÷ quantidade de rolos) e colocar o resultado no campo "Custo médio por rolo" acima.</div>
                 <div class="form-row">
                   <button class="confirm-btn" data-salvar-edit-mp="${m.id}">Salvar</button>
                   <button class="toggle-btn" data-cancelar-edit-mp="${m.id}">Cancelar</button>
@@ -2766,6 +2784,33 @@ function attachTecidoHandlers(c) {
   const toggleCompra = document.getElementById('toggleCompraTecido');
   if (toggleCompra) toggleCompra.addEventListener('click', () => { state.showCompraTecidoForm = !state.showCompraTecidoForm; render(); });
 
+  const calcularRolosPeso = document.getElementById('calcularRolosPeso');
+  if (calcularRolosPeso) calcularRolosPeso.addEventListener('click', () => {
+    const pesoTotal = parseBRNumber(document.getElementById('tecidoPesoTotal').value);
+    const pesoRolo = parseBRNumber(document.getElementById('tecidoPesoRolo').value) || 19.75;
+    if (!pesoTotal || pesoTotal <= 0) { alert('Informe o peso total comprado, em kg.'); return; }
+    const rolosEstimados = Math.round(pesoTotal / pesoRolo);
+    document.getElementById('tecidoRolos').value = rolosEstimados;
+    atualizarPreviewCustoTecido();
+  });
+
+  function atualizarPreviewCustoTecido() {
+    const preview = document.getElementById('tecidoPreviewCusto');
+    if (!preview) return;
+    const rolos = Number(document.getElementById('tecidoRolos').value) || 0;
+    const valor = parseBRNumber(document.getElementById('tecidoValor').value);
+    if (rolos > 0 && valor > 0) {
+      preview.style.display = 'block';
+      preview.textContent = `💲 Custo por rolo: ${fmt(valor / rolos)}`;
+    } else {
+      preview.style.display = 'none';
+    }
+  }
+  const tecidoRolosInput = document.getElementById('tecidoRolos');
+  const tecidoValorInput = document.getElementById('tecidoValor');
+  if (tecidoRolosInput) tecidoRolosInput.addEventListener('input', atualizarPreviewCustoTecido);
+  if (tecidoValorInput) tecidoValorInput.addEventListener('input', atualizarPreviewCustoTecido);
+
   const salvarCompra = document.getElementById('salvarCompraTecido');
   if (salvarCompra) salvarCompra.addEventListener('click', async () => {
     const cor = document.getElementById('tecidoCor').value.trim();
@@ -2777,6 +2822,17 @@ function attachTecidoHandlers(c) {
     await comprarTecido(cor, rolos, valor, data, !historico);
     state.showCompraTecidoForm = false;
     render();
+  });
+
+  document.querySelectorAll('[data-calcular-rolos-peso-mp]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.calcularRolosPesoMp;
+      const pesoTotal = parseBRNumber(document.getElementById(`editMpPesoTotal-${id}`).value);
+      const pesoRolo = parseBRNumber(document.getElementById(`editMpPesoRolo-${id}`).value) || 19.75;
+      if (!pesoTotal || pesoTotal <= 0) { alert('Informe o peso total, em kg.'); return; }
+      const rolosEstimados = Math.round(pesoTotal / pesoRolo);
+      document.getElementById(`editMpRolos-${id}`).value = rolosEstimados;
+    });
   });
 
   document.querySelectorAll('[data-editar-mp]').forEach((btn) => {
