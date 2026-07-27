@@ -595,10 +595,11 @@ async function updateTx(id, tx) {
 }
 
 async function addProduto(p) {
-  const { error } = await sb.from('produtos').insert({
+  const { data, error } = await sb.from('produtos').insert({
     nome: p.nome, sku: p.sku || null, estoque_atual: p.estoqueAtual, estoque_minimo: p.estoqueMinimo, custo_unitario: p.custoUnitario, valor_mao_obra: p.valorMaoObra || 0,
-  });
-  if (error) alert('Erro ao salvar produto: ' + error.message);
+  }).select().single();
+  if (error) { alert('Erro ao salvar produto: ' + error.message); return null; }
+  return data;
 }
 async function updateProdutoEstoque(id, novoEstoque) {
   const { error } = await sb.from('produtos').update({ estoque_atual: novoEstoque }).eq('id', id);
@@ -2180,6 +2181,15 @@ function renderEstoque(c) {
         </div>
         <input type="text" id="pCusto" placeholder="Custo de produção por unidade (ex: 18,50)" />
         <input type="text" id="pMaoObra" placeholder="Valor de mão de obra por peça (ex: 5,00)" />
+
+        <div class="form-hint">🎨 Esse produto tem cores? Cadastre já aqui (opcional). Se preencher, o estoque de cada cor começa zerado — o "Estoque atual" acima é ignorado e você ajusta cor por cor depois de salvar.</div>
+        ${[0, 1, 2, 3, 4].map((i) => `
+          <div class="form-row">
+            <input type="text" id="pCorNome-${i}" placeholder="Nome da cor" />
+            <input type="text" id="pCorSku-${i}" placeholder="SKU da cor (opcional)" />
+          </div>
+        `).join('')}
+
         <button class="confirm-btn" id="salvarProduto">Salvar produto</button>
       </div>
     ` : ''}
@@ -3284,7 +3294,18 @@ function attachEstoqueHandlers(c) {
     const custoUnitario = parseBRNumber(document.getElementById('pCusto').value);
     const valorMaoObra = parseBRNumber(document.getElementById('pMaoObra').value);
     if (!nome) { alert('Informe o nome do produto.'); return; }
-    await addProduto({ nome, sku, estoqueAtual, estoqueMinimo, custoUnitario, valorMaoObra });
+
+    const cores = [];
+    for (let i = 0; i < 5; i++) {
+      const corNome = document.getElementById(`pCorNome-${i}`)?.value.trim();
+      const corSku = document.getElementById(`pCorSku-${i}`)?.value.trim();
+      if (corNome) cores.push({ nome: corNome, sku: corSku });
+    }
+
+    const produtoCriado = await addProduto({ nome, sku, estoqueAtual: cores.length ? 0 : estoqueAtual, estoqueMinimo, custoUnitario, valorMaoObra });
+    if (produtoCriado) {
+      for (const cor of cores) await addVariante(produtoCriado.id, cor.nome, cor.sku);
+    }
     state.showProdutoForm = false;
     await loadData();
   });
