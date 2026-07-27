@@ -258,6 +258,7 @@ const state = {
   distribuindoOrdemId: null,
   editingMateriaPrimaId: null,
   editingOrdemCorteId: null,
+  showTabOrderForm: false,
 };
 
 // ==================== DATA LAYER ====================
@@ -1378,11 +1379,8 @@ function renderConciliacao(c) {
     </div>
   `;
 }
-// ---- Tecido / Matéria-prima ----
-function renderTecido(c) {
-  const aguardando = state.ordensCorte.filter((o) => o.status === 'aguardando').sort((a, b) => a.dataEnvio.localeCompare(b.dataEnvio));
-  const concluidas = [...state.ordensCorte.filter((o) => o.status === 'concluido')].sort((a, b) => b.dataConclusao.localeCompare(a.dataConclusao));
-
+// ---- Materiais (matéria-prima + insumos) ----
+function renderMateriais(c) {
   return `
     <div class="section-title-wrap">
       <div><div class="section-title">Matéria-prima</div><div class="section-subtitle">Rolos de tecido em estoque, por cor</div></div>
@@ -1432,6 +1430,63 @@ function renderTecido(c) {
       </div>
     `}
 
+    <div class="section-title-wrap">
+      <div><div class="section-title">Outros insumos</div><div class="section-subtitle">Zíper, elástico, bojo, etiqueta, saquinho...</div></div>
+      <button class="icon-btn" id="toggleCompraInsumo">＋ Comprar</button>
+    </div>
+
+    ${state.showCompraInsumoForm ? `
+      <div class="form-card">
+        <input type="text" id="insumoNome" placeholder="Nome (ex: Zíper 20cm, Bojo P, Etiqueta)" />
+        <div class="form-row">
+          <input type="text" id="insumoQuantidade" placeholder="Quantidade" inputmode="decimal" />
+          <select id="insumoUnidade">
+            <option value="un">unidade</option>
+            <option value="m">metro</option>
+            <option value="cm">cm</option>
+            <option value="par">par</option>
+            <option value="pacote">pacote</option>
+          </select>
+        </div>
+        <input type="text" id="insumoValor" placeholder="Valor total pago (R$)" />
+        <select id="insumoCategoria">
+          <option value="Aviamento">Aviamento (zíper, elástico, bojo...)</option>
+          <option value="Embalagem">Embalagem (saquinho, caixa...)</option>
+          <option value="Etiquetas/Tags">Etiquetas/Tags</option>
+        </select>
+        <input type="date" id="insumoData" value="${todayStr()}" />
+        <label class="checkbox-label"><input type="checkbox" id="insumoHistorico" /> 📦 Já tinha antes do sistema (não lançar despesa)</label>
+        <button class="confirm-btn" id="salvarCompraInsumo">Registrar compra</button>
+      </div>
+    ` : ''}
+
+    ${state.insumos.length === 0 ? `<div class="empty-state">Nenhum insumo cadastrado ainda.</div>` : `
+      <div class="tx-list">
+        ${state.insumos.map((i) => `
+          <div class="tx-row">
+            <div class="tx-dot" style="background:${i.quantidadeDisponivel > 0 ? 'var(--teal)' : 'var(--red)'}"></div>
+            <div style="flex:1"><div class="tx-categoria">${esc(i.nome)}</div><div class="tx-desc">${fmt(i.custoMedioUnitario)}/${esc(i.unidade)} (média)</div></div>
+            ${state.showBaixaInsumoId === i.id ? `
+              <input type="text" id="baixaQtd-${i.id}" placeholder="Qtd usada" style="width:70px;margin-right:6px" />
+              <button class="confirm-btn" style="width:auto;padding:8px 10px" data-confirmar-baixa="${i.id}">OK</button>
+            ` : `
+              <div class="tx-valor" style="margin-right:6px">${i.quantidadeDisponivel} ${esc(i.unidade)}</div>
+              <button class="trash-btn" data-abrir-baixa="${i.id}">➖</button>
+            `}
+            <button class="trash-btn" data-remover-insumo="${i.id}">🗑</button>
+          </div>
+        `).join('')}
+      </div>
+    `}
+  `;
+}
+
+// ---- Corte (ordens de corte: envio, resultado, distribuição pras costureiras) ----
+function renderCorte(c) {
+  const aguardando = state.ordensCorte.filter((o) => o.status === 'aguardando').sort((a, b) => a.dataEnvio.localeCompare(b.dataEnvio));
+  const concluidas = [...state.ordensCorte.filter((o) => o.status === 'concluido')].sort((a, b) => b.dataConclusao.localeCompare(a.dataConclusao));
+
+  return `
     <div class="section-title-wrap">
       <div><div class="section-title">Ordens de corte</div><div class="section-subtitle">Envio de tecido pro corte e resultado em peças</div></div>
       <button class="icon-btn" id="toggleOrdemCorte">＋ Enviar corte</button>
@@ -1635,55 +1690,6 @@ function renderTecido(c) {
         }).join('')}
       </div>
     `}
-
-    <div class="section-title-wrap">
-      <div><div class="section-title">Outros insumos</div><div class="section-subtitle">Zíper, elástico, bojo, etiqueta, saquinho...</div></div>
-      <button class="icon-btn" id="toggleCompraInsumo">＋ Comprar</button>
-    </div>
-
-    ${state.showCompraInsumoForm ? `
-      <div class="form-card">
-        <input type="text" id="insumoNome" placeholder="Nome (ex: Zíper 20cm, Bojo P, Etiqueta)" />
-        <div class="form-row">
-          <input type="text" id="insumoQuantidade" placeholder="Quantidade" inputmode="decimal" />
-          <select id="insumoUnidade">
-            <option value="un">unidade</option>
-            <option value="m">metro</option>
-            <option value="cm">cm</option>
-            <option value="par">par</option>
-            <option value="pacote">pacote</option>
-          </select>
-        </div>
-        <input type="text" id="insumoValor" placeholder="Valor total pago (R$)" />
-        <select id="insumoCategoria">
-          <option value="Aviamento">Aviamento (zíper, elástico, bojo...)</option>
-          <option value="Embalagem">Embalagem (saquinho, caixa...)</option>
-          <option value="Etiquetas/Tags">Etiquetas/Tags</option>
-        </select>
-        <input type="date" id="insumoData" value="${todayStr()}" />
-        <label class="checkbox-label"><input type="checkbox" id="insumoHistorico" /> 📦 Já tinha antes do sistema (não lançar despesa)</label>
-        <button class="confirm-btn" id="salvarCompraInsumo">Registrar compra</button>
-      </div>
-    ` : ''}
-
-    ${state.insumos.length === 0 ? `<div class="empty-state">Nenhum insumo cadastrado ainda.</div>` : `
-      <div class="tx-list">
-        ${state.insumos.map((i) => `
-          <div class="tx-row">
-            <div class="tx-dot" style="background:${i.quantidadeDisponivel > 0 ? 'var(--teal)' : 'var(--red)'}"></div>
-            <div style="flex:1"><div class="tx-categoria">${esc(i.nome)}</div><div class="tx-desc">${fmt(i.custoMedioUnitario)}/${esc(i.unidade)} (média)</div></div>
-            ${state.showBaixaInsumoId === i.id ? `
-              <input type="text" id="baixaQtd-${i.id}" placeholder="Qtd usada" style="width:70px;margin-right:6px" />
-              <button class="confirm-btn" style="width:auto;padding:8px 10px" data-confirmar-baixa="${i.id}">OK</button>
-            ` : `
-              <div class="tx-valor" style="margin-right:6px">${i.quantidadeDisponivel} ${esc(i.unidade)}</div>
-              <button class="trash-btn" data-abrir-baixa="${i.id}">➖</button>
-            `}
-            <button class="trash-btn" data-remover-insumo="${i.id}">🗑</button>
-          </div>
-        `).join('')}
-      </div>
-    `}
   `;
 }
 // ---- Resumo financeiro (custos fixos x variáveis + contas a vencer) ----
@@ -1790,14 +1796,7 @@ function render() {
         <button class="sair-link" id="sairApp">Trocar código</button>
       </div>
     </div>
-    <div class="tabs-wrap">
-      ${tabBtn('dashboard', 'Dashboard', c.produtosStatus.filter(p => p.status !== 'ok').length)}
-      ${tabBtn('financeiro', 'Financeiro', c.contasAVencer.length)}
-      ${tabBtn('estoque', 'Estoque')}
-      ${tabBtn('tecido', 'Materiais')}
-      ${tabBtn('producao', 'Produção')}
-      ${tabBtn('dre', 'DRE')}
-    </div>
+    ${renderTabsBar(c)}
     <div class="content" id="tabContent"></div>
   `;
 
@@ -1805,7 +1804,8 @@ function render() {
   if (state.tab === 'dashboard') contentEl.innerHTML = renderDashboard(c);
   else if (state.tab === 'financeiro') contentEl.innerHTML = renderFinanceiro(c);
   else if (state.tab === 'estoque') contentEl.innerHTML = renderEstoque(c);
-  else if (state.tab === 'tecido') contentEl.innerHTML = renderTecido(c);
+  else if (state.tab === 'tecido') contentEl.innerHTML = renderMateriais(c);
+  else if (state.tab === 'corte') contentEl.innerHTML = renderCorte(c);
   else if (state.tab === 'producao') contentEl.innerHTML = renderProducaoDono(c);
   else if (state.tab === 'dre') contentEl.innerHTML = renderDRE(c);
 
@@ -1816,6 +1816,64 @@ function tabBtn(id, label, badge) {
   const active = state.tab === id ? 'active' : '';
   const badgeHtml = badge ? `<span class="tab-badge">${badge}</span>` : '';
   return `<button class="tab-btn ${active}" data-tab="${id}">${label}${badgeHtml}</button>`;
+}
+
+// ---- Abas: definição, ordem customizável (salva no aparelho) ----
+const TABS = {
+  dashboard: { label: 'Dashboard' },
+  financeiro: { label: 'Financeiro' },
+  estoque: { label: 'Estoque' },
+  tecido: { label: 'Materiais' },
+  corte: { label: 'Corte' },
+  producao: { label: 'Produção' },
+  dre: { label: 'DRE' },
+};
+const TAB_ORDER_PADRAO = ['dashboard', 'financeiro', 'estoque', 'tecido', 'corte', 'producao', 'dre'];
+
+function getTabOrder() {
+  let saved = [];
+  try { saved = JSON.parse(localStorage.getItem('rj_tab_order') || '[]'); } catch (e) { saved = []; }
+  const validos = saved.filter((id) => TABS[id]);
+  const faltando = TAB_ORDER_PADRAO.filter((id) => !validos.includes(id));
+  return [...validos, ...faltando];
+}
+function saveTabOrder(order) {
+  localStorage.setItem('rj_tab_order', JSON.stringify(order));
+}
+
+function renderTabsBar(c) {
+  const order = getTabOrder();
+  const ordensAguardandoCount = state.ordensCorte.filter((o) => o.status === 'aguardando').length;
+  const badges = {
+    dashboard: c.produtosStatus.filter((p) => p.status !== 'ok').length,
+    financeiro: c.contasAVencer.length,
+    corte: ordensAguardandoCount,
+  };
+  return `
+    <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
+      <button class="icon-btn-ghost" id="toggleOrganizarAbas">${state.showTabOrderForm ? '✕ Fechar' : '↕️ Organizar abas'}</button>
+    </div>
+    ${state.showTabOrderForm ? renderOrganizarAbas(order) : ''}
+    <div class="tabs-wrap">
+      ${order.map((id) => tabBtn(id, TABS[id].label, badges[id])).join('')}
+    </div>
+  `;
+}
+
+function renderOrganizarAbas(order) {
+  return `
+    <div class="form-card" style="margin-bottom:16px">
+      <div class="section-title" style="margin-bottom:2px">Organizar abas</div>
+      <div class="section-subtitle" style="margin-bottom:12px">Use as setas pra colocar na ordem que preferir</div>
+      ${order.map((id, idx) => `
+        <div class="tx-row">
+          <div style="flex:1"><div class="tx-categoria">${TABS[id].label}</div></div>
+          <button class="step-btn" data-mover-aba="${id}" data-direcao="-1" ${idx === 0 ? 'disabled' : ''}>↑</button>
+          <button class="step-btn" data-mover-aba="${id}" data-direcao="1" ${idx === order.length - 1 ? 'disabled' : ''}>↓</button>
+        </div>
+      `).join('')}
+    </div>
+  `;
 }
 
 // ---- Financeiro ----
@@ -2296,10 +2354,29 @@ function attachHandlers(c) {
     }
   });
 
+  // organizar abas
+  const toggleOrganizar = document.getElementById('toggleOrganizarAbas');
+  if (toggleOrganizar) toggleOrganizar.addEventListener('click', () => { state.showTabOrderForm = !state.showTabOrderForm; render(); });
+
+  document.querySelectorAll('[data-mover-aba]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.moverAba;
+      const direcao = Number(btn.dataset.direcao);
+      const order = getTabOrder();
+      const idx = order.indexOf(id);
+      const novoIdx = idx + direcao;
+      if (novoIdx < 0 || novoIdx >= order.length) return;
+      [order[idx], order[novoIdx]] = [order[novoIdx], order[idx]];
+      saveTabOrder(order);
+      render();
+    });
+  });
+
   // tabs
   document.querySelectorAll('[data-tab]').forEach((el) => {
     el.addEventListener('click', () => {
       state.tab = el.dataset.tab;
+      state.showTabOrderForm = false;
       state.showTxForm = false;
       state.showUpload = false;
       state.showProdutoForm = false;
@@ -2343,7 +2420,7 @@ function attachHandlers(c) {
   }
   if (state.tab === 'financeiro') attachFinanceiroHandlers(c);
   if (state.tab === 'estoque') attachEstoqueHandlers(c);
-  if (state.tab === 'tecido') attachTecidoHandlers(c);
+  if (state.tab === 'tecido' || state.tab === 'corte') attachTecidoHandlers(c);
   if (state.tab === 'producao') attachProducaoHandlers(c);
   if (state.tab === 'dre') {
     const dreMonthSelect = document.getElementById('dreMonthSelect');
