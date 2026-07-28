@@ -272,11 +272,13 @@ const state = {
   showNovoKitForm: false,
   fichaTecnicaBusca: '',
   fichaTecnicaFiltro: 'com-ficha',
+  insumoPlataformaQtd: [],
+  configEnvioInsumoId: null,
 };
 
 // ==================== DATA LAYER ====================
 async function loadData() {
-  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }] = await Promise.all([
+  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }] = await Promise.all([
     sb.from('transacoes').select('*').order('data', { ascending: false }),
     sb.from('produtos').select('*').order('created_at', { ascending: false }),
     sb.from('plataformas').select('*').order('nome', { ascending: true }),
@@ -289,6 +291,7 @@ async function loadData() {
     sb.from('insumos').select('*').order('nome', { ascending: true }),
     sb.from('distribuicoes').select('*').order('data', { ascending: false }),
     sb.from('ficha_tecnica_itens').select('*'),
+    sb.from('insumo_plataforma_qtd').select('*'),
   ]);
   if (e1) console.error(e1);
   if (e2) console.error(e2);
@@ -302,6 +305,7 @@ async function loadData() {
   if (e10) console.error(e10);
   if (e11) console.error(e11);
   if (e12) console.error(e12);
+  if (e13) console.error(e13);
   state.tx = (tx || []).map(mapTxFromDb);
   state.produtos = (produtos || []).map(mapProdutoFromDb);
   state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0) }));
@@ -311,9 +315,10 @@ async function loadData() {
   state.materiaPrima = (materiaPrima || []).map((m) => ({ id: m.id, cor: m.cor, rolosDisponiveis: m.rolos_disponiveis, custoMedioRolo: Number(m.custo_medio_rolo || 0) }));
   state.ordensCorte = (ordensCorte || []).map((o) => ({ id: o.id, cor: o.cor, quantidadeRolos: o.quantidade_rolos, valorTecido: Number(o.valor_tecido), dataEnvio: o.data_envio, status: o.status, dataConclusao: o.data_conclusao, tipo: o.tipo || 'principal', valorCorte: Number(o.valor_corte || 0), transacaoCorteId: o.transacao_corte_id || null }));
   state.ordensCorteItens = (ordensCorteItens || []).map((i) => ({ id: i.id, ordemId: i.ordem_id, produtoId: i.produto_id, quantidade: i.quantidade, varianteId: i.variante_id || null }));
-  state.insumos = (insumos || []).map((i) => ({ id: i.id, nome: i.nome, unidade: i.unidade, quantidadeDisponivel: Number(i.quantidade_disponivel), custoMedioUnitario: Number(i.custo_medio_unitario) }));
+  state.insumos = (insumos || []).map((i) => ({ id: i.id, nome: i.nome, unidade: i.unidade, quantidadeDisponivel: Number(i.quantidade_disponivel), custoMedioUnitario: Number(i.custo_medio_unitario), usadoNoEnvio: !!i.usado_no_envio }));
   state.distribuicoes = (distribuicoes || []).map((d) => ({ id: d.id, ordemItemId: d.ordem_item_id, produtoId: d.produto_id, varianteId: d.variante_id || null, costureiraId: d.costureira_id, quantidadeDistribuida: d.quantidade_distribuida, quantidadeDevolvida: d.quantidade_devolvida, data: d.data }));
   state.fichaTecnicaItens = (fichaTecnicaItens || []).map((f) => ({ id: f.id, produtoId: f.produto_id, tipoItem: f.tipo_item, insumoId: f.insumo_id || null, componenteProdutoId: f.componente_produto_id || null, quantidade: Number(f.quantidade), momento: f.momento || 'venda' }));
+  state.insumoPlataformaQtd = (insumoPlataformaQtd || []).map((q) => ({ id: q.id, insumoId: q.insumo_id, plataformaId: q.plataforma_id, quantidade: Number(q.quantidade) }));
   state.loading = false;
   render();
 }
@@ -482,6 +487,26 @@ async function baixarInsumo(id, quantidadeUsada) {
 async function updateInsumo(id, nome, quantidadeDisponivel, custoMedioUnitario) {
   const { error } = await sb.from('insumos').update({ nome, quantidade_disponivel: quantidadeDisponivel, custo_medio_unitario: custoMedioUnitario }).eq('id', id);
   if (error) alert('Erro ao atualizar insumo: ' + error.message);
+}
+async function toggleInsumoUsadoNoEnvio(id, valor) {
+  const { error } = await sb.from('insumos').update({ usado_no_envio: valor }).eq('id', id);
+  if (error) alert('Erro ao atualizar insumo: ' + error.message);
+}
+// quantidade desse insumo usada por pedido nessa plataforma (1 se não houver configuração específica)
+function qtdInsumoPorPedido(insumoId, plataformaId) {
+  if (!plataformaId) return 1;
+  const cfg = state.insumoPlataformaQtd.find((q) => q.insumoId === insumoId && q.plataformaId === plataformaId);
+  return cfg ? cfg.quantidade : 1;
+}
+async function salvarQtdPorPlataforma(insumoId, valoresPorPlataforma) {
+  const { error: errDel } = await sb.from('insumo_plataforma_qtd').delete().eq('insumo_id', insumoId);
+  if (errDel) { alert('Erro ao salvar configuração: ' + errDel.message); return; }
+  const linhas = Object.entries(valoresPorPlataforma)
+    .filter(([, qtd]) => qtd && qtd !== 1)
+    .map(([plataformaId, qtd]) => ({ insumo_id: insumoId, plataforma_id: plataformaId, quantidade: qtd }));
+  if (linhas.length === 0) return;
+  const { error: errIns } = await sb.from('insumo_plataforma_qtd').insert(linhas);
+  if (errIns) alert('Erro ao salvar configuração: ' + errIns.message);
 }
 async function removeInsumo(id) {
   const { error } = await sb.from('insumos').delete().eq('id', id);
@@ -1878,7 +1903,7 @@ function renderMateriais(c) {
           return `
           <div class="tx-row">
             <div class="tx-dot" style="background:${i.quantidadeDisponivel > 0 ? 'var(--teal)' : 'var(--red)'}"></div>
-            <div style="flex:1"><div class="tx-categoria">${esc(i.nome)}</div><div class="tx-desc">${fmt(i.custoMedioUnitario)}/${esc(i.unidade)} (média)</div></div>
+            <div style="flex:1"><div class="tx-categoria">${esc(i.nome)}${i.usadoNoEnvio ? ' <span style="font-size:10px;font-weight:600;color:var(--amber);border:1px solid var(--amber)55;border-radius:4px;padding:1px 5px;vertical-align:middle">POR PEDIDO</span>' : ''}</div><div class="tx-desc">${fmt(i.custoMedioUnitario)}/${esc(i.unidade)} (média)</div></div>
             ${state.showBaixaInsumoId === i.id ? `
               <input type="text" id="baixaQtd-${i.id}" placeholder="Qtd usada" style="width:70px;margin-right:6px" />
               <button class="confirm-btn" style="width:auto;padding:8px 10px" data-confirmar-baixa="${i.id}">OK</button>
@@ -1886,9 +1911,26 @@ function renderMateriais(c) {
               <div class="tx-valor" style="margin-right:6px">${i.quantidadeDisponivel} ${esc(i.unidade)}</div>
               <button class="trash-btn" data-abrir-baixa="${i.id}">➖</button>
             `}
+            <button class="trash-btn" data-toggle-envio="${i.id}" data-envio="${i.usadoNoEnvio}" title="${i.usadoNoEnvio ? 'Descontar por peça (produção/venda), não por pedido' : 'Marcar como usado 1x por pedido enviado (ex: envelope, etiqueta de rastreio)'}">${i.usadoNoEnvio ? '📦✅' : '📦'}</button>
+            ${i.usadoNoEnvio ? `<button class="trash-btn" data-config-envio="${i.id}" title="Quantidade por plataforma">⚙️</button>` : ''}
             <button class="trash-btn" data-editar-insumo="${i.id}">✏️</button>
             <button class="trash-btn" data-remover-insumo="${i.id}">🗑</button>
           </div>
+          ${state.configEnvioInsumoId === i.id ? `
+            <div class="entrada-box">
+              <div class="form-hint">Quantas unidades de "${esc(i.nome)}" cada plataforma usa por pedido? Deixa em 1 se for igual pra todas (padrão).</div>
+              ${state.plataformas.map((plat) => `
+                <div class="form-row">
+                  <div style="flex:1;display:flex;align-items:center;font-size:13px">${esc(plat.nome)}</div>
+                  <input type="text" id="qtdEnvio-${i.id}-${plat.id}" value="${qtdInsumoPorPedido(i.id, plat.id)}" inputmode="numeric" style="flex:0 0 70px" />
+                </div>
+              `).join('')}
+              <div class="form-row">
+                <button class="confirm-btn" data-salvar-qtd-envio="${i.id}">Salvar</button>
+                <button class="toggle-btn" data-cancelar-qtd-envio="1">Cancelar</button>
+              </div>
+            </div>
+          ` : ''}
         `;
         }).join('')}
       </div>
@@ -3442,6 +3484,8 @@ function attachFinanceiroHandlers(c) {
     const novos = [];
     const deducoes = new Map(); // produtoId -> { qtd, ultimaData }
     const skusNaoEncontrados = new Set();
+    const pedidosPorPlataforma = new Map(); // plataformaId (ou '_sem_plataforma') -> Set de pedidos
+    const linhasSemPedidoPorPlataforma = new Map(); // fallback quando a linha não tem ID do pedido
     let temSku = false;
     let totalTaxas = 0;
     let totalTaxasReais = 0;
@@ -3459,6 +3503,13 @@ function attachFinanceiroHandlers(c) {
       const taxaPctLinha = plataformaLinha ? plataformaLinha.taxaPercentual : 0;
       const taxaFixaLinha = plataformaLinha ? plataformaLinha.taxaFixa : 0;
       const idPedidoLinha = guessIdPedidoField(row);
+      const chavePlataforma = plataformaLinha ? plataformaLinha.id : '_sem_plataforma';
+      if (idPedidoLinha) {
+        if (!pedidosPorPlataforma.has(chavePlataforma)) pedidosPorPlataforma.set(chavePlataforma, new Set());
+        pedidosPorPlataforma.get(chavePlataforma).add(idPedidoLinha.trim().toLowerCase());
+      } else {
+        linhasSemPedidoPorPlataforma.set(chavePlataforma, (linhasSemPedidoPorPlataforma.get(chavePlataforma) || 0) + 1);
+      }
 
       novos.push({
         tipo: 'entrada', valor,
@@ -3527,6 +3578,30 @@ function attachFinanceiroHandlers(c) {
       }
     }
 
+    // conta pedidos por plataforma (pedidos únicos onde tem ID; fallback pra contagem de
+    // linhas só quando aquela plataforma não trouxe ID do pedido em nenhuma linha)
+    const chavesPlataforma = new Set([...pedidosPorPlataforma.keys(), ...linhasSemPedidoPorPlataforma.keys()]);
+    const pedidosPorPlataformaCount = new Map();
+    chavesPlataforma.forEach((chave) => {
+      const viaPedido = pedidosPorPlataforma.get(chave)?.size || 0;
+      const contagem = viaPedido > 0 ? viaPedido : (linhasSemPedidoPorPlataforma.get(chave) || 0);
+      pedidosPorPlataformaCount.set(chave, contagem);
+    });
+    const totalPedidosImportados = [...pedidosPorPlataformaCount.values()].reduce((a, n) => a + n, 0);
+    const usouEstimativaPorLinha = [...pedidosPorPlataforma.values()].every((s) => s.size === 0) || pedidosPorPlataforma.size === 0;
+
+    // insumos usados por pedido (envelope, etiqueta de rastreio) — respeitando a quantidade
+    // configurada por plataforma (ex: Mercado Livre = 2 etiquetas, padrão = 1)
+    const insumosEnvio = state.insumos.filter((i) => i.usadoNoEnvio);
+    for (const insumo of insumosEnvio) {
+      let totalParaBaixar = 0;
+      pedidosPorPlataformaCount.forEach((qtdPedidos, chave) => {
+        const plataformaId = chave === '_sem_plataforma' ? null : chave;
+        totalParaBaixar += qtdPedidos * qtdInsumoPorPedido(insumo.id, plataformaId);
+      });
+      if (totalParaBaixar > 0) await baixarInsumo(insumo.id, totalParaBaixar);
+    }
+
     state.showUpload = false;
     await loadData();
 
@@ -3546,6 +3621,9 @@ function attachFinanceiroHandlers(c) {
       }
     } else {
       resumo += `\n(Nenhuma coluna de SKU foi encontrada, então o estoque não foi ajustado.)`;
+    }
+    if (insumosEnvio.length > 0) {
+      resumo += `\n\n📦 ${totalPedidosImportados} pedido(s)${usouEstimativaPorLinha ? ' (estimado por linha, sem coluna de ID do pedido)' : ''} — baixado de: ${insumosEnvio.map((i) => i.nome).join(', ')} (respeitando a quantidade configurada por plataforma).`;
     }
     alert(resumo);
   });
@@ -3901,6 +3979,35 @@ function attachTecidoHandlers(c) {
         await removeInsumo(btn.dataset.removerInsumo);
         await loadData();
       }
+    });
+  });
+
+  document.querySelectorAll('[data-toggle-envio]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.toggleEnvio;
+      const atual = btn.dataset.envio === 'true';
+      await toggleInsumoUsadoNoEnvio(id, !atual);
+      await loadData();
+    });
+  });
+
+  document.querySelectorAll('[data-config-envio]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.configEnvioInsumoId = btn.dataset.configEnvio; render(); });
+  });
+  document.querySelectorAll('[data-cancelar-qtd-envio]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.configEnvioInsumoId = null; render(); });
+  });
+  document.querySelectorAll('[data-salvar-qtd-envio]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const insumoId = btn.dataset.salvarQtdEnvio;
+      const valores = {};
+      state.plataformas.forEach((plat) => {
+        const val = Number(document.getElementById(`qtdEnvio-${insumoId}-${plat.id}`)?.value) || 1;
+        valores[plat.id] = val;
+      });
+      await salvarQtdPorPlataforma(insumoId, valores);
+      state.configEnvioInsumoId = null;
+      await loadData();
     });
   });
 
