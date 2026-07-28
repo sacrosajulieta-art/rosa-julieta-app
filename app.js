@@ -263,11 +263,13 @@ const state = {
   estoqueBusca: '',
   estoqueOrdenar: 'recentes',
   editandoEmMaosChave: null,
+  fichaTecnicaItens: [],
+  editingFichaTecnicaId: null,
 };
 
 // ==================== DATA LAYER ====================
 async function loadData() {
-  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }] = await Promise.all([
+  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }] = await Promise.all([
     sb.from('transacoes').select('*').order('data', { ascending: false }),
     sb.from('produtos').select('*').order('created_at', { ascending: false }),
     sb.from('plataformas').select('*').order('nome', { ascending: true }),
@@ -279,6 +281,7 @@ async function loadData() {
     sb.from('ordens_corte_itens').select('*'),
     sb.from('insumos').select('*').order('nome', { ascending: true }),
     sb.from('distribuicoes').select('*').order('data', { ascending: false }),
+    sb.from('ficha_tecnica_itens').select('*'),
   ]);
   if (e1) console.error(e1);
   if (e2) console.error(e2);
@@ -291,6 +294,7 @@ async function loadData() {
   if (e9) console.error(e9);
   if (e10) console.error(e10);
   if (e11) console.error(e11);
+  if (e12) console.error(e12);
   state.tx = (tx || []).map(mapTxFromDb);
   state.produtos = (produtos || []).map(mapProdutoFromDb);
   state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0) }));
@@ -302,6 +306,7 @@ async function loadData() {
   state.ordensCorteItens = (ordensCorteItens || []).map((i) => ({ id: i.id, ordemId: i.ordem_id, produtoId: i.produto_id, quantidade: i.quantidade, varianteId: i.variante_id || null }));
   state.insumos = (insumos || []).map((i) => ({ id: i.id, nome: i.nome, unidade: i.unidade, quantidadeDisponivel: Number(i.quantidade_disponivel), custoMedioUnitario: Number(i.custo_medio_unitario) }));
   state.distribuicoes = (distribuicoes || []).map((d) => ({ id: d.id, ordemItemId: d.ordem_item_id, produtoId: d.produto_id, varianteId: d.variante_id || null, costureiraId: d.costureira_id, quantidadeDistribuida: d.quantidade_distribuida, quantidadeDevolvida: d.quantidade_devolvida, data: d.data }));
+  state.fichaTecnicaItens = (fichaTecnicaItens || []).map((f) => ({ id: f.id, produtoId: f.produto_id, tipoItem: f.tipo_item, insumoId: f.insumo_id || null, componenteProdutoId: f.componente_produto_id || null, quantidade: Number(f.quantidade) }));
   state.loading = false;
   render();
 }
@@ -310,7 +315,7 @@ function mapTxFromDb(row) {
   return { id: row.id, tipo: row.tipo, valor: Number(row.valor), categoria: row.categoria, natureza: row.natureza, descricao: row.descricao, data: row.data, recorrente: !!row.recorrente, recorrenteOrigemId: row.recorrente_origem_id || null, idPedido: row.id_pedido || null, conciliado: !!row.conciliado };
 }
 function mapProdutoFromDb(row) {
-  return { id: row.id, nome: row.nome, sku: row.sku, estoqueAtual: row.estoque_atual, estoqueMinimo: row.estoque_minimo, custoUnitario: Number(row.custo_unitario), totalVendido: row.total_vendido || 0, ultimaVenda: row.ultima_venda || null, valorMaoObra: Number(row.valor_mao_obra || 0) };
+  return { id: row.id, nome: row.nome, sku: row.sku, estoqueAtual: row.estoque_atual, estoqueMinimo: row.estoque_minimo, custoUnitario: Number(row.custo_unitario), totalVendido: row.total_vendido || 0, ultimaVenda: row.ultima_venda || null, valorMaoObra: Number(row.valor_mao_obra || 0), tipo: row.tipo || 'unitario' };
 }
 
 async function addTx(tx) {
@@ -650,7 +655,7 @@ async function updateTx(id, tx) {
 
 async function addProduto(p) {
   const { data, error } = await sb.from('produtos').insert({
-    nome: p.nome, sku: p.sku || null, estoque_atual: p.estoqueAtual, estoque_minimo: p.estoqueMinimo, custo_unitario: p.custoUnitario, valor_mao_obra: p.valorMaoObra || 0,
+    nome: p.nome, sku: p.sku || null, estoque_atual: p.estoqueAtual, estoque_minimo: p.estoqueMinimo, custo_unitario: p.custoUnitario, valor_mao_obra: p.valorMaoObra || 0, tipo: p.tipo || 'unitario',
   }).select().single();
   if (error) { alert('Erro ao salvar produto: ' + error.message); return null; }
   return data;
@@ -669,9 +674,66 @@ async function removeProduto(id) {
 }
 async function updateProduto(id, p) {
   const { error } = await sb.from('produtos').update({
-    nome: p.nome, sku: p.sku || null, estoque_atual: p.estoqueAtual, estoque_minimo: p.estoqueMinimo, custo_unitario: p.custoUnitario, valor_mao_obra: p.valorMaoObra || 0,
+    nome: p.nome, sku: p.sku || null, estoque_atual: p.estoqueAtual, estoque_minimo: p.estoqueMinimo, custo_unitario: p.custoUnitario, valor_mao_obra: p.valorMaoObra || 0, tipo: p.tipo || 'unitario',
   }).eq('id', id);
   if (error) alert('Erro ao atualizar produto: ' + error.message);
+}
+
+// ---- Ficha técnica (receita de insumos + produtos componentes por produto/kit) ----
+function fichaTecnicaDoProduto(produtoId) {
+  return state.fichaTecnicaItens.filter((f) => f.produtoId === produtoId);
+}
+// custo total = tecido/corte + mão de obra + (insumos da ficha × custo) + (produtos componentes da ficha × custo total deles, recursivo)
+function calcularCustoTotalProduto(produtoId, visitados) {
+  visitados = visitados || new Set();
+  if (visitados.has(produtoId)) return 0; // evita loop infinito se alguém criar uma referência circular
+  visitados.add(produtoId);
+  const produto = state.produtos.find((p) => p.id === produtoId);
+  if (!produto) return 0;
+  let total = (produto.custoUnitario || 0) + (produto.valorMaoObra || 0);
+  fichaTecnicaDoProduto(produtoId).forEach((item) => {
+    if (item.tipoItem === 'insumo') {
+      const insumo = state.insumos.find((i) => i.id === item.insumoId);
+      if (insumo) total += insumo.custoMedioUnitario * item.quantidade;
+    } else if (item.tipoItem === 'produto') {
+      total += calcularCustoTotalProduto(item.componenteProdutoId, visitados) * item.quantidade;
+    }
+  });
+  return total;
+}
+async function salvarFichaTecnica(produtoId, itens) {
+  const { error: errDel } = await sb.from('ficha_tecnica_itens').delete().eq('produto_id', produtoId);
+  if (errDel) { alert('Erro ao salvar ficha técnica: ' + errDel.message); return; }
+  if (itens.length === 0) return;
+  const { error: errIns } = await sb.from('ficha_tecnica_itens').insert(itens.map((item) => ({
+    produto_id: produtoId,
+    tipo_item: item.tipoItem,
+    insumo_id: item.tipoItem === 'insumo' ? item.refId : null,
+    componente_produto_id: item.tipoItem === 'produto' ? item.refId : null,
+    quantidade: item.quantidade,
+  })));
+  if (errIns) alert('Erro ao salvar ficha técnica: ' + errIns.message);
+}
+// desconta do estoque os insumos e produtos-componentes da ficha técnica, proporcional à quantidade vendida
+async function baixarEstoquePorFichaTecnica(produtoId, quantidadeVendida, dataVenda, visitados) {
+  visitados = visitados || new Set();
+  if (visitados.has(produtoId)) return;
+  visitados.add(produtoId);
+  for (const item of fichaTecnicaDoProduto(produtoId)) {
+    const qtdConsumida = item.quantidade * quantidadeVendida;
+    if (item.tipoItem === 'insumo') {
+      const insumo = state.insumos.find((i) => i.id === item.insumoId);
+      if (insumo) await baixarInsumo(insumo.id, qtdConsumida);
+    } else if (item.tipoItem === 'produto') {
+      const componente = state.produtos.find((p) => p.id === item.componenteProdutoId);
+      if (componente) {
+        const novoEstoque = Math.max(0, componente.estoqueAtual - qtdConsumida);
+        const novoTotalVendido = (componente.totalVendido || 0) + qtdConsumida;
+        await registrarVendaProduto(componente.id, novoEstoque, novoTotalVendido, dataVenda);
+        await baixarEstoquePorFichaTecnica(componente.id, qtdConsumida, dataVenda, visitados);
+      }
+    }
+  }
 }
 
 async function updatePlataformaTaxa(id, taxaPercentual, taxaFixa) {
@@ -1997,6 +2059,7 @@ function render() {
   else if (state.tab === 'tecido') contentEl.innerHTML = renderMateriais(c);
   else if (state.tab === 'corte') contentEl.innerHTML = renderCorte(c);
   else if (state.tab === 'producao') contentEl.innerHTML = renderProducaoDono(c);
+  else if (state.tab === 'ficha') contentEl.innerHTML = renderFichaTecnica(c);
   else if (state.tab === 'dre') contentEl.innerHTML = renderDRE(c);
 
   attachHandlers(c);
@@ -2026,9 +2089,10 @@ const TABS = {
   tecido: { label: 'Materiais' },
   corte: { label: 'Corte' },
   producao: { label: 'Produção' },
+  ficha: { label: 'Ficha Técnica' },
   dre: { label: 'DRE' },
 };
-const TAB_ORDER_PADRAO = ['dashboard', 'financeiro', 'estoque', 'tecido', 'corte', 'producao', 'dre'];
+const TAB_ORDER_PADRAO = ['dashboard', 'financeiro', 'estoque', 'tecido', 'corte', 'producao', 'ficha', 'dre'];
 
 function getTabOrder() {
   let saved = [];
@@ -2234,6 +2298,197 @@ function renderFinanceiro(c) {
 }
 
 // ---- DRE ----
+// ---- Ficha Técnica (BOM): insumos e produtos componentes de cada produto/kit ----
+function capturarLinhasFicha(produtoId, numInsumo, numComponente) {
+  const insumoValores = [];
+  for (let i = 0; i < numInsumo; i++) {
+    insumoValores.push({
+      ref: document.getElementById(`ftInsumo-${produtoId}-${i}`)?.value || '',
+      qtd: document.getElementById(`ftInsumoQtd-${produtoId}-${i}`)?.value || '',
+    });
+  }
+  const componenteValores = [];
+  for (let i = 0; i < numComponente; i++) {
+    componenteValores.push({
+      ref: document.getElementById(`ftComponente-${produtoId}-${i}`)?.value || '',
+      qtd: document.getElementById(`ftComponenteQtd-${produtoId}-${i}`)?.value || '',
+    });
+  }
+  window.__ftInsumoValores = insumoValores;
+  window.__ftComponenteValores = componenteValores;
+}
+
+function renderFichaTecnica(c) {
+  const linhas = state.produtos.map((p) => ({
+    produto: p,
+    itens: fichaTecnicaDoProduto(p.id),
+    custoBase: (p.custoUnitario || 0) + (p.valorMaoObra || 0),
+    custoTotal: calcularCustoTotalProduto(p.id),
+  })).sort((a, b) => {
+    if (a.produto.tipo !== b.produto.tipo) return a.produto.tipo === 'kit' ? -1 : 1;
+    return a.produto.nome.localeCompare(b.produto.nome, 'pt-BR');
+  });
+
+  return `
+    <div class="section-title-wrap">
+      <div><div class="section-title">Ficha Técnica</div><div class="section-subtitle">Custo completo de cada produto e kit — tecido, corte, mão de obra e insumos</div></div>
+    </div>
+
+    ${state.produtos.length === 0 ? `<div class="empty-state">Cadastre produtos no Estoque primeiro.</div>` : `
+      <div class="produto-list">
+        ${linhas.map(({ produto: p, itens, custoBase, custoTotal }) => {
+          const editando = state.editingFichaTecnicaId === p.id;
+
+          if (editando) {
+            const itensInsumo = itens.filter((i) => i.tipoItem === 'insumo');
+            const itensComponente = itens.filter((i) => i.tipoItem === 'produto');
+            const numInsumo = window.__ftNumInsumoRows || Math.max(3, itensInsumo.length);
+            const numComponente = window.__ftNumComponenteRows || Math.max(2, itensComponente.length);
+            const insumoValores = window.__ftInsumoValores || itensInsumo.map((i) => ({ ref: i.insumoId, qtd: String(i.quantidade) }));
+            const componenteValores = window.__ftComponenteValores || itensComponente.map((i) => ({ ref: i.componenteProdutoId, qtd: String(i.quantidade) }));
+
+            return `
+              <div class="produto-card">
+                <div class="produto-header">
+                  <div><div class="produto-nome">${esc(p.nome)}${p.tipo === 'kit' ? ' 🎁' : ''}</div></div>
+                </div>
+                <div class="form-hint">Insumos usados (bojo, etiqueta, embalagem...)</div>
+                ${Array.from({ length: numInsumo }, (_, i) => {
+                  const atual = insumoValores[i] || { ref: '', qtd: '' };
+                  return `
+                  <div class="form-row">
+                    <select id="ftInsumo-${p.id}-${i}">
+                      <option value="">Selecione o insumo</option>
+                      ${state.insumos.map((ins) => `<option value="${ins.id}" ${atual.ref === ins.id ? 'selected' : ''}>${esc(ins.nome)}</option>`).join('')}
+                    </select>
+                    <input type="text" id="ftInsumoQtd-${p.id}-${i}" placeholder="Quantidade" value="${esc(atual.qtd)}" />
+                  </div>
+                `;
+                }).join('')}
+                <button class="entrada-btn" type="button" data-mais-insumo-ft="${p.id}">＋ Mais um insumo</button>
+
+                <div class="form-hint" style="margin-top:12px">Produtos componentes (pra kits — ex: 2× Top Joy M)</div>
+                ${Array.from({ length: numComponente }, (_, i) => {
+                  const atual = componenteValores[i] || { ref: '', qtd: '' };
+                  return `
+                  <div class="form-row">
+                    <select id="ftComponente-${p.id}-${i}">
+                      <option value="">Selecione o produto</option>
+                      ${state.produtos.filter((prod) => prod.id !== p.id).map((prod) => `<option value="${prod.id}" ${atual.ref === prod.id ? 'selected' : ''}>${esc(prod.nome)}</option>`).join('')}
+                    </select>
+                    <input type="text" id="ftComponenteQtd-${p.id}-${i}" placeholder="Quantidade" value="${esc(atual.qtd)}" />
+                  </div>
+                `;
+                }).join('')}
+                <button class="entrada-btn" type="button" data-mais-componente-ft="${p.id}">＋ Mais um produto componente</button>
+
+                <div class="form-row" style="margin-top:12px">
+                  <button class="confirm-btn" data-salvar-ficha="${p.id}" data-num-insumo="${numInsumo}" data-num-componente="${numComponente}">Salvar ficha técnica</button>
+                  <button class="toggle-btn" data-cancelar-ficha="1">Cancelar</button>
+                </div>
+              </div>
+            `;
+          }
+
+          return `
+            <div class="produto-card">
+              <div class="produto-header">
+                <div>
+                  <div class="produto-nome">${esc(p.nome)}${p.tipo === 'kit' ? ' 🎁 Kit' : ''}</div>
+                  ${p.sku ? `<div class="produto-sku">${esc(p.sku)}</div>` : ''}
+                </div>
+                <button class="trash-btn" data-editar-ficha="${p.id}">✏️</button>
+              </div>
+              <div class="produto-meta">Custo base (tecido/corte + mão de obra): <strong style="color:var(--text)">${fmt(custoBase)}</strong></div>
+              <div class="produto-meta" style="margin-top:4px">Custo total (com insumos): <strong style="color:var(--teal)">${fmt(custoTotal)}</strong></div>
+              ${itens.length > 0 ? `
+                <div class="prod-breakdown" style="margin-top:8px">
+                  ${itens.map((item) => {
+                    if (item.tipoItem === 'insumo') {
+                      const insumo = state.insumos.find((i) => i.id === item.insumoId);
+                      return `<div class="prod-breakdown-item"><span>🧷 ${esc(insumo?.nome || 'Insumo removido')}</span><span>${item.quantidade}×</span></div>`;
+                    }
+                    const componente = state.produtos.find((prod) => prod.id === item.componenteProdutoId);
+                    return `<div class="prod-breakdown-item"><span>📦 ${esc(componente?.nome || 'Produto removido')}</span><span>${item.quantidade}×</span></div>`;
+                  }).join('')}
+                </div>
+              ` : `<div class="form-hint" style="margin-top:6px">Sem ficha técnica cadastrada ainda.</div>`}
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `}
+  `;
+}
+
+function attachFichaTecnicaHandlers(c) {
+  document.querySelectorAll('[data-editar-ficha]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.editingFichaTecnicaId = btn.dataset.editarFicha;
+      window.__ftNumInsumoRows = null;
+      window.__ftNumComponenteRows = null;
+      window.__ftInsumoValores = null;
+      window.__ftComponenteValores = null;
+      render();
+    });
+  });
+  document.querySelectorAll('[data-cancelar-ficha]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.editingFichaTecnicaId = null;
+      window.__ftNumInsumoRows = null;
+      window.__ftNumComponenteRows = null;
+      window.__ftInsumoValores = null;
+      window.__ftComponenteValores = null;
+      render();
+    });
+  });
+  document.querySelectorAll('[data-mais-insumo-ft]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const produtoId = btn.dataset.maisInsumoFt;
+      const numInsumoAtual = window.__ftNumInsumoRows || 3;
+      const numComponenteAtual = window.__ftNumComponenteRows || 2;
+      capturarLinhasFicha(produtoId, numInsumoAtual, numComponenteAtual);
+      window.__ftNumInsumoRows = numInsumoAtual + 3;
+      render();
+    });
+  });
+  document.querySelectorAll('[data-mais-componente-ft]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const produtoId = btn.dataset.maisComponenteFt;
+      const numInsumoAtual = window.__ftNumInsumoRows || 3;
+      const numComponenteAtual = window.__ftNumComponenteRows || 2;
+      capturarLinhasFicha(produtoId, numInsumoAtual, numComponenteAtual);
+      window.__ftNumComponenteRows = numComponenteAtual + 2;
+      render();
+    });
+  });
+  document.querySelectorAll('[data-salvar-ficha]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const produtoId = btn.dataset.salvarFicha;
+      const numInsumo = Number(btn.dataset.numInsumo);
+      const numComponente = Number(btn.dataset.numComponente);
+      const itens = [];
+      for (let i = 0; i < numInsumo; i++) {
+        const insumoId = document.getElementById(`ftInsumo-${produtoId}-${i}`)?.value;
+        const qtd = parseBRNumber(document.getElementById(`ftInsumoQtd-${produtoId}-${i}`)?.value || '0');
+        if (insumoId && qtd > 0) itens.push({ tipoItem: 'insumo', refId: insumoId, quantidade: qtd });
+      }
+      for (let i = 0; i < numComponente; i++) {
+        const componenteId = document.getElementById(`ftComponente-${produtoId}-${i}`)?.value;
+        const qtd = parseBRNumber(document.getElementById(`ftComponenteQtd-${produtoId}-${i}`)?.value || '0');
+        if (componenteId && qtd > 0) itens.push({ tipoItem: 'produto', refId: componenteId, quantidade: qtd });
+      }
+      await salvarFichaTecnica(produtoId, itens);
+      state.editingFichaTecnicaId = null;
+      window.__ftNumInsumoRows = null;
+      window.__ftNumComponenteRows = null;
+      window.__ftInsumoValores = null;
+      window.__ftComponenteValores = null;
+      await loadData();
+    });
+  });
+}
+
 function renderDRE(c) {
   const txMes = c.txMes;
   const receitaBruta = txMes.filter((t) => t.tipo === 'entrada').reduce((a, t) => a + t.valor, 0);
@@ -2366,6 +2621,10 @@ function renderEstoque(c) {
 
     ${state.showProdutoForm ? `
       <div class="form-card">
+        <div class="form-row">
+          <button class="toggle-btn ${(window.__novoProdutoTipo || 'unitario') === 'unitario' ? 'active-teal' : ''}" data-novo-produto-tipo="unitario">📦 Peça unitária</button>
+          <button class="toggle-btn ${window.__novoProdutoTipo === 'kit' ? 'active-pink' : ''}" data-novo-produto-tipo="kit">🎁 Kit</button>
+        </div>
         <input type="text" id="pNome" placeholder="Nome do produto" />
         <input type="text" id="pSku" placeholder="SKU (opcional) — vários separados por vírgula" />
         <div class="form-row">
@@ -2397,6 +2656,10 @@ function renderEstoque(c) {
           if (state.editingProdutoId === p.id) {
             return `
               <div class="form-card">
+                <div class="form-row">
+                  <button class="toggle-btn ${(window.__editProdutoTipo || p.tipo || 'unitario') === 'unitario' ? 'active-teal' : ''}" data-edit-produto-tipo="unitario">📦 Peça unitária</button>
+                  <button class="toggle-btn ${(window.__editProdutoTipo || p.tipo) === 'kit' ? 'active-pink' : ''}" data-edit-produto-tipo="kit">🎁 Kit</button>
+                </div>
                 <input type="text" id="editPNome-${p.id}" placeholder="Nome do produto" value="${esc(p.nome)}" />
                 <input type="text" id="editPSku-${p.id}" placeholder="SKU (opcional) — vários separados por vírgula" value="${esc(p.sku || '')}" />
                 <div class="form-row">
@@ -2637,6 +2900,7 @@ function attachHandlers(c) {
       state.distribuindoOrdemId = null;
       state.editingMateriaPrimaId = null;
       state.editingOrdemCorteId = null;
+      state.editingFichaTecnicaId = null;
       render();
     });
   });
@@ -2656,6 +2920,7 @@ function attachHandlers(c) {
   if (state.tab === 'estoque') attachEstoqueHandlers(c);
   if (state.tab === 'tecido' || state.tab === 'corte') attachTecidoHandlers(c);
   if (state.tab === 'producao') attachProducaoHandlers(c);
+  if (state.tab === 'ficha') attachFichaTecnicaHandlers(c);
   if (state.tab === 'dre') {
     const dreMonthSelect = document.getElementById('dreMonthSelect');
     if (dreMonthSelect) dreMonthSelect.addEventListener('change', (e) => { state.selectedMonth = e.target.value; render(); });
@@ -2916,6 +3181,8 @@ function attachFinanceiroHandlers(c) {
         const novoEstoque = Math.max(0, produto.estoqueAtual - info.qtd);
         const novoTotalVendido = (produto.totalVendido || 0) + info.qtd;
         await registrarVendaProduto(produtoId, novoEstoque, novoTotalVendido, info.ultimaData);
+        // se o SKU vendido tem ficha técnica (ex: um kit), desconta insumos e produtos componentes também
+        await baixarEstoquePorFichaTecnica(produtoId, info.qtd, info.ultimaData);
       }
     }
 
@@ -3507,6 +3774,7 @@ function attachEstoqueHandlers(c) {
     state.showProdutoForm = !state.showProdutoForm;
     window.__numCoresNovoProduto = 5;
     window.__coresNovoProdutoValores = [];
+    window.__novoProdutoTipo = 'unitario';
     render();
   });
 
@@ -3531,6 +3799,10 @@ function attachEstoqueHandlers(c) {
     render();
   });
 
+  document.querySelectorAll('[data-novo-produto-tipo]').forEach((btn) => {
+    btn.addEventListener('click', () => { window.__novoProdutoTipo = btn.dataset.novoProdutoTipo; render(); });
+  });
+
   const salvarProduto = document.getElementById('salvarProduto');
   if (salvarProduto) salvarProduto.addEventListener('click', async () => {
     const nome = document.getElementById('pNome').value.trim();
@@ -3539,6 +3811,7 @@ function attachEstoqueHandlers(c) {
     const estoqueMinimo = Number(document.getElementById('pEstoqueMinimo').value) || 0;
     const custoUnitario = parseBRNumber(document.getElementById('pCusto').value);
     const valorMaoObra = parseBRNumber(document.getElementById('pMaoObra').value);
+    const tipo = window.__novoProdutoTipo || 'unitario';
     if (!nome) { alert('Informe o nome do produto.'); return; }
 
     const cores = [];
@@ -3548,13 +3821,14 @@ function attachEstoqueHandlers(c) {
       if (corNome) cores.push({ nome: corNome, sku: corSku });
     }
 
-    const produtoCriado = await addProduto({ nome, sku, estoqueAtual: cores.length ? 0 : estoqueAtual, estoqueMinimo, custoUnitario, valorMaoObra });
+    const produtoCriado = await addProduto({ nome, sku, estoqueAtual: cores.length ? 0 : estoqueAtual, estoqueMinimo, custoUnitario, valorMaoObra, tipo });
     if (produtoCriado) {
       for (const cor of cores) await addVariante(produtoCriado.id, cor.nome, cor.sku);
     }
     state.showProdutoForm = false;
     window.__numCoresNovoProduto = 5;
     window.__coresNovoProdutoValores = [];
+    window.__novoProdutoTipo = 'unitario';
     await loadData();
   });
 
@@ -3618,10 +3892,13 @@ function attachEstoqueHandlers(c) {
   });
 
   document.querySelectorAll('[data-edit-produto]').forEach((btn) => {
-    btn.addEventListener('click', () => { state.editingProdutoId = btn.dataset.editProduto; render(); });
+    btn.addEventListener('click', () => { state.editingProdutoId = btn.dataset.editProduto; window.__editProdutoTipo = null; render(); });
   });
   document.querySelectorAll('[data-cancelar-edit-produto]').forEach((btn) => {
-    btn.addEventListener('click', () => { state.editingProdutoId = null; render(); });
+    btn.addEventListener('click', () => { state.editingProdutoId = null; window.__editProdutoTipo = null; render(); });
+  });
+  document.querySelectorAll('[data-edit-produto-tipo]').forEach((btn) => {
+    btn.addEventListener('click', () => { window.__editProdutoTipo = btn.dataset.editProdutoTipo; render(); });
   });
   document.querySelectorAll('[data-salvar-edit-produto]').forEach((btn) => {
     btn.addEventListener('click', async () => {
@@ -3632,9 +3909,12 @@ function attachEstoqueHandlers(c) {
       const estoqueMinimo = Number(document.getElementById(`editPEstoqueMinimo-${id}`).value) || 0;
       const custoUnitario = parseBRNumber(document.getElementById(`editPCusto-${id}`).value);
       const valorMaoObra = parseBRNumber(document.getElementById(`editPMaoObra-${id}`).value);
+      const produtoOriginal = state.produtos.find((p) => p.id === id);
+      const tipo = window.__editProdutoTipo || produtoOriginal?.tipo || 'unitario';
       if (!nome) { alert('Informe o nome do produto.'); return; }
-      await updateProduto(id, { nome, sku, estoqueAtual, estoqueMinimo, custoUnitario, valorMaoObra });
+      await updateProduto(id, { nome, sku, estoqueAtual, estoqueMinimo, custoUnitario, valorMaoObra, tipo });
       state.editingProdutoId = null;
+      window.__editProdutoTipo = null;
       await loadData();
     });
   });
