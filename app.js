@@ -954,7 +954,39 @@ function renderLinhaJornadaDia(prefixo, dia, cfgExistente, jornadaPadrao) {
   `;
 }
 function renderEditorJornadaSemanal(prefixo, jornadaSemanalAtual, jornadaPadrao) {
-  return [1, 2, 3, 4, 5, 6, 0].map((dia) => renderLinhaJornadaDia(prefixo, dia, (jornadaSemanalAtual || {})[dia], jornadaPadrao)).join('');
+  return `
+    <div id="${prefixo}JornadaEditor">
+      ${[1, 2, 3, 4, 5, 6, 0].map((dia) => renderLinhaJornadaDia(prefixo, dia, (jornadaSemanalAtual || {})[dia], jornadaPadrao)).join('')}
+      <div class="form-card" style="margin-top:10px;text-align:center;background:var(--bg)">
+        <div class="form-hint" style="margin-bottom:2px">Total semanal configurado</div>
+        <div id="${prefixo}TotalSemana" style="font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:700">—</div>
+        <div class="form-hint" style="margin-top:2px;margin-bottom:0">Compare com o combinado (ex: 44h/semana)</div>
+      </div>
+    </div>
+  `;
+}
+function atualizarTotalSemanal(prefixo) {
+  let totalMinutos = 0;
+  [0, 1, 2, 3, 4, 5, 6].forEach((dia) => {
+    const trabalha = document.getElementById(`${prefixo}Trabalha-${dia}`)?.checked;
+    if (!trabalha) return;
+    const entrada = document.getElementById(`${prefixo}Entrada-${dia}`)?.value;
+    const saidaAlmoco = document.getElementById(`${prefixo}SaidaAlmoco-${dia}`)?.value;
+    const voltaAlmoco = document.getElementById(`${prefixo}VoltaAlmoco-${dia}`)?.value;
+    const saida = document.getElementById(`${prefixo}Saida-${dia}`)?.value;
+    if (!entrada || !saidaAlmoco || !voltaAlmoco || !saida) return;
+    const [hE, mE] = entrada.split(':').map(Number);
+    const [hSA, mSA] = saidaAlmoco.split(':').map(Number);
+    const [hVA, mVA] = voltaAlmoco.split(':').map(Number);
+    const [hS, mS] = saida.split(':').map(Number);
+    totalMinutos += ((hSA * 60 + mSA) - (hE * 60 + mE)) + ((hS * 60 + mS) - (hVA * 60 + mVA));
+  });
+  const el = document.getElementById(`${prefixo}TotalSemana`);
+  if (el) {
+    const horas = totalMinutos / 60;
+    el.textContent = `${horas.toFixed(1)}h / semana`;
+    el.style.color = horas > 44 ? 'var(--amber)' : 'var(--teal)';
+  }
 }
 function coletarJornadaSemanal(prefixo) {
   const resultado = {};
@@ -3380,6 +3412,19 @@ function attachRHHandlers(c) {
     cb.addEventListener('change', () => {
       const el = document.getElementById(cb.dataset.toggleDiaHorario);
       if (el) el.style.display = cb.checked ? '' : 'none';
+    });
+  });
+
+  // liga o cálculo ao vivo do total semanal, sem re-renderizar a tela (pra não perder o que já foi digitado)
+  const prefixosAtivos = ['func'];
+  if (state.editingFuncionariaId) prefixosAtivos.push(`editFunc${state.editingFuncionariaId}`);
+  prefixosAtivos.forEach((prefixo) => {
+    const container = document.getElementById(`${prefixo}JornadaEditor`);
+    if (!container) return;
+    atualizarTotalSemanal(prefixo);
+    container.querySelectorAll('input').forEach((input) => {
+      input.addEventListener('input', () => atualizarTotalSemanal(prefixo));
+      input.addEventListener('change', () => atualizarTotalSemanal(prefixo));
     });
   });
 
