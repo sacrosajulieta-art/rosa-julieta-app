@@ -265,6 +265,7 @@ const state = {
   editandoEmMaosChave: null,
   fichaTecnicaItens: [],
   editingFichaTecnicaId: null,
+  showNovoKitForm: false,
 };
 
 // ==================== DATA LAYER ====================
@@ -2332,7 +2333,20 @@ function renderFichaTecnica(c) {
   return `
     <div class="section-title-wrap">
       <div><div class="section-title">Ficha Técnica</div><div class="section-subtitle">Custo completo de cada produto e kit — tecido, corte, mão de obra e insumos</div></div>
+      <button class="icon-btn" id="toggleNovoKit">🎁 Criar novo kit</button>
     </div>
+
+    ${state.showNovoKitForm ? `
+      <div class="form-card">
+        <div class="form-hint">Cria só o essencial pra reconhecer o kit nas vendas — sem precisar passar pelo Estoque. Na sequência você já monta a receita dele (quais produtos + insumos ele leva).</div>
+        <input type="text" id="novoKitNome" placeholder="Nome do kit (ex: Kit 2 Tops Joy M)" />
+        <input type="text" id="novoKitSku" placeholder="SKU do kit (o mesmo da plataforma)" />
+        <div class="form-row">
+          <button class="confirm-btn" id="salvarNovoKit">Criar e montar receita</button>
+          <button class="toggle-btn" id="cancelarNovoKit">Cancelar</button>
+        </div>
+      </div>
+    ` : ''}
 
     ${state.produtos.length === 0 ? `<div class="empty-state">Cadastre produtos no Estoque primeiro.</div>` : `
       <div class="produto-list">
@@ -2422,6 +2436,23 @@ function renderFichaTecnica(c) {
 }
 
 function attachFichaTecnicaHandlers(c) {
+  const toggleNovoKit = document.getElementById('toggleNovoKit');
+  if (toggleNovoKit) toggleNovoKit.addEventListener('click', () => { state.showNovoKitForm = !state.showNovoKitForm; render(); });
+
+  const cancelarNovoKit = document.getElementById('cancelarNovoKit');
+  if (cancelarNovoKit) cancelarNovoKit.addEventListener('click', () => { state.showNovoKitForm = false; render(); });
+
+  const salvarNovoKit = document.getElementById('salvarNovoKit');
+  if (salvarNovoKit) salvarNovoKit.addEventListener('click', async () => {
+    const nome = document.getElementById('novoKitNome').value.trim();
+    const sku = document.getElementById('novoKitSku').value.trim();
+    if (!nome) { alert('Informe o nome do kit.'); return; }
+    const kitCriado = await addProduto({ nome, sku, estoqueAtual: 0, estoqueMinimo: 0, custoUnitario: 0, valorMaoObra: 0, tipo: 'kit' });
+    state.showNovoKitForm = false;
+    if (kitCriado) state.editingFichaTecnicaId = kitCriado.id;
+    await loadData();
+  });
+
   document.querySelectorAll('[data-editar-ficha]').forEach((btn) => {
     btn.addEventListener('click', () => {
       state.editingFichaTecnicaId = btn.dataset.editarFicha;
@@ -2901,6 +2932,7 @@ function attachHandlers(c) {
       state.editingMateriaPrimaId = null;
       state.editingOrdemCorteId = null;
       state.editingFichaTecnicaId = null;
+      state.showNovoKitForm = false;
       render();
     });
   });
