@@ -262,6 +262,7 @@ const state = {
   showTotalDefeitos: false,
   estoqueBusca: '',
   estoqueOrdenar: 'recentes',
+  editandoEmMaosChave: null,
 };
 
 // ==================== DATA LAYER ====================
@@ -600,6 +601,36 @@ async function baixarDistribuicoesFIFO(costureiraId, produtoId, varianteId, quan
     const abate = Math.min(disponivel, restante);
     await sb.from('distribuicoes').update({ quantidade_devolvida: d.quantidadeDevolvida + abate }).eq('id', d.id);
     restante -= abate;
+  }
+}
+// desfaz devoluções já registradas (das mais recentes pra trás), pra "devolver" peças às mãos da costureira
+async function restaurarDistribuicoesLIFO(costureiraId, produtoId, varianteId, quantidadeARestaurar) {
+  let restante = quantidadeARestaurar;
+  const comDevolucao = state.distribuicoes
+    .filter((d) => d.costureiraId === costureiraId && d.produtoId === produtoId && (d.varianteId || null) === (varianteId || null) && d.quantidadeDevolvida > 0)
+    .sort((a, b) => b.data.localeCompare(a.data));
+  for (const d of comDevolucao) {
+    if (restante <= 0) break;
+    const restaura = Math.min(d.quantidadeDevolvida, restante);
+    await sb.from('distribuicoes').update({ quantidade_devolvida: d.quantidadeDevolvida - restaura }).eq('id', d.id);
+    restante -= restaura;
+  }
+  return restante; // > 0 se não havia devolução suficiente pra desfazer
+}
+// ajusta o total de "peças em mãos" pro valor informado, distribuindo a diferença
+// entre as distribuições existentes (sem mexer no estoque de peças prontas)
+async function ajustarPecasEmMaos(costureiraId, produtoId, varianteId, novoTotal) {
+  const relacionadas = state.distribuicoes.filter((d) => d.costureiraId === costureiraId && d.produtoId === produtoId && (d.varianteId || null) === (varianteId || null));
+  const totalAtual = relacionadas.reduce((a, d) => a + (d.quantidadeDistribuida - d.quantidadeDevolvida), 0);
+  const diferenca = novoTotal - totalAtual;
+  if (diferenca === 0) return;
+  if (diferenca < 0) {
+    await baixarDistribuicoesFIFO(costureiraId, produtoId, varianteId, Math.abs(diferenca));
+  } else {
+    const sobrou = await restaurarDistribuicoesLIFO(costureiraId, produtoId, varianteId, diferenca);
+    if (sobrou > 0) {
+      alert(`Consegui ajustar só ${diferenca - sobrou} de ${diferenca} peças a mais, porque não havia devolução suficiente registrada pra desfazer.`);
+    }
   }
 }
 async function removeTx(id) {
@@ -1011,16 +1042,18 @@ function renderCostureiraDetalhe(costureiraId) {
   const resumoPorDia = Object.entries(porDiaFiltrado).sort((a, b) => b[0].localeCompare(a[0]));
 
   // peças cortadas que essa costureira ainda tem em mãos (distribuído - já devolvido)
-  const emMaos = {};
+  const emMaosMap = {};
   state.distribuicoes.filter((d) => d.costureiraId === costureiraId).forEach((d) => {
     const restante = d.quantidadeDistribuida - d.quantidadeDevolvida;
     if (restante <= 0) return;
     const produto = state.produtos.find((p) => p.id === d.produtoId);
     const variante = d.varianteId ? state.variantes.find((v) => v.id === d.varianteId) : null;
-    const chave = `${produto?.nome || 'Produto removido'}${variante ? ' — ' + variante.nome : ''}`;
-    emMaos[chave] = (emMaos[chave] || 0) + restante;
+    const chaveId = `${d.produtoId}|${d.varianteId || ''}`;
+    const nome = `${produto?.nome || 'Produto removido'}${variante ? ' — ' + variante.nome : ''}`;
+    if (!emMaosMap[chaveId]) emMaosMap[chaveId] = { nome, qtd: 0, produtoId: d.produtoId, varianteId: d.varianteId || null };
+    emMaosMap[chaveId].qtd += restante;
   });
-  const emMaosLista = Object.entries(emMaos).sort((a, b) => b[1] - a[1]);
+  const emMaosLista = Object.values(emMaosMap).sort((a, b) => b.qtd - a.qtd);
 
   // defeitos: total de peças perdidas por defeito, dessa costureira
   const defeitos = entradas.filter((p) => p.quantidade < 0);
@@ -1043,13 +1076,24 @@ function renderCostureiraDetalhe(costureiraId) {
         <div><div class="section-title">Peças em mãos</div><div class="section-subtitle">Cortadas e distribuídas, ainda não devolvidas prontas</div></div>
       </div>
       <div class="tx-list" style="margin-bottom:20px">
-        ${emMaosLista.map(([nome, qtd]) => `
+        ${emMaosLista.map((item) => {
+          const chaveId = `${item.produtoId}|${item.varianteId || ''}`;
+          const editando = state.editandoEmMaosChave === chaveId;
+          return `
           <div class="tx-row">
             <div class="tx-dot" style="background:var(--amber)"></div>
-            <div style="flex:1"><div class="tx-categoria">${esc(nome)}</div></div>
-            <div class="tx-valor" style="color:var(--amber)">${qtd} peças</div>
+            <div style="flex:1"><div class="tx-categoria">${esc(item.nome)}</div></div>
+            ${editando ? `
+              <input type="text" id="editEmMaosQtd" value="${item.qtd}" style="width:70px;margin-right:6px" />
+              <button class="confirm-btn" style="width:auto;padding:8px 10px" data-salvar-em-maos="1" data-produto="${item.produtoId}" data-variante="${item.varianteId || ''}" data-costureira="${costureiraId}">OK</button>
+              <button class="trash-btn" data-cancelar-em-maos="1">✕</button>
+            ` : `
+              <div class="tx-valor" style="color:var(--amber);margin-right:6px">${item.qtd} peças</div>
+              <button class="trash-btn" data-editar-em-maos="${chaveId}">✏️</button>
+            `}
           </div>
-        `).join('')}
+        `;
+        }).join('')}
       </div>
     ` : ''}
 
@@ -3272,7 +3316,26 @@ function attachProducaoHandlers(c) {
   // ---- Tela de perfil da costureira ----
   if (state.costureiraDetalheId) {
     const voltar = document.getElementById('voltarCostureiras');
-    if (voltar) voltar.addEventListener('click', () => { state.costureiraDetalheId = null; state.showProducaoForm = false; state.editingProducaoId = null; render(); });
+    if (voltar) voltar.addEventListener('click', () => { state.costureiraDetalheId = null; state.showProducaoForm = false; state.editingProducaoId = null; state.editandoEmMaosChave = null; render(); });
+
+    document.querySelectorAll('[data-editar-em-maos]').forEach((btn) => {
+      btn.addEventListener('click', () => { state.editandoEmMaosChave = btn.dataset.editarEmMaos; render(); });
+    });
+    document.querySelectorAll('[data-cancelar-em-maos]').forEach((btn) => {
+      btn.addEventListener('click', () => { state.editandoEmMaosChave = null; render(); });
+    });
+    document.querySelectorAll('[data-salvar-em-maos]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const produtoId = btn.dataset.produto;
+        const varianteId = btn.dataset.variante || null;
+        const costureiraId = btn.dataset.costureira;
+        const novoTotal = Number(document.getElementById('editEmMaosQtd').value);
+        if (isNaN(novoTotal) || novoTotal < 0) { alert('Informe uma quantidade válida.'); return; }
+        await ajustarPecasEmMaos(costureiraId, produtoId, varianteId, novoTotal);
+        state.editandoEmMaosChave = null;
+        await loadData();
+      });
+    });
 
     const toggleDetalheForm = document.getElementById('toggleDetalheForm');
     if (toggleDetalheForm) toggleDetalheForm.addEventListener('click', () => { state.showProducaoForm = !state.showProducaoForm; render(); });
