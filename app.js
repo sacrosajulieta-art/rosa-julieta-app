@@ -1077,7 +1077,10 @@ function renderProducaoDono(c) {
 
     <div class="section-title-wrap">
       <div><div class="section-title">Costureiras</div><div class="section-subtitle">Toque numa costureira pra ver o histórico completo</div></div>
-      <button class="icon-btn" id="toggleCostureiraForm">＋ Costureira</button>
+      <div style="display:flex;gap:8px;align-items:center">
+        ${renderControleColunas('costureiras')}
+        <button class="icon-btn" id="toggleCostureiraForm">＋ Costureira</button>
+      </div>
     </div>
 
     ${state.showCostureiraForm ? `
@@ -1088,11 +1091,11 @@ function renderProducaoDono(c) {
     ` : ''}
 
     ${state.costureiras.length === 0 ? `<div class="empty-state">Nenhuma costureira cadastrada ainda.</div>` : `
-      <div class="produto-list" style="margin-bottom:28px">
+      <div style="display:grid;grid-template-columns:${gridColumnsStyle('costureiras', 220)};gap:10px;margin-bottom:28px">
         ${state.costureiras.map((cost) => {
           if (state.editingCostureiraId === cost.id) {
             return `
-              <div class="form-card">
+              <div class="form-card" style="grid-column:1 / -1">
                 <input type="text" id="editCostNome-${cost.id}" placeholder="Nome da costureira" value="${esc(cost.nome)}" />
                 <input type="text" id="editCostMeta-${cost.id}" placeholder="Meta de peças por semana (ex: 1500)" value="${cost.metaSemanal || ''}" inputmode="numeric" />
                 <label class="checkbox-label"><input type="checkbox" id="editCostAtiva-${cost.id}" ${cost.ativa ? 'checked' : ''} /> Costureira ativa</label>
@@ -1132,10 +1135,11 @@ function renderProducaoDono(c) {
 
     <div class="section-title-wrap">
       <div><div class="section-title">Pagamento pendente</div><div class="section-subtitle">Produção ainda não paga, por costureira</div></div>
+      ${renderControleColunas('pagamentoPendente')}
     </div>
 
     ${Object.keys(porCostureira).length === 0 ? `<div class="empty-state">Nenhuma produção pendente de pagamento 🎉</div>` : `
-      <div class="produto-list">
+      <div style="display:grid;grid-template-columns:${gridColumnsStyle('pagamentoPendente', 260)};gap:10px">
         ${Object.entries(porCostureira).map(([costureiraId, info]) => {
           const costureira = state.costureiras.find((cc) => cc.id === costureiraId);
           const produtosLista = Object.entries(info.porProduto).sort((a, b) => b[1].qtd - a[1].qtd);
@@ -2513,7 +2517,10 @@ function renderFichaTecnica(c) {
   return `
     <div class="section-title-wrap">
       <div><div class="section-title">Ficha Técnica</div><div class="section-subtitle">Custo completo de cada produto e kit — tecido, corte, mão de obra e insumos</div></div>
-      <button class="icon-btn" id="toggleNovoKit">🎁 Criar novo kit</button>
+      <div style="display:flex;gap:8px;align-items:center">
+        ${renderControleColunas('fichaTecnica')}
+        <button class="icon-btn" id="toggleNovoKit">🎁 Criar novo kit</button>
+      </div>
     </div>
 
     <div class="form-row" style="margin-bottom:14px">
@@ -2538,7 +2545,7 @@ function renderFichaTecnica(c) {
     ` : ''}
 
     ${state.produtos.length === 0 ? `<div class="empty-state">Cadastre produtos no Estoque primeiro.</div>` : linhasFiltradas.length === 0 ? `<div class="empty-state">${termoBusca ? 'Nenhum produto encontrado pra essa busca.' : 'Nada por aqui com esse filtro. Tenta "Todos os produtos".'}</div>` : `
-      <div class="produto-list">
+      <div style="display:grid;grid-template-columns:${gridColumnsStyle('fichaTecnica', 260)};gap:10px">
         ${linhasFiltradas.map(({ produto: p, itens, custoBase, custoTotal }) => {
           const editando = state.editingFichaTecnicaId === p.id;
 
@@ -2551,7 +2558,7 @@ function renderFichaTecnica(c) {
             const componenteValores = window.__ftComponenteValores || itensComponente.map((i) => ({ ref: i.componenteProdutoId, qtd: String(i.quantidade) }));
 
             return `
-              <div class="produto-card">
+              <div class="produto-card" style="grid-column:1 / -1">
                 <div class="produto-header">
                   <div><div class="produto-nome">${esc(p.nome)}${p.tipo === 'kit' ? ' 🎁' : ''}</div></div>
                 </div>
@@ -2831,6 +2838,7 @@ function renderEstoque(c) {
     <div class="section-title-wrap">
       <div><div class="section-title">Estoque</div><div class="section-subtitle">Cadastre seus SKUs pra ativar o semáforo de reposição</div></div>
       <div style="display:flex;gap:8px">
+        ${renderControleColunas('estoque')}
         <button class="icon-btn-ghost" id="toggleProdutosParados">⏸️ Parados${c.produtosParados.length > 0 ? ` (${c.produtosParados.length})` : ''}</button>
         <button class="icon-btn" id="toggleProdutoForm">＋ Produto</button>
       </div>
@@ -2847,10 +2855,15 @@ function renderEstoque(c) {
 
     ${state.showProdutosParados ? `
       <div class="form-card">
-        <div class="section-title" style="margin-bottom:2px">Produtos parados</div>
-        <div class="section-subtitle" style="margin-bottom:12px">Sem vender há 30 dias ou mais</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+          <div>
+            <div class="section-title" style="margin-bottom:2px">Produtos parados</div>
+            <div class="section-subtitle" style="margin-bottom:12px">Sem vender há 30 dias ou mais</div>
+          </div>
+          ${renderControleColunas('produtosParados')}
+        </div>
         ${c.produtosParados.length === 0 ? `<div class="empty-state">Nenhum produto parado no momento 🎉</div>` : `
-          <div class="alert-list">
+          <div style="display:grid;grid-template-columns:${gridColumnsStyle('produtosParados', 240)};gap:8px">
             ${c.produtosParados.map((p) => `
               <div class="alert-card" style="border-color:var(--amber)55">
                 <div class="alert-card-row">
@@ -2897,14 +2910,14 @@ function renderEstoque(c) {
     ` : ''}
 
     ${listaProdutos.length === 0 ? `<div class="empty-state">${termoBusca ? 'Nenhum produto encontrado pra essa busca.' : 'Nenhum produto cadastrado ainda.'}</div>` : `
-      <div class="produto-list">
+      <div style="display:grid;grid-template-columns:${gridColumnsStyle('estoque', 260)};gap:10px">
         ${listaProdutos.map((p) => {
           const statusColor = { critico: 'var(--red)', aguarde: 'var(--amber)', 'pode-cortar': 'var(--teal)', ok: 'var(--border)' }[p.status];
           const entradaOpen = state.entradaOpenId === p.id;
 
           if (state.editingProdutoId === p.id) {
             return `
-              <div class="form-card">
+              <div class="form-card" style="grid-column:1 / -1">
                 <div class="form-row">
                   <button class="toggle-btn ${(window.__editProdutoTipo || p.tipo || 'unitario') === 'unitario' ? 'active-teal' : ''}" data-edit-produto-tipo="unitario">📦 Peça unitária</button>
                   <button class="toggle-btn ${(window.__editProdutoTipo || p.tipo) === 'kit' ? 'active-pink' : ''}" data-edit-produto-tipo="kit">🎁 Kit</button>
@@ -2930,7 +2943,7 @@ function renderEstoque(c) {
           const showVarForm = state.showVarianteForm[p.id];
 
           return `
-            <div class="produto-card" style="border-color:${statusColor}55">
+            <div class="produto-card" style="border-color:${statusColor}55${(showVarForm || entradaOpen || temVariantes) ? ';grid-column:1 / -1' : ''}">
               <div class="produto-header">
                 <div>
                   <div class="produto-nome">${esc(p.nome)}</div>
@@ -3068,9 +3081,10 @@ function renderDashboard(c) {
 
     <div class="section-title-wrap">
       <div><div class="section-title">Semáforo de reposição</div><div class="section-subtitle">Cruza estoque baixo com saldo disponível</div></div>
+      ${renderControleColunas('semaforo')}
     </div>
     ${alertList.length === 0 ? `<div class="empty-state">Nenhum alerta no momento. Cadastre produtos na aba Estoque pra ativar o semáforo.</div>` : `
-      <div class="alert-list">
+      <div style="display:grid;grid-template-columns:${gridColumnsStyle('semaforo', 240)};gap:8px">
         ${alertList.map((p) => `
           <div class="alert-card" style="border-color:${SEMAFORO[p.status].color}55">
             <div class="alert-card-row">
@@ -3090,6 +3104,13 @@ function renderDashboard(c) {
 
 // ==================== EVENT HANDLERS ====================
 function attachHandlers(c) {
+  document.querySelectorAll('[data-colunas-chave]').forEach((sel) => {
+    sel.addEventListener('change', (e) => {
+      salvarColunasConfig(sel.dataset.colunasChave, e.target.value);
+      render();
+    });
+  });
+
   const sairBtn = document.getElementById('sairApp');
   if (sairBtn) sairBtn.addEventListener('click', () => {
     if (confirm('Sair e pedir o código de acesso de novo?')) {
@@ -3524,13 +3545,6 @@ function attachFinanceiroHandlers(c) {
 }
 
 function attachTecidoHandlers(c) {
-  document.querySelectorAll('[data-colunas-chave]').forEach((sel) => {
-    sel.addEventListener('change', (e) => {
-      salvarColunasConfig(sel.dataset.colunasChave, e.target.value);
-      render();
-    });
-  });
-
   const toggleCompra = document.getElementById('toggleCompraTecido');
   if (toggleCompra) toggleCompra.addEventListener('click', () => {
     state.showCompraTecidoForm = !state.showCompraTecidoForm;
