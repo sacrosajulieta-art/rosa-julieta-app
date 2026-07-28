@@ -1698,12 +1698,43 @@ function renderConciliacao(c) {
     </div>
   `;
 }
+// ---- Preferência de colunas por grade (salva no aparelho) ----
+function getColunasConfig() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem('rj_layout_colunas') || '{}'); } catch (e) { saved = {}; }
+  return saved;
+}
+function salvarColunasConfig(chave, valor) {
+  const config = getColunasConfig();
+  config[chave] = valor;
+  localStorage.setItem('rj_layout_colunas', JSON.stringify(config));
+}
+function gridColumnsStyle(chave, minWidthPx) {
+  const valor = getColunasConfig()[chave] || 'auto';
+  if (valor === 'auto') return `repeat(auto-fill, minmax(${minWidthPx}px, 1fr))`;
+  return `repeat(${valor}, 1fr)`;
+}
+function renderControleColunas(chave) {
+  const valor = getColunasConfig()[chave] || 'auto';
+  return `
+    <select class="controle-colunas" data-colunas-chave="${chave}" style="width:auto;font-size:11.5px;padding:6px 10px">
+      <option value="auto" ${valor === 'auto' ? 'selected' : ''}>↕️ Auto</option>
+      <option value="1" ${valor === '1' ? 'selected' : ''}>▤ Lista (1 col)</option>
+      <option value="2" ${valor === '2' ? 'selected' : ''}>▦ 2 colunas</option>
+      <option value="3" ${valor === '3' ? 'selected' : ''}>▦ 3 colunas</option>
+      <option value="4" ${valor === '4' ? 'selected' : ''}>▦ 4 colunas</option>
+    </select>
+  `;
+}
 // ---- Materiais (matéria-prima + insumos) ----
 function renderMateriais(c) {
   return `
     <div class="section-title-wrap">
       <div><div class="section-title">Matéria-prima</div><div class="section-subtitle">Rolos de tecido em estoque, por cor</div></div>
-      <button class="icon-btn" id="toggleCompraTecido">＋ Comprar</button>
+      <div style="display:flex;gap:8px;align-items:center">
+        ${renderControleColunas('materiais')}
+        <button class="icon-btn" id="toggleCompraTecido">＋ Comprar</button>
+      </div>
     </div>
 
     ${state.showCompraTecidoForm ? `
@@ -1734,7 +1765,7 @@ function renderMateriais(c) {
     ` : ''}
 
     ${state.materiaPrima.length === 0 ? `<div class="empty-state">Nenhum tecido cadastrado ainda.</div>` : `
-      <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(150px, 1fr));gap:10px;margin-bottom:28px">
+      <div style="display:grid;grid-template-columns:${gridColumnsStyle('materiais', 150)};gap:10px;margin-bottom:28px">
         ${state.materiaPrima.map((m) => {
           if (state.editingMateriaPrimaId === m.id) {
             return `
@@ -1863,7 +1894,10 @@ function renderCorte(c) {
   return `
     <div class="section-title-wrap">
       <div><div class="section-title">Ordens de corte</div><div class="section-subtitle">Envio de tecido pro corte e resultado em peças</div></div>
-      <button class="icon-btn" id="toggleOrdemCorte">＋ Enviar corte</button>
+      <div style="display:flex;gap:8px;align-items:center">
+        ${renderControleColunas('corteAguardando')}
+        <button class="icon-btn" id="toggleOrdemCorte">＋ Enviar corte</button>
+      </div>
     </div>
 
     ${state.showOrdemCorteForm ? `
@@ -1893,7 +1927,7 @@ function renderCorte(c) {
     ` : ''}
 
     ${aguardando.length === 0 ? '' : `
-      <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(240px, 1fr));gap:10px;margin-bottom:20px">
+      <div style="display:grid;grid-template-columns:${gridColumnsStyle('corteAguardando', 240)};gap:10px;margin-bottom:20px">
         ${aguardando.map((o) => {
           if (state.editingOrdemCorteId === o.id) {
             return `
@@ -1951,9 +1985,12 @@ function renderCorte(c) {
       </div>
     `}
 
-    <div class="section-title-wrap"><div><div class="section-title">Cortes concluídos</div></div></div>
+    <div class="section-title-wrap">
+      <div><div class="section-title">Cortes concluídos</div></div>
+      ${renderControleColunas('corteConcluidos')}
+    </div>
     ${concluidas.length === 0 ? `<div class="empty-state">Nenhum corte concluído ainda.</div>` : `
-      <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(240px, 1fr));gap:10px">
+      <div style="display:grid;grid-template-columns:${gridColumnsStyle('corteConcluidos', 240)};gap:10px">
         ${concluidas.map((o) => {
           if (state.editingOrdemCorteId === o.id) {
             return `
@@ -3487,6 +3524,13 @@ function attachFinanceiroHandlers(c) {
 }
 
 function attachTecidoHandlers(c) {
+  document.querySelectorAll('[data-colunas-chave]').forEach((sel) => {
+    sel.addEventListener('change', (e) => {
+      salvarColunasConfig(sel.dataset.colunasChave, e.target.value);
+      render();
+    });
+  });
+
   const toggleCompra = document.getElementById('toggleCompraTecido');
   if (toggleCompra) toggleCompra.addEventListener('click', () => {
     state.showCompraTecidoForm = !state.showCompraTecidoForm;
