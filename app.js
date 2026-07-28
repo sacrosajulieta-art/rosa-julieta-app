@@ -3332,7 +3332,10 @@ function renderRH(c) {
   return `
     <div class="section-title-wrap">
       <div><div class="section-title">RH</div><div class="section-subtitle">Funcionárias e ponto eletrônico</div></div>
-      <button class="icon-btn" id="toggleFuncionariaForm">＋ Funcionária</button>
+      <div style="display:flex;gap:8px">
+        <button class="icon-btn-ghost" id="copiarLinkPonto">🔗 Link de ponto</button>
+        <button class="icon-btn" id="toggleFuncionariaForm">＋ Funcionária</button>
+      </div>
     </div>
 
     ${totalProblemas > 0 ? `
@@ -3611,6 +3614,17 @@ function renderFuncionariaDetalhe(funcionariaId) {
 }
 
 function attachRHHandlers(c) {
+  const copiarLinkPonto = document.getElementById('copiarLinkPonto');
+  if (copiarLinkPonto) copiarLinkPonto.addEventListener('click', async () => {
+    const link = `${window.location.origin}/?ponto=1`;
+    try {
+      await navigator.clipboard.writeText(link);
+      alert(`Link copiado!\n\n${link}\n\nManda pra funcionária — ela abre, digita o PIN dela e já cai na tela de bater ponto.`);
+    } catch (e) {
+      prompt('Copia esse link manualmente:', link);
+    }
+  });
+
   document.querySelectorAll('[data-aprovar-solicitacao]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const solicitacao = state.solicitacoesPonto.find((s) => s.id === btn.dataset.aprovarSolicitacao);
@@ -5476,6 +5490,12 @@ function showInstallBanner() {
 // ==================== INIT ====================
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(console.error));
+}
+
+// link direto pra funcionária bater ponto: rosa-julieta-app.vercel.app/?ponto=1
+// pula direto pra tela de PIN, sem precisar clicar em "Sou funcionária"
+if (new URLSearchParams(window.location.search).get('ponto')) {
+  window.__gateModoPonto = true;
 }
 
 (async () => {
