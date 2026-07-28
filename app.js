@@ -260,6 +260,8 @@ const state = {
   editingOrdemCorteId: null,
   showTabOrderForm: false,
   showTotalDefeitos: false,
+  estoqueBusca: '',
+  estoqueOrdenar: 'recentes',
 };
 
 // ==================== DATA LAYER ====================
@@ -1921,6 +1923,13 @@ function render() {
   const c = getComputed();
   const positivo = c.saldoTotal >= 0;
 
+  // guarda o campo com foco (e a posição do cursor) antes de redesenhar a tela,
+  // pra não perder o foco quando algo redesenha enquanto a pessoa está digitando
+  const focoAtivo = document.activeElement;
+  const focoId = focoAtivo && focoAtivo.id;
+  const focoInicio = focoAtivo && typeof focoAtivo.selectionStart === 'number' ? focoAtivo.selectionStart : null;
+  const focoFim = focoAtivo && typeof focoAtivo.selectionEnd === 'number' ? focoAtivo.selectionEnd : null;
+
   app.innerHTML = `
     <div class="header">
       <div>
@@ -1947,6 +1956,16 @@ function render() {
   else if (state.tab === 'dre') contentEl.innerHTML = renderDRE(c);
 
   attachHandlers(c);
+
+  if (focoId) {
+    const elParaFocar = document.getElementById(focoId);
+    if (elParaFocar) {
+      elParaFocar.focus();
+      if (focoInicio !== null && elParaFocar.setSelectionRange) {
+        try { elParaFocar.setSelectionRange(focoInicio, focoFim); } catch (e) { /* alguns tipos de input não suportam, ignora */ }
+      }
+    }
+  }
 }
 
 function tabBtn(id, label, badge) {
@@ -2246,6 +2265,20 @@ function renderDRE(c) {
 
 // ---- Estoque ----
 function renderEstoque(c) {
+  // busca por nome/SKU + ordenação (não altera c.produtosStatus original)
+  let listaProdutos = c.produtosStatus;
+  const termoBusca = (state.estoqueBusca || '').trim().toLowerCase();
+  if (termoBusca) {
+    listaProdutos = listaProdutos.filter((p) =>
+      p.nome.toLowerCase().includes(termoBusca) || (p.sku && p.sku.toLowerCase().includes(termoBusca))
+    );
+  }
+  if (state.estoqueOrdenar === 'alfabetica') {
+    listaProdutos = [...listaProdutos].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+  } else if (state.estoqueOrdenar === 'mais-vendidos') {
+    listaProdutos = [...listaProdutos].sort((a, b) => (b.totalVendido || 0) - (a.totalVendido || 0));
+  }
+
   return `
     <div class="section-title-wrap">
       <div><div class="section-title">Estoque</div><div class="section-subtitle">Cadastre seus SKUs pra ativar o semáforo de reposição</div></div>
@@ -2253,6 +2286,15 @@ function renderEstoque(c) {
         <button class="icon-btn-ghost" id="toggleProdutosParados">⏸️ Parados${c.produtosParados.length > 0 ? ` (${c.produtosParados.length})` : ''}</button>
         <button class="icon-btn" id="toggleProdutoForm">＋ Produto</button>
       </div>
+    </div>
+
+    <div class="form-row" style="margin-bottom:14px">
+      <input type="text" id="estoqueBusca" placeholder="🔍 Buscar por nome ou SKU..." value="${esc(state.estoqueBusca || '')}" />
+      <select id="estoqueOrdenar">
+        <option value="recentes" ${state.estoqueOrdenar === 'recentes' ? 'selected' : ''}>Mais recentes</option>
+        <option value="alfabetica" ${state.estoqueOrdenar === 'alfabetica' ? 'selected' : ''}>A – Z</option>
+        <option value="mais-vendidos" ${state.estoqueOrdenar === 'mais-vendidos' ? 'selected' : ''}>Mais vendidos</option>
+      </select>
     </div>
 
     ${state.showProdutosParados ? `
@@ -2302,9 +2344,9 @@ function renderEstoque(c) {
       </div>
     ` : ''}
 
-    ${c.produtosStatus.length === 0 ? `<div class="empty-state">Nenhum produto cadastrado ainda.</div>` : `
+    ${listaProdutos.length === 0 ? `<div class="empty-state">${termoBusca ? 'Nenhum produto encontrado pra essa busca.' : 'Nenhum produto cadastrado ainda.'}</div>` : `
       <div class="produto-list">
-        ${c.produtosStatus.map((p) => {
+        ${listaProdutos.map((p) => {
           const statusColor = { critico: 'var(--red)', aguarde: 'var(--amber)', 'pode-cortar': 'var(--teal)', ok: 'var(--border)' }[p.status];
           const entradaOpen = state.entradaOpenId === p.id;
 
@@ -3391,6 +3433,12 @@ function attachProducaoHandlers(c) {
 }
 
 function attachEstoqueHandlers(c) {
+  const estoqueBuscaInput = document.getElementById('estoqueBusca');
+  if (estoqueBuscaInput) estoqueBuscaInput.addEventListener('input', (e) => { state.estoqueBusca = e.target.value; render(); });
+
+  const estoqueOrdenarSelect = document.getElementById('estoqueOrdenar');
+  if (estoqueOrdenarSelect) estoqueOrdenarSelect.addEventListener('change', (e) => { state.estoqueOrdenar = e.target.value; render(); });
+
   const toggleForm = document.getElementById('toggleProdutoForm');
   if (toggleForm) toggleForm.addEventListener('click', () => {
     state.showProdutoForm = !state.showProdutoForm;
