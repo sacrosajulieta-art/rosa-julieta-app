@@ -266,6 +266,8 @@ const state = {
   fichaTecnicaItens: [],
   editingFichaTecnicaId: null,
   showNovoKitForm: false,
+  fichaTecnicaBusca: '',
+  fichaTecnicaFiltro: 'com-ficha',
 };
 
 // ==================== DATA LAYER ====================
@@ -714,6 +716,10 @@ async function salvarFichaTecnica(produtoId, itens) {
     quantidade: item.quantidade,
   })));
   if (errIns) alert('Erro ao salvar ficha técnica: ' + errIns.message);
+}
+async function excluirFichaTecnica(produtoId) {
+  const { error } = await sb.from('ficha_tecnica_itens').delete().eq('produto_id', produtoId);
+  if (error) alert('Erro ao excluir ficha técnica: ' + error.message);
 }
 // desconta do estoque os insumos e produtos-componentes da ficha técnica, proporcional à quantidade vendida
 async function baixarEstoquePorFichaTecnica(produtoId, quantidadeVendida, dataVenda, visitados) {
@@ -2330,10 +2336,32 @@ function renderFichaTecnica(c) {
     return a.produto.nome.localeCompare(b.produto.nome, 'pt-BR');
   });
 
+  const termoBusca = (state.fichaTecnicaBusca || '').trim().toLowerCase();
+  let linhasFiltradas = linhas.filter((l) => {
+    if (state.fichaTecnicaFiltro === 'com-ficha' && l.itens.length === 0) return false;
+    if (state.fichaTecnicaFiltro === 'kits' && l.produto.tipo !== 'kit') return false;
+    if (termoBusca && !(l.produto.nome.toLowerCase().includes(termoBusca) || (l.produto.sku && l.produto.sku.toLowerCase().includes(termoBusca)))) return false;
+    return true;
+  });
+  // garante que o item que está sendo editado no momento nunca some da lista por causa do filtro
+  if (state.editingFichaTecnicaId && !linhasFiltradas.some((l) => l.produto.id === state.editingFichaTecnicaId)) {
+    const emEdicao = linhas.find((l) => l.produto.id === state.editingFichaTecnicaId);
+    if (emEdicao) linhasFiltradas = [emEdicao, ...linhasFiltradas];
+  }
+
   return `
     <div class="section-title-wrap">
       <div><div class="section-title">Ficha Técnica</div><div class="section-subtitle">Custo completo de cada produto e kit — tecido, corte, mão de obra e insumos</div></div>
       <button class="icon-btn" id="toggleNovoKit">🎁 Criar novo kit</button>
+    </div>
+
+    <div class="form-row" style="margin-bottom:14px">
+      <input type="text" id="fichaTecnicaBusca" placeholder="🔍 Buscar por nome ou SKU..." value="${esc(state.fichaTecnicaBusca || '')}" />
+      <select id="fichaTecnicaFiltro">
+        <option value="com-ficha" ${state.fichaTecnicaFiltro === 'com-ficha' ? 'selected' : ''}>Só com ficha técnica</option>
+        <option value="kits" ${state.fichaTecnicaFiltro === 'kits' ? 'selected' : ''}>Só kits</option>
+        <option value="todos" ${state.fichaTecnicaFiltro === 'todos' ? 'selected' : ''}>Todos os produtos</option>
+      </select>
     </div>
 
     ${state.showNovoKitForm ? `
@@ -2348,9 +2376,9 @@ function renderFichaTecnica(c) {
       </div>
     ` : ''}
 
-    ${state.produtos.length === 0 ? `<div class="empty-state">Cadastre produtos no Estoque primeiro.</div>` : `
+    ${state.produtos.length === 0 ? `<div class="empty-state">Cadastre produtos no Estoque primeiro.</div>` : linhasFiltradas.length === 0 ? `<div class="empty-state">${termoBusca ? 'Nenhum produto encontrado pra essa busca.' : 'Nada por aqui com esse filtro. Tenta "Todos os produtos".'}</div>` : `
       <div class="produto-list">
-        ${linhas.map(({ produto: p, itens, custoBase, custoTotal }) => {
+        ${linhasFiltradas.map(({ produto: p, itens, custoBase, custoTotal }) => {
           const editando = state.editingFichaTecnicaId === p.id;
 
           if (editando) {
@@ -2411,7 +2439,10 @@ function renderFichaTecnica(c) {
                   <div class="produto-nome">${esc(p.nome)}${p.tipo === 'kit' ? ' 🎁 Kit' : ''}</div>
                   ${p.sku ? `<div class="produto-sku">${esc(p.sku)}</div>` : ''}
                 </div>
-                <button class="trash-btn" data-editar-ficha="${p.id}">✏️</button>
+                <div style="display:flex;gap:2px">
+                  <button class="trash-btn" data-editar-ficha="${p.id}">✏️</button>
+                  ${itens.length > 0 ? `<button class="trash-btn" data-excluir-ficha="${p.id}">🗑️</button>` : ''}
+                </div>
               </div>
               <div class="produto-meta">Custo base (tecido/corte + mão de obra): <strong style="color:var(--text)">${fmt(custoBase)}</strong></div>
               <div class="produto-meta" style="margin-top:4px">Custo total (com insumos): <strong style="color:var(--teal)">${fmt(custoTotal)}</strong></div>
@@ -2436,6 +2467,21 @@ function renderFichaTecnica(c) {
 }
 
 function attachFichaTecnicaHandlers(c) {
+  const fichaTecnicaBuscaInput = document.getElementById('fichaTecnicaBusca');
+  if (fichaTecnicaBuscaInput) fichaTecnicaBuscaInput.addEventListener('input', (e) => { state.fichaTecnicaBusca = e.target.value; render(); });
+
+  const fichaTecnicaFiltroSelect = document.getElementById('fichaTecnicaFiltro');
+  if (fichaTecnicaFiltroSelect) fichaTecnicaFiltroSelect.addEventListener('change', (e) => { state.fichaTecnicaFiltro = e.target.value; render(); });
+
+  document.querySelectorAll('[data-excluir-ficha]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (confirm('Remover a ficha técnica desse produto? O produto continua no Estoque normalmente, só a receita de insumos/componentes é apagada.')) {
+        await excluirFichaTecnica(btn.dataset.excluirFicha);
+        await loadData();
+      }
+    });
+  });
+
   const toggleNovoKit = document.getElementById('toggleNovoKit');
   if (toggleNovoKit) toggleNovoKit.addEventListener('click', () => { state.showNovoKitForm = !state.showNovoKitForm; render(); });
 
@@ -2933,6 +2979,7 @@ function attachHandlers(c) {
       state.editingOrdemCorteId = null;
       state.editingFichaTecnicaId = null;
       state.showNovoKitForm = false;
+      state.fichaTecnicaBusca = '';
       render();
     });
   });
