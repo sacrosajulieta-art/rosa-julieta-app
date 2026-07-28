@@ -257,6 +257,7 @@ const state = {
   distribuicoes: [],
   distribuindoOrdemId: null,
   editingMateriaPrimaId: null,
+  editingInsumoId: null,
   editingOrdemCorteId: null,
   showTabOrderForm: false,
   showTotalDefeitos: false,
@@ -474,6 +475,10 @@ async function baixarInsumo(id, quantidadeUsada) {
   const nova = Math.max(0, insumo.quantidadeDisponivel - quantidadeUsada);
   const { error } = await sb.from('insumos').update({ quantidade_disponivel: nova }).eq('id', id);
   if (error) alert('Erro ao dar baixa: ' + error.message);
+}
+async function updateInsumo(id, nome, quantidadeDisponivel, custoMedioUnitario) {
+  const { error } = await sb.from('insumos').update({ nome, quantidade_disponivel: quantidadeDisponivel, custo_medio_unitario: custoMedioUnitario }).eq('id', id);
+  if (error) alert('Erro ao atualizar insumo: ' + error.message);
 }
 async function removeInsumo(id) {
   const { error } = await sb.from('insumos').delete().eq('id', id);
@@ -1731,7 +1736,25 @@ function renderMateriais(c) {
 
     ${state.insumos.length === 0 ? `<div class="empty-state">Nenhum insumo cadastrado ainda.</div>` : `
       <div class="tx-list">
-        ${state.insumos.map((i) => `
+        ${state.insumos.map((i) => {
+          if (state.editingInsumoId === i.id) {
+            return `
+              <div class="form-card">
+                <input type="text" id="editInsumoNome-${i.id}" placeholder="Nome" value="${esc(i.nome)}" />
+                <input type="text" id="editInsumoQtd-${i.id}" placeholder="Quantidade disponível" value="${i.quantidadeDisponivel}" />
+                <div class="form-hint">Preencha o valor TOTAL pago por essa quantidade — o custo médio é calculado sozinho.</div>
+                <div class="form-row">
+                  <input type="text" id="editInsumoValorTotal-${i.id}" placeholder="Valor total pago (R$)" inputmode="decimal" />
+                  <input type="text" id="editInsumoCusto-${i.id}" placeholder="Custo médio por unidade (R$)" value="${i.custoMedioUnitario.toFixed(2).replace('.', ',')}" />
+                </div>
+                <div class="form-row">
+                  <button class="confirm-btn" data-salvar-edit-insumo="${i.id}">Salvar</button>
+                  <button class="toggle-btn" data-cancelar-edit-insumo="${i.id}">Cancelar</button>
+                </div>
+              </div>
+            `;
+          }
+          return `
           <div class="tx-row">
             <div class="tx-dot" style="background:${i.quantidadeDisponivel > 0 ? 'var(--teal)' : 'var(--red)'}"></div>
             <div style="flex:1"><div class="tx-categoria">${esc(i.nome)}</div><div class="tx-desc">${fmt(i.custoMedioUnitario)}/${esc(i.unidade)} (média)</div></div>
@@ -1742,9 +1765,11 @@ function renderMateriais(c) {
               <div class="tx-valor" style="margin-right:6px">${i.quantidadeDisponivel} ${esc(i.unidade)}</div>
               <button class="trash-btn" data-abrir-baixa="${i.id}">➖</button>
             `}
+            <button class="trash-btn" data-editar-insumo="${i.id}">✏️</button>
             <button class="trash-btn" data-remover-insumo="${i.id}">🗑</button>
           </div>
-        `).join('')}
+        `;
+        }).join('')}
       </div>
     `}
   `;
@@ -3664,6 +3689,41 @@ function attachTecidoHandlers(c) {
       }
     });
   });
+
+  document.querySelectorAll('[data-editar-insumo]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.editingInsumoId = btn.dataset.editarInsumo; render(); });
+  });
+  document.querySelectorAll('[data-cancelar-edit-insumo]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.editingInsumoId = null; render(); });
+  });
+  document.querySelectorAll('[data-salvar-edit-insumo]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.salvarEditInsumo;
+      const nome = document.getElementById(`editInsumoNome-${id}`).value.trim();
+      const qtd = parseBRNumber(document.getElementById(`editInsumoQtd-${id}`).value);
+      const custo = parseBRNumber(document.getElementById(`editInsumoCusto-${id}`).value);
+      if (!nome) { alert('Informe o nome do insumo.'); return; }
+      await updateInsumo(id, nome, qtd, custo);
+      state.editingInsumoId = null;
+      await loadData();
+    });
+  });
+  // custo médio = valor total ÷ quantidade, recalculado ao digitar
+  if (state.editingInsumoId) {
+    const id = state.editingInsumoId;
+    const valorInput = document.getElementById(`editInsumoValorTotal-${id}`);
+    const qtdInput = document.getElementById(`editInsumoQtd-${id}`);
+    const custoInput = document.getElementById(`editInsumoCusto-${id}`);
+    if (valorInput && qtdInput && custoInput) {
+      const recalcularCustoInsumo = () => {
+        const valor = parseBRNumber(valorInput.value);
+        const qtd = parseBRNumber(qtdInput.value);
+        if (valor > 0 && qtd > 0) custoInput.value = (valor / qtd).toFixed(2).replace('.', ',');
+      };
+      valorInput.addEventListener('input', recalcularCustoInsumo);
+      qtdInput.addEventListener('input', recalcularCustoInsumo);
+    }
+  }
 
   document.querySelectorAll('[data-abrir-distribuicao]').forEach((btn) => {
     btn.addEventListener('click', () => { state.distribuindoOrdemId = btn.dataset.abrirDistribuicao; render(); });
