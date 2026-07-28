@@ -1660,11 +1660,11 @@ function renderMateriais(c) {
     ` : ''}
 
     ${state.materiaPrima.length === 0 ? `<div class="empty-state">Nenhum tecido cadastrado ainda.</div>` : `
-      <div class="tx-list" style="margin-bottom:28px">
+      <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(150px, 1fr));gap:10px;margin-bottom:28px">
         ${state.materiaPrima.map((m) => {
           if (state.editingMateriaPrimaId === m.id) {
             return `
-              <div class="form-card">
+              <div class="form-card" style="grid-column:1 / -1">
                 <input type="text" id="editMpCor-${m.id}" placeholder="Cor" value="${esc(m.cor)}" />
 
                 <div class="form-hint">🧮 Sabe o peso total em estoque? Calcule a quantidade de rolos (peso médio ajustável, 19,5kg a 20kg por rolo).</div>
@@ -1688,12 +1688,17 @@ function renderMateriais(c) {
             `;
           }
           return `
-          <div class="tx-row">
-            <div class="tx-dot" style="background:${m.rolosDisponiveis > 0 ? 'var(--teal)' : 'var(--red)'}"></div>
-            <div style="flex:1"><div class="tx-categoria">${esc(m.cor)}</div><div class="tx-desc">${fmt(m.custoMedioRolo)}/rolo (média)</div></div>
-            <div class="tx-valor" style="margin-right:6px">${m.rolosDisponiveis} rolo(s)</div>
-            <button class="trash-btn" data-editar-mp="${m.id}">✏️</button>
-            <button class="trash-btn" data-remover-mp="${m.id}">🗑</button>
+          <div style="background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:6px">
+            <div style="display:flex;align-items:center;gap:6px">
+              <div style="width:8px;height:8px;min-width:8px;border-radius:50%;background:${m.rolosDisponiveis > 0 ? 'var(--teal)' : 'var(--red)'}"></div>
+              <div style="font-size:13px;font-weight:600;color:var(--text);line-height:1.3">${esc(m.cor)}</div>
+            </div>
+            <div style="font-size:20px;font-weight:700;color:var(--text)">${m.rolosDisponiveis}<span style="font-size:12px;font-weight:400;color:var(--text-muted)"> rolo(s)</span></div>
+            <div style="font-size:12px;color:var(--text-muted)">${fmt(m.custoMedioRolo)}/rolo</div>
+            <div style="display:flex;gap:6px;margin-top:2px">
+              <button class="trash-btn" data-editar-mp="${m.id}">✏️</button>
+              <button class="trash-btn" data-remover-mp="${m.id}">🗑</button>
+            </div>
           </div>
         `;
         }).join('')}
