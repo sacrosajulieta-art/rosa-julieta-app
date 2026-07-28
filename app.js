@@ -309,7 +309,7 @@ async function loadData() {
   state.ordensCorteItens = (ordensCorteItens || []).map((i) => ({ id: i.id, ordemId: i.ordem_id, produtoId: i.produto_id, quantidade: i.quantidade, varianteId: i.variante_id || null }));
   state.insumos = (insumos || []).map((i) => ({ id: i.id, nome: i.nome, unidade: i.unidade, quantidadeDisponivel: Number(i.quantidade_disponivel), custoMedioUnitario: Number(i.custo_medio_unitario) }));
   state.distribuicoes = (distribuicoes || []).map((d) => ({ id: d.id, ordemItemId: d.ordem_item_id, produtoId: d.produto_id, varianteId: d.variante_id || null, costureiraId: d.costureira_id, quantidadeDistribuida: d.quantidade_distribuida, quantidadeDevolvida: d.quantidade_devolvida, data: d.data }));
-  state.fichaTecnicaItens = (fichaTecnicaItens || []).map((f) => ({ id: f.id, produtoId: f.produto_id, tipoItem: f.tipo_item, insumoId: f.insumo_id || null, componenteProdutoId: f.componente_produto_id || null, quantidade: Number(f.quantidade) }));
+  state.fichaTecnicaItens = (fichaTecnicaItens || []).map((f) => ({ id: f.id, produtoId: f.produto_id, tipoItem: f.tipo_item, insumoId: f.insumo_id || null, componenteProdutoId: f.componente_produto_id || null, quantidade: Number(f.quantidade), momento: f.momento || 'venda' }));
   state.loading = false;
   render();
 }
@@ -714,6 +714,7 @@ async function salvarFichaTecnica(produtoId, itens) {
     insumo_id: item.tipoItem === 'insumo' ? item.refId : null,
     componente_produto_id: item.tipoItem === 'produto' ? item.refId : null,
     quantidade: item.quantidade,
+    momento: item.tipoItem === 'insumo' ? (item.momento || 'venda') : 'venda',
   })));
   if (errIns) alert('Erro ao salvar ficha técnica: ' + errIns.message);
 }
@@ -721,7 +722,7 @@ async function excluirFichaTecnica(produtoId) {
   const { error } = await sb.from('ficha_tecnica_itens').delete().eq('produto_id', produtoId);
   if (error) alert('Erro ao excluir ficha técnica: ' + error.message);
 }
-// desconta do estoque os insumos e produtos-componentes da ficha técnica, proporcional à quantidade vendida
+// desconta do estoque os insumos (momento = venda) e produtos-componentes da ficha técnica, proporcional à quantidade vendida
 async function baixarEstoquePorFichaTecnica(produtoId, quantidadeVendida, dataVenda, visitados) {
   visitados = visitados || new Set();
   if (visitados.has(produtoId)) return;
@@ -729,6 +730,7 @@ async function baixarEstoquePorFichaTecnica(produtoId, quantidadeVendida, dataVe
   for (const item of fichaTecnicaDoProduto(produtoId)) {
     const qtdConsumida = item.quantidade * quantidadeVendida;
     if (item.tipoItem === 'insumo') {
+      if (item.momento !== 'venda') continue; // insumos de "produção" já foram baixados quando a peça foi entregue
       const insumo = state.insumos.find((i) => i.id === item.insumoId);
       if (insumo) await baixarInsumo(insumo.id, qtdConsumida);
     } else if (item.tipoItem === 'produto') {
@@ -740,6 +742,14 @@ async function baixarEstoquePorFichaTecnica(produtoId, quantidadeVendida, dataVe
         await baixarEstoquePorFichaTecnica(componente.id, qtdConsumida, dataVenda, visitados);
       }
     }
+  }
+}
+// desconta insumos marcados como "momento = produção" (ex: etiqueta) toda vez que uma peça é entregue pronta
+async function baixarInsumosProducao(produtoId, quantidadeProduzida, data) {
+  for (const item of fichaTecnicaDoProduto(produtoId)) {
+    if (item.tipoItem !== 'insumo' || item.momento !== 'producao') continue;
+    const insumo = state.insumos.find((i) => i.id === item.insumoId);
+    if (insumo) await baixarInsumo(insumo.id, item.quantidade * quantidadeProduzida);
   }
 }
 
@@ -776,6 +786,8 @@ async function registrarProducao(costureiraId, produtoId, quantidade, data, vari
     if (produto) await updateProdutoEstoque(produtoId, produto.estoqueAtual + quantidade);
   }
   if (quantidade !== 0) await baixarDistribuicoesFIFO(costureiraId, produtoId, varianteId, Math.abs(quantidade));
+  // peças de verdade entregues (não defeito) já consomem os insumos de "produção" da ficha técnica, tipo etiqueta
+  if (quantidade > 0) await baixarInsumosProducao(produtoId, quantidade, data);
 }
 async function marcarProducaoPaga(ids) {
   const { error } = await sb.from('producoes').update({ pago: true }).in('id', ids);
@@ -2312,6 +2324,7 @@ function capturarLinhasFicha(produtoId, numInsumo, numComponente) {
     insumoValores.push({
       ref: document.getElementById(`ftInsumo-${produtoId}-${i}`)?.value || '',
       qtd: document.getElementById(`ftInsumoQtd-${produtoId}-${i}`)?.value || '',
+      momento: document.getElementById(`ftInsumoMomento-${produtoId}-${i}`)?.value || 'venda',
     });
   }
   const componenteValores = [];
@@ -2386,7 +2399,7 @@ function renderFichaTecnica(c) {
             const itensComponente = itens.filter((i) => i.tipoItem === 'produto');
             const numInsumo = window.__ftNumInsumoRows || Math.max(3, itensInsumo.length);
             const numComponente = window.__ftNumComponenteRows || Math.max(2, itensComponente.length);
-            const insumoValores = window.__ftInsumoValores || itensInsumo.map((i) => ({ ref: i.insumoId, qtd: String(i.quantidade) }));
+            const insumoValores = window.__ftInsumoValores || itensInsumo.map((i) => ({ ref: i.insumoId, qtd: String(i.quantidade), momento: i.momento || 'venda' }));
             const componenteValores = window.__ftComponenteValores || itensComponente.map((i) => ({ ref: i.componenteProdutoId, qtd: String(i.quantidade) }));
 
             return `
@@ -2396,7 +2409,7 @@ function renderFichaTecnica(c) {
                 </div>
                 <div class="form-hint">Insumos usados (bojo, etiqueta, embalagem...)</div>
                 ${Array.from({ length: numInsumo }, (_, i) => {
-                  const atual = insumoValores[i] || { ref: '', qtd: '' };
+                  const atual = insumoValores[i] || { ref: '', qtd: '', momento: 'venda' };
                   return `
                   <div class="form-row">
                     <select id="ftInsumo-${p.id}-${i}">
@@ -2405,6 +2418,10 @@ function renderFichaTecnica(c) {
                     </select>
                     <input type="text" id="ftInsumoQtd-${p.id}-${i}" placeholder="Quantidade" value="${esc(atual.qtd)}" />
                   </div>
+                  <select id="ftInsumoMomento-${p.id}-${i}" style="margin-bottom:10px">
+                    <option value="venda" ${(atual.momento || 'venda') === 'venda' ? 'selected' : ''}>Descontar na venda (ex: bojo do kit)</option>
+                    <option value="producao" ${atual.momento === 'producao' ? 'selected' : ''}>Descontar na produção (ex: etiqueta, toda peça usa)</option>
+                  </select>
                 `;
                 }).join('')}
                 <button class="entrada-btn" type="button" data-mais-insumo-ft="${p.id}">＋ Mais um insumo</button>
@@ -2451,7 +2468,7 @@ function renderFichaTecnica(c) {
                   ${itens.map((item) => {
                     if (item.tipoItem === 'insumo') {
                       const insumo = state.insumos.find((i) => i.id === item.insumoId);
-                      return `<div class="prod-breakdown-item"><span>🧷 ${esc(insumo?.nome || 'Insumo removido')}</span><span>${item.quantidade}×</span></div>`;
+                      return `<div class="prod-breakdown-item"><span>🧷 ${esc(insumo?.nome || 'Insumo removido')} <span style="color:var(--text-muted);font-size:11px">(${item.momento === 'producao' ? 'na produção' : 'na venda'})</span></span><span>${item.quantidade}×</span></div>`;
                     }
                     const componente = state.produtos.find((prod) => prod.id === item.componenteProdutoId);
                     return `<div class="prod-breakdown-item"><span>📦 ${esc(componente?.nome || 'Produto removido')}</span><span>${item.quantidade}×</span></div>`;
@@ -2548,7 +2565,8 @@ function attachFichaTecnicaHandlers(c) {
       for (let i = 0; i < numInsumo; i++) {
         const insumoId = document.getElementById(`ftInsumo-${produtoId}-${i}`)?.value;
         const qtd = parseBRNumber(document.getElementById(`ftInsumoQtd-${produtoId}-${i}`)?.value || '0');
-        if (insumoId && qtd > 0) itens.push({ tipoItem: 'insumo', refId: insumoId, quantidade: qtd });
+        const momento = document.getElementById(`ftInsumoMomento-${produtoId}-${i}`)?.value || 'venda';
+        if (insumoId && qtd > 0) itens.push({ tipoItem: 'insumo', refId: insumoId, quantidade: qtd, momento });
       }
       for (let i = 0; i < numComponente; i++) {
         const componenteId = document.getElementById(`ftComponente-${produtoId}-${i}`)?.value;
