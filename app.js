@@ -274,11 +274,20 @@ const state = {
   fichaTecnicaFiltro: 'com-ficha',
   insumoPlataformaQtd: [],
   configEnvioInsumoId: null,
+  funcionarias: [],
+  pontos: [],
+  funcionariaLogadaId: localStorage.getItem('rj_funcionaria_id') || null,
+  showFuncionariaForm: false,
+  editingFuncionariaId: null,
+  rhFuncionariaDetalheId: null,
+  rhFiltroInicio: null,
+  rhFiltroFim: null,
+  editingPontoId: null,
 };
 
 // ==================== DATA LAYER ====================
 async function loadData() {
-  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }] = await Promise.all([
+  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }] = await Promise.all([
     sb.from('transacoes').select('*').order('data', { ascending: false }),
     sb.from('produtos').select('*').order('created_at', { ascending: false }),
     sb.from('plataformas').select('*').order('nome', { ascending: true }),
@@ -292,6 +301,8 @@ async function loadData() {
     sb.from('distribuicoes').select('*').order('data', { ascending: false }),
     sb.from('ficha_tecnica_itens').select('*'),
     sb.from('insumo_plataforma_qtd').select('*'),
+    sb.from('funcionarias').select('*').order('nome', { ascending: true }),
+    sb.from('pontos').select('*').order('horario', { ascending: false }),
   ]);
   if (e1) console.error(e1);
   if (e2) console.error(e2);
@@ -306,6 +317,8 @@ async function loadData() {
   if (e11) console.error(e11);
   if (e12) console.error(e12);
   if (e13) console.error(e13);
+  if (e14) console.error(e14);
+  if (e15) console.error(e15);
   state.tx = (tx || []).map(mapTxFromDb);
   state.produtos = (produtos || []).map(mapProdutoFromDb);
   state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0) }));
@@ -319,6 +332,8 @@ async function loadData() {
   state.distribuicoes = (distribuicoes || []).map((d) => ({ id: d.id, ordemItemId: d.ordem_item_id, produtoId: d.produto_id, varianteId: d.variante_id || null, costureiraId: d.costureira_id, quantidadeDistribuida: d.quantidade_distribuida, quantidadeDevolvida: d.quantidade_devolvida, data: d.data }));
   state.fichaTecnicaItens = (fichaTecnicaItens || []).map((f) => ({ id: f.id, produtoId: f.produto_id, tipoItem: f.tipo_item, insumoId: f.insumo_id || null, componenteProdutoId: f.componente_produto_id || null, quantidade: Number(f.quantidade), momento: f.momento || 'venda' }));
   state.insumoPlataformaQtd = (insumoPlataformaQtd || []).map((q) => ({ id: q.id, insumoId: q.insumo_id, plataformaId: q.plataforma_id, quantidade: Number(q.quantidade) }));
+  state.funcionarias = (funcionarias || []).map((f) => ({ id: f.id, nome: f.nome, pin: f.pin, ativa: f.ativa, jornadaEntrada: (f.jornada_entrada || '08:00').slice(0, 5), jornadaSaidaAlmoco: (f.jornada_saida_almoco || '12:00').slice(0, 5), jornadaVoltaAlmoco: (f.jornada_volta_almoco || '13:00').slice(0, 5), jornadaSaida: (f.jornada_saida || '17:00').slice(0, 5), valorHora: Number(f.valor_hora || 0) }));
+  state.pontos = (pontos || []).map((p) => ({ id: p.id, funcionariaId: p.funcionaria_id, data: p.data, tipo: p.tipo, horario: p.horario }));
   state.loading = false;
   render();
 }
@@ -816,6 +831,64 @@ async function addPlataforma(nome, taxaPercentual, taxaFixa) {
 async function removePlataforma(id) {
   const { error } = await sb.from('plataformas').delete().eq('id', id);
   if (error) alert('Erro ao remover plataforma: ' + error.message);
+}
+
+// ---- RH: funcionárias e ponto eletrônico ----
+async function addFuncionaria(dados) {
+  const { error } = await sb.from('funcionarias').insert({
+    nome: dados.nome, pin: dados.pin, ativa: true,
+    jornada_entrada: dados.jornadaEntrada, jornada_saida_almoco: dados.jornadaSaidaAlmoco,
+    jornada_volta_almoco: dados.jornadaVoltaAlmoco, jornada_saida: dados.jornadaSaida,
+    valor_hora: dados.valorHora || 0,
+  });
+  if (error) alert('Erro ao adicionar funcionária: ' + error.message);
+}
+async function updateFuncionaria(id, dados) {
+  const { error } = await sb.from('funcionarias').update({
+    nome: dados.nome, pin: dados.pin, ativa: dados.ativa,
+    jornada_entrada: dados.jornadaEntrada, jornada_saida_almoco: dados.jornadaSaidaAlmoco,
+    jornada_volta_almoco: dados.jornadaVoltaAlmoco, jornada_saida: dados.jornadaSaida,
+    valor_hora: dados.valorHora || 0,
+  }).eq('id', id);
+  if (error) alert('Erro ao atualizar funcionária: ' + error.message);
+}
+async function removeFuncionaria(id) {
+  const { error } = await sb.from('funcionarias').delete().eq('id', id);
+  if (error) alert('Erro ao remover funcionária: ' + error.message);
+}
+async function registrarPonto(funcionariaId, tipo) {
+  const agora = new Date();
+  const { error } = await sb.from('pontos').insert({
+    funcionaria_id: funcionariaId, data: todayStr(), tipo, horario: agora.toISOString(),
+  });
+  if (error) alert('Erro ao bater ponto: ' + error.message);
+}
+async function updatePonto(id, horarioISO) {
+  const { error } = await sb.from('pontos').update({ horario: horarioISO }).eq('id', id);
+  if (error) alert('Erro ao corrigir ponto: ' + error.message);
+}
+async function removePonto(id) {
+  const { error } = await sb.from('pontos').delete().eq('id', id);
+  if (error) alert('Erro ao remover ponto: ' + error.message);
+}
+// calcula horas trabalhadas e a diferença (extra/falta) num dia, a partir das batidas
+function calcularHorasDia(pontosDoDia, funcionaria) {
+  const porTipo = {};
+  pontosDoDia.forEach((p) => { porTipo[p.tipo] = new Date(p.horario); });
+  let horasTrabalhadas = 0;
+  if (porTipo.entrada && porTipo.saida_almoco) horasTrabalhadas += (porTipo.saida_almoco - porTipo.entrada) / 3600000;
+  if (porTipo.volta_almoco && porTipo.saida) horasTrabalhadas += (porTipo.saida - porTipo.volta_almoco) / 3600000;
+  // se bateu só entrada e saída (sem almoço registrado), calcula direto
+  if (porTipo.entrada && porTipo.saida && !porTipo.saida_almoco && !porTipo.volta_almoco) {
+    horasTrabalhadas = (porTipo.saida - porTipo.entrada) / 3600000;
+  }
+  const [hE, mE] = funcionaria.jornadaEntrada.split(':').map(Number);
+  const [hSA, mSA] = funcionaria.jornadaSaidaAlmoco.split(':').map(Number);
+  const [hVA, mVA] = funcionaria.jornadaVoltaAlmoco.split(':').map(Number);
+  const [hS, mS] = funcionaria.jornadaSaida.split(':').map(Number);
+  const jornadaEsperada = ((hSA * 60 + mSA) - (hE * 60 + mE) + (hS * 60 + mS) - (hVA * 60 + mVA)) / 60;
+  const completo = !!(porTipo.entrada && porTipo.saida);
+  return { horasTrabalhadas, jornadaEsperada, diferenca: horasTrabalhadas - jornadaEsperada, completo, porTipo };
 }
 
 // ---- Costureiras & Produção ----
@@ -1452,6 +1525,85 @@ function renderCostureiraDetalhe(costureiraId) {
       </div>
     `}
   `;
+}
+
+// ---- Modo Ponto (funcionária bate o próprio ponto) ----
+const ORDEM_PONTOS = ['entrada', 'saida_almoco', 'volta_almoco', 'saida'];
+const LABEL_PONTO = { entrada: 'Entrada', saida_almoco: 'Saída Almoço', volta_almoco: 'Volta Almoço', saida: 'Saída' };
+
+function renderModoPonto(app) {
+  const funcionaria = state.funcionarias.find((f) => f.id === state.funcionariaLogadaId);
+  if (!funcionaria) {
+    localStorage.removeItem('rj_papel');
+    localStorage.removeItem('rj_funcionaria_id');
+    state.papel = null;
+    state.funcionariaLogadaId = null;
+    render();
+    return;
+  }
+
+  const hoje = todayStr();
+  const pontosHoje = state.pontos
+    .filter((p) => p.funcionariaId === funcionaria.id && p.data === hoje)
+    .sort((a, b) => new Date(a.horario) - new Date(b.horario));
+  const tiposJaBatidos = new Set(pontosHoje.map((p) => p.tipo));
+  const proximoTipo = ORDEM_PONTOS.find((t) => !tiposJaBatidos.has(t));
+  const agora = new Date();
+  const horaAtual = agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const dataFormatada = agora.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' });
+
+  app.innerHTML = `
+    <div class="header">
+      <div>
+        <div class="brand-row"><div class="brand-dot"></div><span class="brand-name">ROSA JULIETA</span></div>
+        <div class="brand-sub">Olá, ${esc(funcionaria.nome)}</div>
+      </div>
+      <button class="icon-btn-ghost" id="sairPonto">Sair</button>
+    </div>
+    <div class="content" style="max-width:420px">
+      <div style="text-align:center;margin-bottom:24px">
+        <div style="font-size:13px;color:var(--text-muted);text-transform:capitalize">${dataFormatada}</div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:40px;font-weight:700;margin-top:4px">${horaAtual}</div>
+      </div>
+
+      ${proximoTipo ? `
+        <button class="confirm-btn" id="baterPonto" data-tipo="${proximoTipo}" style="padding:20px;font-size:16px;margin-bottom:24px">
+          🕐 Bater ${LABEL_PONTO[proximoTipo]}
+        </button>
+      ` : `
+        <div class="empty-state" style="margin-bottom:24px">✅ Jornada de hoje completa!</div>
+      `}
+
+      <div class="section-title-wrap"><div><div class="section-title">Hoje</div></div></div>
+      ${pontosHoje.length === 0 ? `<div class="empty-state">Nenhuma batida ainda hoje.</div>` : `
+        <div class="tx-list">
+          ${pontosHoje.map((p) => `
+            <div class="tx-row">
+              <div class="tx-dot" style="background:var(--teal)"></div>
+              <div style="flex:1"><div class="tx-categoria">${LABEL_PONTO[p.tipo] || p.tipo}</div></div>
+              <div class="tx-valor">${new Date(p.horario).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</div>
+            </div>
+          `).join('')}
+        </div>
+      `}
+    </div>
+  `;
+
+  document.getElementById('sairPonto').addEventListener('click', () => {
+    localStorage.removeItem('rj_papel');
+    localStorage.removeItem('rj_funcionaria_id');
+    state.papel = null;
+    state.funcionariaLogadaId = null;
+    render();
+  });
+
+  const baterBtn = document.getElementById('baterPonto');
+  if (baterBtn) baterBtn.addEventListener('click', async () => {
+    const tipo = baterBtn.dataset.tipo;
+    if (!confirm(`Confirmar ${LABEL_PONTO[tipo]} agora (${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })})?`)) return;
+    await registrarPonto(funcionaria.id, tipo);
+    await loadData();
+  });
 }
 
 // ---- Modo Supervisora (lançamento de produção) ----
@@ -2250,17 +2402,28 @@ function renderContasAVencer(c) {
 
 // ---- Gate de acesso ----
 function renderGate(app) {
+  const modoPonto = window.__gateModoPonto;
   app.innerHTML = `
     <div class="gate-wrap">
       <div class="brand-row" style="justify-content:center;margin-bottom:24px">
         <div class="brand-dot"></div><span class="brand-name">ROSA JULIETA</span>
       </div>
       <div class="gate-card">
-        <div class="section-title" style="margin-bottom:4px">Código de acesso</div>
-        <div class="section-subtitle" style="margin-bottom:16px">Digite o código que você recebeu</div>
-        <input type="password" id="gateCodigo" placeholder="Código" />
-        <button class="confirm-btn" id="gateEntrar" style="margin-top:10px">Entrar</button>
-        <div id="gateErro" style="color:var(--red);font-size:12px;margin-top:8px;display:none">Código inválido, tente de novo.</div>
+        ${modoPonto ? `
+          <div class="section-title" style="margin-bottom:4px">Bater ponto</div>
+          <div class="section-subtitle" style="margin-bottom:16px">Digite seu PIN pessoal</div>
+          <input type="password" id="gatePin" inputmode="numeric" placeholder="PIN" />
+          <button class="confirm-btn" id="gateEntrarPin" style="margin-top:10px">Entrar</button>
+          <div id="gateErroPin" style="color:var(--red);font-size:12px;margin-top:8px;display:none">PIN inválido, tente de novo.</div>
+          <button class="sair-link" id="gateVoltarCodigo" style="margin-top:14px">← Voltar pro código de acesso</button>
+        ` : `
+          <div class="section-title" style="margin-bottom:4px">Código de acesso</div>
+          <div class="section-subtitle" style="margin-bottom:16px">Digite o código que você recebeu</div>
+          <input type="password" id="gateCodigo" placeholder="Código" />
+          <button class="confirm-btn" id="gateEntrar" style="margin-top:10px">Entrar</button>
+          <div id="gateErro" style="color:var(--red);font-size:12px;margin-top:8px;display:none">Código inválido, tente de novo.</div>
+          <button class="sair-link" id="gateIrPonto" style="margin-top:14px">🕐 Sou funcionária, bater ponto</button>
+        `}
       </div>
     </div>
   `;
@@ -2277,8 +2440,29 @@ function renderGate(app) {
       document.getElementById('gateErro').style.display = 'block';
     }
   };
-  document.getElementById('gateEntrar').addEventListener('click', tentar);
-  document.getElementById('gateCodigo').addEventListener('keydown', (e) => { if (e.key === 'Enter') tentar(); });
+  if (!modoPonto) {
+    document.getElementById('gateEntrar').addEventListener('click', tentar);
+    document.getElementById('gateCodigo').addEventListener('keydown', (e) => { if (e.key === 'Enter') tentar(); });
+    document.getElementById('gateIrPonto').addEventListener('click', () => { window.__gateModoPonto = true; render(); });
+  } else {
+    const tentarPin = () => {
+      const pin = document.getElementById('gatePin').value.trim();
+      const funcionaria = state.funcionarias.find((f) => f.pin === pin && f.ativa !== false);
+      if (funcionaria) {
+        localStorage.setItem('rj_papel', 'ponto');
+        localStorage.setItem('rj_funcionaria_id', funcionaria.id);
+        state.papel = 'ponto';
+        state.funcionariaLogadaId = funcionaria.id;
+        window.__gateModoPonto = false;
+        render();
+      } else {
+        document.getElementById('gateErroPin').style.display = 'block';
+      }
+    };
+    document.getElementById('gateEntrarPin').addEventListener('click', tentarPin);
+    document.getElementById('gatePin').addEventListener('keydown', (e) => { if (e.key === 'Enter') tentarPin(); });
+    document.getElementById('gateVoltarCodigo').addEventListener('click', () => { window.__gateModoPonto = false; render(); });
+  }
 }
 
 function render() {
@@ -2293,6 +2477,10 @@ function render() {
   }
   if (state.papel === 'supervisora') {
     renderModoSupervisora(app);
+    return;
+  }
+  if (state.papel === 'ponto') {
+    renderModoPonto(app);
     return;
   }
   const c = getComputed();
@@ -2329,6 +2517,7 @@ function render() {
   else if (state.tab === 'corte') contentEl.innerHTML = renderCorte(c);
   else if (state.tab === 'producao') contentEl.innerHTML = renderProducaoDono(c);
   else if (state.tab === 'ficha') contentEl.innerHTML = renderFichaTecnica(c);
+  else if (state.tab === 'rh') contentEl.innerHTML = renderRH(c);
   else if (state.tab === 'dre') contentEl.innerHTML = renderDRE(c);
 
   attachHandlers(c);
@@ -2359,9 +2548,10 @@ const TABS = {
   corte: { label: 'Corte' },
   producao: { label: 'Produção' },
   ficha: { label: 'Ficha Técnica' },
+  rh: { label: 'RH' },
   dre: { label: 'DRE' },
 };
-const TAB_ORDER_PADRAO = ['dashboard', 'financeiro', 'estoque', 'tecido', 'corte', 'producao', 'ficha', 'dre'];
+const TAB_ORDER_PADRAO = ['dashboard', 'financeiro', 'estoque', 'tecido', 'corte', 'producao', 'ficha', 'rh', 'dre'];
 
 function getTabOrder() {
   let saved = [];
@@ -2846,6 +3036,303 @@ function attachFichaTecnicaHandlers(c) {
   });
 }
 
+// ---- RH: funcionárias e ponto eletrônico ----
+function renderRH(c) {
+  if (state.rhFuncionariaDetalheId) return renderFuncionariaDetalhe(state.rhFuncionariaDetalheId);
+
+  const hoje = todayStr();
+
+  return `
+    <div class="section-title-wrap">
+      <div><div class="section-title">RH</div><div class="section-subtitle">Funcionárias e ponto eletrônico</div></div>
+      <button class="icon-btn" id="toggleFuncionariaForm">＋ Funcionária</button>
+    </div>
+
+    ${state.showFuncionariaForm ? `
+      <div class="form-card">
+        <input type="text" id="funcNome" placeholder="Nome da funcionária" />
+        <input type="text" id="funcPin" placeholder="PIN pessoal (ex: 4 dígitos)" inputmode="numeric" />
+        <div class="form-hint">Jornada de trabalho padrão dela</div>
+        <div class="form-row">
+          <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Entrada</div><input type="time" id="funcEntrada" value="08:00" /></div>
+          <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Saída almoço</div><input type="time" id="funcSaidaAlmoco" value="12:00" /></div>
+        </div>
+        <div class="form-row">
+          <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Volta almoço</div><input type="time" id="funcVoltaAlmoco" value="13:00" /></div>
+          <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Saída</div><input type="time" id="funcSaida" value="17:00" /></div>
+        </div>
+        <button class="confirm-btn" id="salvarFuncionaria">Adicionar</button>
+      </div>
+    ` : ''}
+
+    ${state.funcionarias.length === 0 ? `<div class="empty-state">Nenhuma funcionária cadastrada ainda.</div>` : `
+      <div class="produto-list">
+        ${state.funcionarias.map((f) => {
+          if (state.editingFuncionariaId === f.id) {
+            return `
+              <div class="form-card">
+                <input type="text" id="editFuncNome-${f.id}" placeholder="Nome" value="${esc(f.nome)}" />
+                <input type="text" id="editFuncPin-${f.id}" placeholder="PIN pessoal" value="${esc(f.pin)}" inputmode="numeric" />
+                <div class="form-row">
+                  <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Entrada</div><input type="time" id="editFuncEntrada-${f.id}" value="${f.jornadaEntrada}" /></div>
+                  <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Saída almoço</div><input type="time" id="editFuncSaidaAlmoco-${f.id}" value="${f.jornadaSaidaAlmoco}" /></div>
+                </div>
+                <div class="form-row">
+                  <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Volta almoço</div><input type="time" id="editFuncVoltaAlmoco-${f.id}" value="${f.jornadaVoltaAlmoco}" /></div>
+                  <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Saída</div><input type="time" id="editFuncSaida-${f.id}" value="${f.jornadaSaida}" /></div>
+                </div>
+                <label class="checkbox-label"><input type="checkbox" id="editFuncAtiva-${f.id}" ${f.ativa !== false ? 'checked' : ''} /> Ativa</label>
+                <div class="form-row">
+                  <button class="confirm-btn" data-salvar-edit-func="${f.id}">Salvar</button>
+                  <button class="toggle-btn" data-cancelar-edit-func="${f.id}">Cancelar</button>
+                </div>
+              </div>
+            `;
+          }
+          const pontosHoje = state.pontos.filter((p) => p.funcionariaId === f.id && p.data === hoje).sort((a, b) => new Date(a.horario) - new Date(b.horario));
+          const ultimaBatida = pontosHoje[pontosHoje.length - 1];
+          return `
+            <div class="tx-row" style="cursor:pointer${f.ativa === false ? ';opacity:0.6' : ''}" data-abrir-funcionaria="${f.id}">
+              <div class="tx-dot" style="background:${f.ativa === false ? 'var(--text-muted)' : ultimaBatida ? 'var(--teal)' : 'var(--amber)'}"></div>
+              <div style="flex:1">
+                <div class="tx-categoria">${esc(f.nome)}${f.ativa === false ? ' (inativa)' : ''}</div>
+                <div class="tx-desc">${ultimaBatida ? `Hoje: ${LABEL_PONTO[ultimaBatida.tipo]} às ${new Date(ultimaBatida.horario).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : 'Nenhuma batida hoje'}</div>
+              </div>
+              <span style="color:var(--text-muted);font-size:16px">›</span>
+              <button class="trash-btn" data-editar-func="${f.id}">✏️</button>
+              <button class="trash-btn" data-remover-func="${f.id}">🗑</button>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `}
+  `;
+}
+
+function renderFuncionariaDetalhe(funcionariaId) {
+  const f = state.funcionarias.find((x) => x.id === funcionariaId);
+  const pontos = state.pontos.filter((p) => p.funcionariaId === funcionariaId).sort((a, b) => new Date(b.horario) - new Date(a.horario));
+
+  const inicio = state.rhFiltroInicio || inicioDaSemana(todayStr());
+  const fim = state.rhFiltroFim || todayStr();
+  const pontosFiltrados = pontos.filter((p) => p.data >= inicio && p.data <= fim);
+
+  // agrupa por dia
+  const porDia = {};
+  pontosFiltrados.forEach((p) => {
+    if (!porDia[p.data]) porDia[p.data] = [];
+    porDia[p.data].push(p);
+  });
+  const diasOrdenados = Object.keys(porDia).sort((a, b) => b.localeCompare(a));
+
+  let totalExtra = 0;
+  let totalFalta = 0;
+
+  return `
+    <button class="icon-btn-ghost" id="voltarFuncionarias" style="margin-bottom:14px">← Voltar</button>
+
+    <div class="section-title-wrap">
+      <div><div class="section-title">${esc(f?.nome || 'Funcionária')}</div><div class="section-subtitle">Jornada: ${f?.jornadaEntrada}–${f?.jornadaSaidaAlmoco} / ${f?.jornadaVoltaAlmoco}–${f?.jornadaSaida}</div></div>
+    </div>
+
+    <div class="form-row" style="margin-bottom:10px">
+      <input type="date" id="rhFiltroInicio" value="${inicio}" />
+      <input type="date" id="rhFiltroFim" value="${fim}" />
+    </div>
+    <div class="form-row" style="margin-bottom:20px">
+      <button class="icon-btn-ghost" id="rhEstaSemana" style="flex:1">📅 Esta semana</button>
+      <button class="icon-btn-ghost" id="rhEsteMes" style="flex:1">📅 Este mês</button>
+    </div>
+
+    <div class="section-title-wrap"><div><div class="section-title">Lançar batida manual</div></div></div>
+    <div class="form-card">
+      <div class="form-row">
+        <input type="date" id="ptManualData" value="${todayStr()}" />
+        <select id="ptManualTipo">
+          ${ORDEM_PONTOS.map((t) => `<option value="${t}">${LABEL_PONTO[t]}</option>`).join('')}
+        </select>
+      </div>
+      <input type="time" id="ptManualHora" value="08:00" />
+      <button class="confirm-btn" data-lancar-ponto-manual="${funcionariaId}">Lançar</button>
+    </div>
+
+    <div class="section-title-wrap"><div><div class="section-title">Dias no período</div></div></div>
+    ${diasOrdenados.length === 0 ? `<div class="empty-state">Nenhuma batida no período selecionado.</div>` : `
+      <div class="tx-list">
+        ${diasOrdenados.map((dia) => {
+          const pontosDoDia = porDia[dia].sort((a, b) => new Date(a.horario) - new Date(b.horario));
+          const calc = f ? calcularHorasDia(pontosDoDia, f) : null;
+          if (calc && calc.completo) {
+            if (calc.diferenca >= 0) totalExtra += calc.diferenca; else totalFalta += Math.abs(calc.diferenca);
+          }
+          return `
+            <div class="produto-card">
+              <div class="produto-header">
+                <div><div class="produto-nome">${dia}</div></div>
+                ${calc && calc.completo ? `
+                  <div class="dre-td-num ${calc.diferenca >= 0 ? 'dre-positivo' : 'dre-negativo'}" style="font-size:13px">${calc.diferenca >= 0 ? '+' : ''}${calc.diferenca.toFixed(1)}h</div>
+                ` : `<span style="font-size:11px;color:var(--amber)">⚠️ incompleto</span>`}
+              </div>
+              <div class="prod-breakdown">
+                ${pontosDoDia.map((p) => `
+                  <div class="prod-breakdown-item">
+                    <span>${LABEL_PONTO[p.tipo] || p.tipo}</span>
+                    <span>
+                      ${new Date(p.horario).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                      <button class="trash-btn" style="padding:2px" data-editar-ponto="${p.id}" data-horario="${p.horario}">✏️</button>
+                      <button class="trash-btn" style="padding:2px" data-remover-ponto="${p.id}">🗑</button>
+                    </span>
+                  </div>
+                `).join('')}
+              </div>
+              ${state.editingPontoId && pontosDoDia.some((p) => p.id === state.editingPontoId) ? `
+                <div class="entrada-box">
+                  <input type="time" id="editPontoHora-${state.editingPontoId}" value="${new Date(pontosDoDia.find((p) => p.id === state.editingPontoId).horario).toTimeString().slice(0, 5)}" />
+                  <div class="form-row">
+                    <button class="confirm-btn" data-salvar-edit-ponto="${state.editingPontoId}" data-data="${dia}">Salvar</button>
+                    <button class="toggle-btn" data-cancelar-edit-ponto="1">Cancelar</button>
+                  </div>
+                </div>
+              ` : ''}
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `}
+
+    ${diasOrdenados.length > 0 ? `
+      <div class="stats-grid" style="margin-top:20px">
+        <div class="stat-card">
+          <div class="stat-icon" style="background:rgba(0,212,160,0.1)">⏱️</div>
+          <div class="stat-label">Horas extras no período</div>
+          <div class="stat-value" style="color:var(--teal)">+${totalExtra.toFixed(1)}h</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon" style="background:rgba(255,71,87,0.1)">⏱️</div>
+          <div class="stat-label">Horas faltantes no período</div>
+          <div class="stat-value" style="color:var(--red)">-${totalFalta.toFixed(1)}h</div>
+        </div>
+      </div>
+    ` : ''}
+  `;
+}
+
+function attachRHHandlers(c) {
+  if (state.rhFuncionariaDetalheId) {
+    const voltar = document.getElementById('voltarFuncionarias');
+    if (voltar) voltar.addEventListener('click', () => { state.rhFuncionariaDetalheId = null; state.editingPontoId = null; render(); });
+
+    const filtroInicio = document.getElementById('rhFiltroInicio');
+    if (filtroInicio) filtroInicio.addEventListener('change', (e) => { state.rhFiltroInicio = e.target.value || null; render(); });
+    const filtroFim = document.getElementById('rhFiltroFim');
+    if (filtroFim) filtroFim.addEventListener('change', (e) => { state.rhFiltroFim = e.target.value || null; render(); });
+
+    const estaSemana = document.getElementById('rhEstaSemana');
+    if (estaSemana) estaSemana.addEventListener('click', () => { state.rhFiltroInicio = inicioDaSemana(todayStr()); state.rhFiltroFim = todayStr(); render(); });
+    const esteMes = document.getElementById('rhEsteMes');
+    if (esteMes) esteMes.addEventListener('click', () => { state.rhFiltroInicio = todayStr().slice(0, 8) + '01'; state.rhFiltroFim = todayStr(); render(); });
+
+    const lancarManual = document.querySelector('[data-lancar-ponto-manual]');
+    if (lancarManual) lancarManual.addEventListener('click', async () => {
+      const funcionariaId = lancarManual.dataset.lancarPontoManual;
+      const data = document.getElementById('ptManualData').value;
+      const tipo = document.getElementById('ptManualTipo').value;
+      const hora = document.getElementById('ptManualHora').value;
+      if (!data || !hora) { alert('Preencha a data e o horário.'); return; }
+      const horarioISO = new Date(`${data}T${hora}:00`).toISOString();
+      const { error } = await sb.from('pontos').insert({ funcionaria_id: funcionariaId, data, tipo, horario: horarioISO });
+      if (error) { alert('Erro ao lançar ponto: ' + error.message); return; }
+      await loadData();
+    });
+
+    document.querySelectorAll('[data-editar-ponto]').forEach((btn) => {
+      btn.addEventListener('click', () => { state.editingPontoId = btn.dataset.editarPonto; render(); });
+    });
+    document.querySelectorAll('[data-cancelar-edit-ponto]').forEach((btn) => {
+      btn.addEventListener('click', () => { state.editingPontoId = null; render(); });
+    });
+    document.querySelectorAll('[data-salvar-edit-ponto]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.salvarEditPonto;
+        const dia = btn.dataset.data;
+        const hora = document.getElementById(`editPontoHora-${id}`).value;
+        const horarioISO = new Date(`${dia}T${hora}:00`).toISOString();
+        await updatePonto(id, horarioISO);
+        state.editingPontoId = null;
+        await loadData();
+      });
+    });
+    document.querySelectorAll('[data-remover-ponto]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        if (confirm('Remover essa batida de ponto?')) {
+          await removePonto(btn.dataset.removerPonto);
+          await loadData();
+        }
+      });
+    });
+    return;
+  }
+
+  const toggleForm = document.getElementById('toggleFuncionariaForm');
+  if (toggleForm) toggleForm.addEventListener('click', () => { state.showFuncionariaForm = !state.showFuncionariaForm; render(); });
+
+  const salvarFuncionaria = document.getElementById('salvarFuncionaria');
+  if (salvarFuncionaria) salvarFuncionaria.addEventListener('click', async () => {
+    const nome = document.getElementById('funcNome').value.trim();
+    const pin = document.getElementById('funcPin').value.trim();
+    if (!nome || !pin) { alert('Informe o nome e o PIN.'); return; }
+    if (state.funcionarias.some((f) => f.pin === pin)) { alert('Esse PIN já está em uso por outra funcionária. Escolha um diferente.'); return; }
+    const jornadaEntrada = document.getElementById('funcEntrada').value;
+    const jornadaSaidaAlmoco = document.getElementById('funcSaidaAlmoco').value;
+    const jornadaVoltaAlmoco = document.getElementById('funcVoltaAlmoco').value;
+    const jornadaSaida = document.getElementById('funcSaida').value;
+    await addFuncionaria({ nome, pin, jornadaEntrada, jornadaSaidaAlmoco, jornadaVoltaAlmoco, jornadaSaida });
+    state.showFuncionariaForm = false;
+    await loadData();
+  });
+
+  document.querySelectorAll('[data-abrir-funcionaria]').forEach((row) => {
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('[data-editar-func]') || e.target.closest('[data-remover-func]')) return;
+      state.rhFuncionariaDetalheId = row.dataset.abrirFuncionaria;
+      render();
+    });
+  });
+
+  document.querySelectorAll('[data-editar-func]').forEach((btn) => {
+    btn.addEventListener('click', (e) => { e.stopPropagation(); state.editingFuncionariaId = btn.dataset.editarFunc; render(); });
+  });
+  document.querySelectorAll('[data-cancelar-edit-func]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.editingFuncionariaId = null; render(); });
+  });
+  document.querySelectorAll('[data-salvar-edit-func]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.salvarEditFunc;
+      const nome = document.getElementById(`editFuncNome-${id}`).value.trim();
+      const pin = document.getElementById(`editFuncPin-${id}`).value.trim();
+      if (!nome || !pin) { alert('Informe o nome e o PIN.'); return; }
+      if (state.funcionarias.some((f) => f.pin === pin && f.id !== id)) { alert('Esse PIN já está em uso por outra funcionária.'); return; }
+      const ativa = document.getElementById(`editFuncAtiva-${id}`).checked;
+      const jornadaEntrada = document.getElementById(`editFuncEntrada-${id}`).value;
+      const jornadaSaidaAlmoco = document.getElementById(`editFuncSaidaAlmoco-${id}`).value;
+      const jornadaVoltaAlmoco = document.getElementById(`editFuncVoltaAlmoco-${id}`).value;
+      const jornadaSaida = document.getElementById(`editFuncSaida-${id}`).value;
+      await updateFuncionaria(id, { nome, pin, ativa, jornadaEntrada, jornadaSaidaAlmoco, jornadaVoltaAlmoco, jornadaSaida });
+      state.editingFuncionariaId = null;
+      await loadData();
+    });
+  });
+  document.querySelectorAll('[data-remover-func]').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (confirm('Remover essa funcionária? O histórico de ponto dela também será apagado.')) {
+        await removeFuncionaria(btn.dataset.removerFunc);
+        await loadData();
+      }
+    });
+  });
+}
+
 function renderDRE(c) {
   const txMes = c.txMes;
   const receitaBruta = txMes.filter((t) => t.tipo === 'entrada').reduce((a, t) => a + t.valor, 0);
@@ -3279,6 +3766,10 @@ function attachHandlers(c) {
       state.editingFichaTecnicaId = null;
       state.showNovoKitForm = false;
       state.fichaTecnicaBusca = '';
+      state.showFuncionariaForm = false;
+      state.editingFuncionariaId = null;
+      state.rhFuncionariaDetalheId = null;
+      state.editingPontoId = null;
       render();
     });
   });
@@ -3299,6 +3790,7 @@ function attachHandlers(c) {
   if (state.tab === 'tecido' || state.tab === 'corte') attachTecidoHandlers(c);
   if (state.tab === 'producao') attachProducaoHandlers(c);
   if (state.tab === 'ficha') attachFichaTecnicaHandlers(c);
+  if (state.tab === 'rh') attachRHHandlers(c);
   if (state.tab === 'dre') {
     const dreMonthSelect = document.getElementById('dreMonthSelect');
     if (dreMonthSelect) dreMonthSelect.addEventListener('change', (e) => { state.selectedMonth = e.target.value; render(); });
