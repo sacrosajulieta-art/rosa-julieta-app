@@ -1893,11 +1893,11 @@ function renderCorte(c) {
     ` : ''}
 
     ${aguardando.length === 0 ? '' : `
-      <div class="produto-list" style="margin-bottom:20px">
+      <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(240px, 1fr));gap:10px;margin-bottom:20px">
         ${aguardando.map((o) => {
           if (state.editingOrdemCorteId === o.id) {
             return `
-              <div class="form-card">
+              <div class="form-card" style="grid-column:1 / -1">
                 <input type="text" id="editOrdemCor-${o.id}" placeholder="Cor" value="${esc(o.cor)}" />
                 <div class="form-row">
                   <input type="text" id="editOrdemRolos-${o.id}" placeholder="Rolos" value="${o.quantidadeRolos}" />
@@ -1914,8 +1914,9 @@ function renderCorte(c) {
               </div>
             `;
           }
+          const expandido = state.ordemConcluindoId === o.id;
           return `
-          <div class="produto-card" style="border-color:var(--amber)55">
+          <div class="produto-card" style="border-color:var(--amber)55${expandido ? ';grid-column:1 / -1' : ''}">
             <div class="produto-header">
               <div>
                 <div class="produto-nome">${o.tipo === 'retalho' ? '♻️ ' : ''}${esc(o.cor)}${o.quantidadeRolos > 0 ? ` — ${o.quantidadeRolos} rolo(s)` : ''}</div>
@@ -1926,7 +1927,7 @@ function renderCorte(c) {
                 <button class="trash-btn" data-remover-ordem="${o.id}">🗑</button>
               </div>
             </div>
-            ${state.ordemConcluindoId === o.id ? `
+            ${expandido ? `
               <div class="entrada-box">
                 <div class="form-hint">Quantas peças de cada modelo saíram desse corte?</div>
                 ${[0, 1, 2, 3, 4].map((i) => `
@@ -1952,11 +1953,11 @@ function renderCorte(c) {
 
     <div class="section-title-wrap"><div><div class="section-title">Cortes concluídos</div></div></div>
     ${concluidas.length === 0 ? `<div class="empty-state">Nenhum corte concluído ainda.</div>` : `
-      <div class="produto-list">
+      <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(240px, 1fr));gap:10px">
         ${concluidas.map((o) => {
           if (state.editingOrdemCorteId === o.id) {
             return `
-              <div class="form-card">
+              <div class="form-card" style="grid-column:1 / -1">
                 <input type="text" id="editOrdemCor-${o.id}" placeholder="Cor" value="${esc(o.cor)}" />
                 <div class="form-row">
                   <input type="text" id="editOrdemRolos-${o.id}" placeholder="Rolos" value="${o.quantidadeRolos}" />
@@ -1987,7 +1988,7 @@ function renderCorte(c) {
           const mediaAnterior = rendimentosAnteriores.length ? rendimentosAnteriores.reduce((a, v) => a + v, 0) / rendimentosAnteriores.length : null;
 
           return `
-            <div class="produto-card">
+            <div class="produto-card"${state.distribuindoOrdemId === o.id ? ' style="grid-column:1 / -1"' : ''}>
               <div class="produto-header">
                 <div>
                   <div class="produto-nome">${o.tipo === 'retalho' ? '♻️ ' : ''}${esc(o.cor)}${o.quantidadeRolos > 0 ? ` — ${o.quantidadeRolos} rolo(s)` : ''}</div>
