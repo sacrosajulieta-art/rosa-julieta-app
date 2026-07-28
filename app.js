@@ -888,12 +888,13 @@ function getComputed() {
     const estoqueReal = estoqueEfetivo(p);
     const precisaRepor = estoqueReal <= p.estoqueMinimo;
     const qtdSugerida = Math.max(p.estoqueMinimo * 2 - estoqueReal, p.estoqueMinimo || 1);
-    const custoRepor = qtdSugerida * p.custoUnitario;
+    const custoTotalUnitario = calcularCustoTotalProduto(p.id);
+    const custoRepor = qtdSugerida * custoTotalUnitario;
     let status = 'ok';
     if (estoqueReal <= 0) status = 'critico';
     else if (precisaRepor) status = saldoTotal >= custoRepor ? 'pode-cortar' : 'aguarde';
     const diasSemVender = p.ultimaVenda ? Math.floor((Date.now() - new Date(p.ultimaVenda + 'T00:00:00').getTime()) / 86400000) : null;
-    return { ...p, estoqueAtual: estoqueReal, precisaRepor, qtdSugerida, custoRepor, status, diasSemVender };
+    return { ...p, estoqueAtual: estoqueReal, precisaRepor, qtdSugerida, custoRepor, custoTotalUnitario, status, diasSemVender };
   });
 
   const PARADO_DIAS = 30;
@@ -911,10 +912,10 @@ function getComputed() {
     .filter((t) => t.diasParaVencer <= JANELA_VENCIMENTO)
     .sort((a, b) => a.diasParaVencer - b.diasParaVencer);
 
-  // valor real do estoque: matéria-prima + insumos parados + peças prontas (pelo custo, não preço de venda)
+  // valor real do estoque: matéria-prima + insumos parados + peças prontas (custo total: tecido+corte+mão de obra+insumos)
   const valorInsumos = state.insumos.reduce((a, i) => a + i.quantidadeDisponivel * i.custoMedioUnitario, 0);
   const valorMateriaPrima = state.materiaPrima.reduce((a, m) => a + m.rolosDisponiveis * m.custoMedioRolo, 0) + valorInsumos;
-  const valorPecasProntas = produtosStatus.reduce((a, p) => a + p.estoqueAtual * p.custoUnitario, 0);
+  const valorPecasProntas = produtosStatus.reduce((a, p) => a + p.estoqueAtual * p.custoTotalUnitario, 0);
   const valorEstoqueTotal = valorMateriaPrima + valorPecasProntas;
   const materiaPrimaDetalhe = state.materiaPrima
     .filter((m) => m.rolosDisponiveis > 0)
@@ -923,7 +924,7 @@ function getComputed() {
     .sort((a, b) => b[1] - a[1]);
   const pecasProntasDetalhe = produtosStatus
     .filter((p) => p.estoqueAtual > 0)
-    .map((p) => [`${p.nome} (${p.estoqueAtual} un)`, p.estoqueAtual * p.custoUnitario])
+    .map((p) => [`${p.nome} (${p.estoqueAtual} un)`, p.estoqueAtual * p.custoTotalUnitario])
     .sort((a, b) => b[1] - a[1]);
 
   return { saldoTotal, txMes, entradasMes, saidasMes, custoFixo, custoVariavel, produtosStatus, produtosParados, contasAVencer, valorMateriaPrima, valorPecasProntas, valorEstoqueTotal, materiaPrimaDetalhe, pecasProntasDetalhe };
@@ -2734,7 +2735,7 @@ function renderEstoque(c) {
                   <div style="flex:1">
                     <div class="alert-name">${esc(p.nome)}</div>
                     <div class="alert-status" style="color:var(--amber)">${p.diasSemVender === null ? '⏸️ Nunca vendeu' : `⏸️ ${p.diasSemVender} dias sem vender`}</div>
-                    <div class="alert-meta">Estoque: ${p.estoqueAtual} un · ${fmt(p.custoUnitario)}/un parado</div>
+                    <div class="alert-meta">Estoque: ${p.estoqueAtual} un · ${fmt(p.custoTotalUnitario)}/un parado</div>
                   </div>
                 </div>
               </div>
@@ -2829,14 +2830,14 @@ function renderEstoque(c) {
                       <button class="trash-btn" data-remover-variante="${v.id}">🗑</button>
                     </div>
                   `).join('')}
-                  <div class="produto-meta" style="margin-top:6px">Total: ${p.estoqueAtual} un · mín. ${p.estoqueMinimo} · ${fmt(p.custoUnitario)}/un</div>
+                  <div class="produto-meta" style="margin-top:6px">Total: ${p.estoqueAtual} un · mín. ${p.estoqueMinimo} · ${fmt(p.custoTotalUnitario)}/un</div>
                 </div>
               ` : `
                 <div class="produto-stock-row">
                   <button class="step-btn" data-step="-1" data-produto="${p.id}" data-atual="${p.estoqueAtual}">-</button>
                   <div class="stock-value">${p.estoqueAtual} <span class="stock-unit">un</span></div>
                   <button class="step-btn" data-step="1" data-produto="${p.id}" data-atual="${p.estoqueAtual}">+</button>
-                  <div class="produto-meta">mín. ${p.estoqueMinimo} · ${fmt(p.custoUnitario)}/un</div>
+                  <div class="produto-meta">mín. ${p.estoqueMinimo} · ${fmt(p.custoTotalUnitario)}/un</div>
                 </div>
               `}
 
