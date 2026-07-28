@@ -283,11 +283,13 @@ const state = {
   rhFiltroInicio: null,
   rhFiltroFim: null,
   editingPontoId: null,
+  feriasTiradas: [],
+  showFeriasForm: false,
 };
 
 // ==================== DATA LAYER ====================
 async function loadData() {
-  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }] = await Promise.all([
+  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }, { data: feriasTiradas, error: e16 }] = await Promise.all([
     sb.from('transacoes').select('*').order('data', { ascending: false }),
     sb.from('produtos').select('*').order('created_at', { ascending: false }),
     sb.from('plataformas').select('*').order('nome', { ascending: true }),
@@ -303,6 +305,7 @@ async function loadData() {
     sb.from('insumo_plataforma_qtd').select('*'),
     sb.from('funcionarias').select('*').order('nome', { ascending: true }),
     sb.from('pontos').select('*').order('horario', { ascending: false }),
+    sb.from('ferias_tiradas').select('*').order('data_inicio', { ascending: false }),
   ]);
   if (e1) console.error(e1);
   if (e2) console.error(e2);
@@ -319,6 +322,7 @@ async function loadData() {
   if (e13) console.error(e13);
   if (e14) console.error(e14);
   if (e15) console.error(e15);
+  if (e16) console.error(e16);
   state.tx = (tx || []).map(mapTxFromDb);
   state.produtos = (produtos || []).map(mapProdutoFromDb);
   state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0) }));
@@ -332,7 +336,8 @@ async function loadData() {
   state.distribuicoes = (distribuicoes || []).map((d) => ({ id: d.id, ordemItemId: d.ordem_item_id, produtoId: d.produto_id, varianteId: d.variante_id || null, costureiraId: d.costureira_id, quantidadeDistribuida: d.quantidade_distribuida, quantidadeDevolvida: d.quantidade_devolvida, data: d.data }));
   state.fichaTecnicaItens = (fichaTecnicaItens || []).map((f) => ({ id: f.id, produtoId: f.produto_id, tipoItem: f.tipo_item, insumoId: f.insumo_id || null, componenteProdutoId: f.componente_produto_id || null, quantidade: Number(f.quantidade), momento: f.momento || 'venda' }));
   state.insumoPlataformaQtd = (insumoPlataformaQtd || []).map((q) => ({ id: q.id, insumoId: q.insumo_id, plataformaId: q.plataforma_id, quantidade: Number(q.quantidade) }));
-  state.funcionarias = (funcionarias || []).map((f) => ({ id: f.id, nome: f.nome, pin: f.pin, ativa: f.ativa, jornadaEntrada: (f.jornada_entrada || '08:00').slice(0, 5), jornadaSaidaAlmoco: (f.jornada_saida_almoco || '12:00').slice(0, 5), jornadaVoltaAlmoco: (f.jornada_volta_almoco || '13:00').slice(0, 5), jornadaSaida: (f.jornada_saida || '17:00').slice(0, 5), valorHora: Number(f.valor_hora || 0) }));
+  state.funcionarias = (funcionarias || []).map((f) => ({ id: f.id, nome: f.nome, pin: f.pin, ativa: f.ativa, jornadaEntrada: (f.jornada_entrada || '08:00').slice(0, 5), jornadaSaidaAlmoco: (f.jornada_saida_almoco || '12:00').slice(0, 5), jornadaVoltaAlmoco: (f.jornada_volta_almoco || '13:00').slice(0, 5), jornadaSaida: (f.jornada_saida || '17:00').slice(0, 5), valorHora: Number(f.valor_hora || 0), dataAdmissao: f.data_admissao || null }));
+  state.feriasTiradas = (feriasTiradas || []).map((v) => ({ id: v.id, funcionariaId: v.funcionaria_id, dataInicio: v.data_inicio, dataFim: v.data_fim }));
   state.pontos = (pontos || []).map((p) => ({ id: p.id, funcionariaId: p.funcionaria_id, data: p.data, tipo: p.tipo, horario: p.horario }));
   state.loading = false;
   render();
@@ -839,7 +844,7 @@ async function addFuncionaria(dados) {
     nome: dados.nome, pin: dados.pin, ativa: true,
     jornada_entrada: dados.jornadaEntrada, jornada_saida_almoco: dados.jornadaSaidaAlmoco,
     jornada_volta_almoco: dados.jornadaVoltaAlmoco, jornada_saida: dados.jornadaSaida,
-    valor_hora: dados.valorHora || 0,
+    valor_hora: dados.valorHora || 0, data_admissao: dados.dataAdmissao || null,
   });
   if (error) alert('Erro ao adicionar funcionária: ' + error.message);
 }
@@ -848,7 +853,7 @@ async function updateFuncionaria(id, dados) {
     nome: dados.nome, pin: dados.pin, ativa: dados.ativa,
     jornada_entrada: dados.jornadaEntrada, jornada_saida_almoco: dados.jornadaSaidaAlmoco,
     jornada_volta_almoco: dados.jornadaVoltaAlmoco, jornada_saida: dados.jornadaSaida,
-    valor_hora: dados.valorHora || 0,
+    valor_hora: dados.valorHora || 0, data_admissao: dados.dataAdmissao || null,
   }).eq('id', id);
   if (error) alert('Erro ao atualizar funcionária: ' + error.message);
 }
@@ -871,6 +876,54 @@ async function removePonto(id) {
   const { error } = await sb.from('pontos').delete().eq('id', id);
   if (error) alert('Erro ao remover ponto: ' + error.message);
 }
+async function addFeriasTirada(funcionariaId, dataInicio, dataFim) {
+  const { error } = await sb.from('ferias_tiradas').insert({ funcionaria_id: funcionariaId, data_inicio: dataInicio, data_fim: dataFim });
+  if (error) alert('Erro ao registrar férias: ' + error.message);
+}
+async function removeFeriasTirada(id) {
+  const { error } = await sb.from('ferias_tiradas').delete().eq('id', id);
+  if (error) alert('Erro ao remover registro de férias: ' + error.message);
+}
+// calcula o ciclo de férias (CLT: 12 meses pra adquirir direito + 12 meses de prazo pra conceder).
+// o ciclo reinicia a partir do dia seguinte ao fim da última férias tirada (se houver).
+function calcularStatusFerias(funcionaria) {
+  if (!funcionaria.dataAdmissao) return null;
+  const feriasDaFuncionaria = state.feriasTiradas
+    .filter((v) => v.funcionariaId === funcionaria.id)
+    .sort((a, b) => b.dataFim.localeCompare(a.dataFim));
+  const ultimaFerias = feriasDaFuncionaria[0];
+
+  let inicioCiclo;
+  if (ultimaFerias) {
+    inicioCiclo = new Date(ultimaFerias.dataFim + 'T00:00:00');
+    inicioCiclo.setDate(inicioCiclo.getDate() + 1);
+  } else {
+    inicioCiclo = new Date(funcionaria.dataAdmissao + 'T00:00:00');
+  }
+
+  const fimPeriodoAquisitivo = new Date(inicioCiclo);
+  fimPeriodoAquisitivo.setFullYear(fimPeriodoAquisitivo.getFullYear() + 1);
+  const prazoLimite = new Date(fimPeriodoAquisitivo);
+  prazoLimite.setFullYear(prazoLimite.getFullYear() + 1);
+
+  const hoje = new Date(todayStr() + 'T00:00:00');
+  const diasParaPrazoLimite = Math.round((prazoLimite - hoje) / 86400000);
+  const diasParaAdquirirDireito = Math.round((fimPeriodoAquisitivo - hoje) / 86400000);
+
+  let status;
+  if (diasParaAdquirirDireito > 0) status = 'aquisitivo';
+  else if (diasParaPrazoLimite <= 0) status = 'vencidas';
+  else if (diasParaPrazoLimite <= 60) status = 'vencendo';
+  else status = 'em-dia';
+
+  return { inicioCiclo, fimPeriodoAquisitivo, prazoLimite, diasParaPrazoLimite, diasParaAdquirirDireito, status };
+}
+const FERIAS_STATUS_LABEL = {
+  'aquisitivo': { label: '🔵 Adquirindo direito', color: 'var(--text-muted)' },
+  'em-dia': { label: '🟢 Em dia', color: 'var(--teal)' },
+  'vencendo': { label: '🟡 Vencendo em breve', color: 'var(--amber)' },
+  'vencidas': { label: '🔴 Vencidas', color: 'var(--red)' },
+};
 // calcula horas trabalhadas e a diferença (extra/falta) num dia, a partir das batidas
 function calcularHorasDia(pontosDoDia, funcionaria) {
   const porTipo = {};
@@ -3052,6 +3105,8 @@ function renderRH(c) {
       <div class="form-card">
         <input type="text" id="funcNome" placeholder="Nome da funcionária" />
         <input type="text" id="funcPin" placeholder="PIN pessoal (ex: 4 dígitos)" inputmode="numeric" />
+        <div class="form-hint" style="margin-bottom:2px">Data de admissão (usada pra calcular as férias)</div>
+        <input type="date" id="funcAdmissao" />
         <div class="form-hint">Jornada de trabalho padrão dela</div>
         <div class="form-row">
           <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Entrada</div><input type="time" id="funcEntrada" value="08:00" /></div>
@@ -3073,6 +3128,8 @@ function renderRH(c) {
               <div class="form-card">
                 <input type="text" id="editFuncNome-${f.id}" placeholder="Nome" value="${esc(f.nome)}" />
                 <input type="text" id="editFuncPin-${f.id}" placeholder="PIN pessoal" value="${esc(f.pin)}" inputmode="numeric" />
+                <div class="form-hint" style="margin-bottom:2px">Data de admissão</div>
+                <input type="date" id="editFuncAdmissao-${f.id}" value="${f.dataAdmissao || ''}" />
                 <div class="form-row">
                   <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Entrada</div><input type="time" id="editFuncEntrada-${f.id}" value="${f.jornadaEntrada}" /></div>
                   <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Saída almoço</div><input type="time" id="editFuncSaidaAlmoco-${f.id}" value="${f.jornadaSaidaAlmoco}" /></div>
@@ -3091,12 +3148,14 @@ function renderRH(c) {
           }
           const pontosHoje = state.pontos.filter((p) => p.funcionariaId === f.id && p.data === hoje).sort((a, b) => new Date(a.horario) - new Date(b.horario));
           const ultimaBatida = pontosHoje[pontosHoje.length - 1];
+          const statusFerias = calcularStatusFerias(f);
           return `
             <div class="tx-row" style="cursor:pointer${f.ativa === false ? ';opacity:0.6' : ''}" data-abrir-funcionaria="${f.id}">
               <div class="tx-dot" style="background:${f.ativa === false ? 'var(--text-muted)' : ultimaBatida ? 'var(--teal)' : 'var(--amber)'}"></div>
               <div style="flex:1">
                 <div class="tx-categoria">${esc(f.nome)}${f.ativa === false ? ' (inativa)' : ''}</div>
                 <div class="tx-desc">${ultimaBatida ? `Hoje: ${LABEL_PONTO[ultimaBatida.tipo]} às ${new Date(ultimaBatida.horario).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : 'Nenhuma batida hoje'}</div>
+                ${statusFerias ? `<div style="font-size:11px;color:${FERIAS_STATUS_LABEL[statusFerias.status].color};margin-top:2px">${FERIAS_STATUS_LABEL[statusFerias.status].label}</div>` : ''}
               </div>
               <span style="color:var(--text-muted);font-size:16px">›</span>
               <button class="trash-btn" data-editar-func="${f.id}">✏️</button>
@@ -3128,12 +3187,52 @@ function renderFuncionariaDetalhe(funcionariaId) {
   let totalExtra = 0;
   let totalFalta = 0;
 
+  const statusFerias = f ? calcularStatusFerias(f) : null;
+  const feriasDaFuncionaria = state.feriasTiradas.filter((v) => v.funcionariaId === funcionariaId).sort((a, b) => b.dataFim.localeCompare(a.dataFim));
+
+  const dataFmt = (d) => new Date(d + 'T00:00:00').toLocaleDateString('pt-BR');
+
   return `
     <button class="icon-btn-ghost" id="voltarFuncionarias" style="margin-bottom:14px">← Voltar</button>
 
     <div class="section-title-wrap">
       <div><div class="section-title">${esc(f?.nome || 'Funcionária')}</div><div class="section-subtitle">Jornada: ${f?.jornadaEntrada}–${f?.jornadaSaidaAlmoco} / ${f?.jornadaVoltaAlmoco}–${f?.jornadaSaida}</div></div>
     </div>
+
+    <div class="section-title-wrap">
+      <div><div class="section-title">Férias</div></div>
+      <button class="icon-btn-ghost" id="toggleFeriasForm">🏖️ Registrar férias</button>
+    </div>
+    ${!f?.dataAdmissao ? `<div class="empty-state">Cadastre a data de admissão dela (✏️ na lista) pra calcular o ciclo de férias.</div>` : `
+      <div class="form-card">
+        <div class="produto-meta" style="margin-left:0">Status: <strong style="color:${FERIAS_STATUS_LABEL[statusFerias.status].color}">${FERIAS_STATUS_LABEL[statusFerias.status].label}</strong></div>
+        <div class="produto-meta" style="margin-left:0;margin-top:4px">Período aquisitivo começou em: <strong style="color:var(--text)">${statusFerias.inicioCiclo.toLocaleDateString('pt-BR')}</strong></div>
+        <div class="produto-meta" style="margin-left:0;margin-top:4px">${statusFerias.diasParaAdquirirDireito > 0 ? `Direito adquirido em: <strong style="color:var(--text)">${statusFerias.fimPeriodoAquisitivo.toLocaleDateString('pt-BR')}</strong> (faltam ${statusFerias.diasParaAdquirirDireito} dias)` : `Prazo limite pra conceder: <strong style="color:var(--text)">${statusFerias.prazoLimite.toLocaleDateString('pt-BR')}</strong> (${statusFerias.diasParaPrazoLimite >= 0 ? `faltam ${statusFerias.diasParaPrazoLimite} dias` : `venceu há ${Math.abs(statusFerias.diasParaPrazoLimite)} dias`})`}</div>
+      </div>
+    `}
+
+    ${state.showFeriasForm ? `
+      <div class="form-card">
+        <div class="form-hint">Registrar um período de férias já tirado (ou já agendado) — isso reinicia o ciclo automaticamente.</div>
+        <div class="form-row">
+          <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Início</div><input type="date" id="feriasInicio" /></div>
+          <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Fim</div><input type="date" id="feriasFim" /></div>
+        </div>
+        <button class="confirm-btn" data-salvar-ferias="${funcionariaId}">Salvar</button>
+      </div>
+    ` : ''}
+
+    ${feriasDaFuncionaria.length > 0 ? `
+      <div class="tx-list" style="margin-bottom:24px">
+        ${feriasDaFuncionaria.map((v) => `
+          <div class="tx-row">
+            <div class="tx-dot" style="background:var(--teal)"></div>
+            <div style="flex:1"><div class="tx-categoria">${dataFmt(v.dataInicio)} → ${dataFmt(v.dataFim)}</div></div>
+            <button class="trash-btn" data-remover-ferias="${v.id}">🗑</button>
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
 
     <div class="form-row" style="margin-bottom:10px">
       <input type="date" id="rhFiltroInicio" value="${inicio}" />
@@ -3220,7 +3319,31 @@ function renderFuncionariaDetalhe(funcionariaId) {
 function attachRHHandlers(c) {
   if (state.rhFuncionariaDetalheId) {
     const voltar = document.getElementById('voltarFuncionarias');
-    if (voltar) voltar.addEventListener('click', () => { state.rhFuncionariaDetalheId = null; state.editingPontoId = null; render(); });
+    if (voltar) voltar.addEventListener('click', () => { state.rhFuncionariaDetalheId = null; state.editingPontoId = null; state.showFeriasForm = false; render(); });
+
+    const toggleFeriasForm = document.getElementById('toggleFeriasForm');
+    if (toggleFeriasForm) toggleFeriasForm.addEventListener('click', () => { state.showFeriasForm = !state.showFeriasForm; render(); });
+
+    const salvarFerias = document.querySelector('[data-salvar-ferias]');
+    if (salvarFerias) salvarFerias.addEventListener('click', async () => {
+      const funcionariaId = salvarFerias.dataset.salvarFerias;
+      const inicio = document.getElementById('feriasInicio').value;
+      const fim = document.getElementById('feriasFim').value;
+      if (!inicio || !fim) { alert('Preencha início e fim das férias.'); return; }
+      if (fim < inicio) { alert('A data de fim precisa ser depois da data de início.'); return; }
+      await addFeriasTirada(funcionariaId, inicio, fim);
+      state.showFeriasForm = false;
+      await loadData();
+    });
+
+    document.querySelectorAll('[data-remover-ferias]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        if (confirm('Remover esse registro de férias? O ciclo volta a contar a partir do registro anterior (ou da admissão).')) {
+          await removeFeriasTirada(btn.dataset.removerFerias);
+          await loadData();
+        }
+      });
+    });
 
     const filtroInicio = document.getElementById('rhFiltroInicio');
     if (filtroInicio) filtroInicio.addEventListener('change', (e) => { state.rhFiltroInicio = e.target.value || null; render(); });
@@ -3282,11 +3405,12 @@ function attachRHHandlers(c) {
     const pin = document.getElementById('funcPin').value.trim();
     if (!nome || !pin) { alert('Informe o nome e o PIN.'); return; }
     if (state.funcionarias.some((f) => f.pin === pin)) { alert('Esse PIN já está em uso por outra funcionária. Escolha um diferente.'); return; }
+    const dataAdmissao = document.getElementById('funcAdmissao').value || null;
     const jornadaEntrada = document.getElementById('funcEntrada').value;
     const jornadaSaidaAlmoco = document.getElementById('funcSaidaAlmoco').value;
     const jornadaVoltaAlmoco = document.getElementById('funcVoltaAlmoco').value;
     const jornadaSaida = document.getElementById('funcSaida').value;
-    await addFuncionaria({ nome, pin, jornadaEntrada, jornadaSaidaAlmoco, jornadaVoltaAlmoco, jornadaSaida });
+    await addFuncionaria({ nome, pin, dataAdmissao, jornadaEntrada, jornadaSaidaAlmoco, jornadaVoltaAlmoco, jornadaSaida });
     state.showFuncionariaForm = false;
     await loadData();
   });
@@ -3312,12 +3436,13 @@ function attachRHHandlers(c) {
       const pin = document.getElementById(`editFuncPin-${id}`).value.trim();
       if (!nome || !pin) { alert('Informe o nome e o PIN.'); return; }
       if (state.funcionarias.some((f) => f.pin === pin && f.id !== id)) { alert('Esse PIN já está em uso por outra funcionária.'); return; }
+      const dataAdmissao = document.getElementById(`editFuncAdmissao-${id}`).value || null;
       const ativa = document.getElementById(`editFuncAtiva-${id}`).checked;
       const jornadaEntrada = document.getElementById(`editFuncEntrada-${id}`).value;
       const jornadaSaidaAlmoco = document.getElementById(`editFuncSaidaAlmoco-${id}`).value;
       const jornadaVoltaAlmoco = document.getElementById(`editFuncVoltaAlmoco-${id}`).value;
       const jornadaSaida = document.getElementById(`editFuncSaida-${id}`).value;
-      await updateFuncionaria(id, { nome, pin, ativa, jornadaEntrada, jornadaSaidaAlmoco, jornadaVoltaAlmoco, jornadaSaida });
+      await updateFuncionaria(id, { nome, pin, dataAdmissao, ativa, jornadaEntrada, jornadaSaidaAlmoco, jornadaVoltaAlmoco, jornadaSaida });
       state.editingFuncionariaId = null;
       await loadData();
     });
@@ -3770,6 +3895,7 @@ function attachHandlers(c) {
       state.editingFuncionariaId = null;
       state.rhFuncionariaDetalheId = null;
       state.editingPontoId = null;
+      state.showFeriasForm = false;
       render();
     });
   });
