@@ -265,6 +265,7 @@ const state = {
   showTotalDefeitos: false,
   estoqueBusca: '',
   estoqueOrdenar: 'recentes',
+  estoqueMostrarForaLinha: false,
   editandoEmMaosChave: null,
   fichaTecnicaItens: [],
   editingFichaTecnicaId: null,
@@ -321,7 +322,7 @@ function mapTxFromDb(row) {
   return { id: row.id, tipo: row.tipo, valor: Number(row.valor), categoria: row.categoria, natureza: row.natureza, descricao: row.descricao, data: row.data, recorrente: !!row.recorrente, recorrenteOrigemId: row.recorrente_origem_id || null, idPedido: row.id_pedido || null, conciliado: !!row.conciliado };
 }
 function mapProdutoFromDb(row) {
-  return { id: row.id, nome: row.nome, sku: row.sku, estoqueAtual: row.estoque_atual, estoqueMinimo: row.estoque_minimo, custoUnitario: Number(row.custo_unitario), totalVendido: row.total_vendido || 0, ultimaVenda: row.ultima_venda || null, valorMaoObra: Number(row.valor_mao_obra || 0), tipo: row.tipo || 'unitario', precoVendaMedio: Number(row.preco_venda_medio || 0) };
+  return { id: row.id, nome: row.nome, sku: row.sku, estoqueAtual: row.estoque_atual, estoqueMinimo: row.estoque_minimo, custoUnitario: Number(row.custo_unitario), totalVendido: row.total_vendido || 0, ultimaVenda: row.ultima_venda || null, valorMaoObra: Number(row.valor_mao_obra || 0), tipo: row.tipo || 'unitario', precoVendaMedio: Number(row.preco_venda_medio || 0), ativo: row.ativo !== false };
 }
 
 async function addTx(tx) {
@@ -703,6 +704,10 @@ async function updateProduto(id, p) {
   }).eq('id', id);
   if (error) alert('Erro ao atualizar produto: ' + error.message);
 }
+async function toggleProdutoAtivo(id, ativo) {
+  const { error } = await sb.from('produtos').update({ ativo }).eq('id', id);
+  if (error) alert('Erro ao atualizar status do produto: ' + error.message);
+}
 
 // ---- Ficha técnica (receita de insumos + produtos componentes por produto/kit) ----
 function fichaTecnicaDoProduto(produtoId) {
@@ -920,7 +925,7 @@ function getComputed() {
 
   const PARADO_DIAS = 30;
   const produtosParados = produtosStatus
-    .filter((p) => p.estoqueAtual > 0 && (p.diasSemVender === null || p.diasSemVender >= PARADO_DIAS))
+    .filter((p) => p.ativo !== false && p.estoqueAtual > 0 && (p.diasSemVender === null || p.diasSemVender >= PARADO_DIAS))
     .sort((a, b) => (b.diasSemVender ?? 99999) - (a.diasSemVender ?? 99999));
 
   // contas a vencer: saídas com data futura (ainda não contam no saldo atual),
@@ -2331,7 +2336,7 @@ function renderTabsBar(c) {
   const order = getTabOrder();
   const ordensAguardandoCount = state.ordensCorte.filter((o) => o.status === 'aguardando').length;
   const badges = {
-    dashboard: c.produtosStatus.filter((p) => p.status !== 'ok').length,
+    dashboard: c.produtosStatus.filter((p) => p.status !== 'ok' && p.ativo !== false).length,
     financeiro: c.contasAVencer.length,
     corte: ordensAguardandoCount,
   };
@@ -2875,7 +2880,8 @@ function renderDRE(c) {
 // ---- Estoque ----
 function renderEstoque(c) {
   // busca por nome/SKU + ordenação (não altera c.produtosStatus original)
-  let listaProdutos = c.produtosStatus;
+  const foraDeLinhaCount = c.produtosStatus.filter((p) => p.ativo === false).length;
+  let listaProdutos = state.estoqueMostrarForaLinha ? c.produtosStatus : c.produtosStatus.filter((p) => p.ativo !== false);
   const termoBusca = (state.estoqueBusca || '').trim().toLowerCase();
   if (termoBusca) {
     listaProdutos = listaProdutos.filter((p) =>
@@ -2891,8 +2897,9 @@ function renderEstoque(c) {
   return `
     <div class="section-title-wrap">
       <div><div class="section-title">Estoque</div><div class="section-subtitle">Cadastre seus SKUs pra ativar o semáforo de reposição</div></div>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
         ${renderControleColunas('estoque')}
+        <button class="icon-btn-ghost" id="toggleForaDeLinha" style="${state.estoqueMostrarForaLinha ? 'background:rgba(154,156,168,0.2);color:var(--text)' : ''}">🚫 Fora de linha${foraDeLinhaCount > 0 ? ` (${foraDeLinhaCount})` : ''}</button>
         <button class="icon-btn-ghost" id="toggleProdutosParados">⏸️ Parados${c.produtosParados.length > 0 ? ` (${c.produtosParados.length})` : ''}</button>
         <button class="icon-btn" id="toggleProdutoForm">＋ Produto</button>
       </div>
@@ -2997,13 +3004,14 @@ function renderEstoque(c) {
           const showVarForm = state.showVarianteForm[p.id];
 
           return `
-            <div class="produto-card" style="border-color:${statusColor}55${(showVarForm || entradaOpen) ? ';grid-column:1 / -1' : ''}">
+            <div class="produto-card" style="border-color:${statusColor}55${(showVarForm || entradaOpen) ? ';grid-column:1 / -1' : ''};${p.ativo === false ? 'opacity:0.6' : ''}">
               <div class="produto-header">
                 <div>
-                  <div class="produto-nome">${esc(p.nome)}</div>
+                  <div class="produto-nome">${esc(p.nome)}${p.ativo === false ? ' <span style="font-size:10px;font-weight:600;color:var(--text-muted);border:1px solid var(--border);border-radius:4px;padding:1px 5px;vertical-align:middle">FORA DE LINHA</span>' : ''}</div>
                   ${p.sku ? `<div class="produto-sku">${esc(p.sku)}</div>` : ''}
                 </div>
                 <div style="display:flex;gap:2px">
+                  <button class="trash-btn" data-toggle-ativo="${p.id}" data-ativo="${p.ativo !== false}" title="${p.ativo === false ? 'Reativar' : 'Tirar de linha'}">${p.ativo === false ? '✅' : '🚫'}</button>
                   <button class="trash-btn" data-edit-produto="${p.id}">✏️</button>
                   <button class="trash-btn" data-remove-produto="${p.id}">🗑</button>
                 </div>
@@ -3075,7 +3083,7 @@ const SEMAFORO = {
 
 function renderDashboard(c) {
   const alertList = c.produtosStatus
-    .filter((p) => p.status !== 'ok')
+    .filter((p) => p.status !== 'ok' && p.ativo !== false)
     .sort((a, b) => ({ critico: 0, aguarde: 1, 'pode-cortar': 2 }[a.status] - { critico: 0, aguarde: 1, 'pode-cortar': 2 }[b.status]));
 
   return `
@@ -4186,6 +4194,20 @@ function attachEstoqueHandlers(c) {
 
   const estoqueOrdenarSelect = document.getElementById('estoqueOrdenar');
   if (estoqueOrdenarSelect) estoqueOrdenarSelect.addEventListener('change', (e) => { state.estoqueOrdenar = e.target.value; render(); });
+
+  const toggleForaDeLinha = document.getElementById('toggleForaDeLinha');
+  if (toggleForaDeLinha) toggleForaDeLinha.addEventListener('click', () => { state.estoqueMostrarForaLinha = !state.estoqueMostrarForaLinha; render(); });
+
+  document.querySelectorAll('[data-toggle-ativo]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.toggleAtivo;
+      const ativoAtual = btn.dataset.ativo === 'true';
+      const novoAtivo = !ativoAtual;
+      if (!novoAtivo && !confirm('Tirar esse produto de linha? Ele some da lista principal, mas todo o histórico continua guardado — você pode reativar quando quiser.')) return;
+      await toggleProdutoAtivo(id, novoAtivo);
+      await loadData();
+    });
+  });
 
   const toggleForm = document.getElementById('toggleProdutoForm');
   if (toggleForm) toggleForm.addEventListener('click', () => {
