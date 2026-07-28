@@ -258,6 +258,7 @@ const state = {
   distribuindoOrdemId: null,
   editingMateriaPrimaId: null,
   editingInsumoId: null,
+  editingCostureiraId: null,
   editingOrdemCorteId: null,
   showTabOrderForm: false,
   showTotalDefeitos: false,
@@ -302,7 +303,7 @@ async function loadData() {
   state.tx = (tx || []).map(mapTxFromDb);
   state.produtos = (produtos || []).map(mapProdutoFromDb);
   state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0) }));
-  state.costureiras = (costureiras || []).map((c) => ({ id: c.id, nome: c.nome, ativa: c.ativa }));
+  state.costureiras = (costureiras || []).map((c) => ({ id: c.id, nome: c.nome, ativa: c.ativa, metaSemanal: c.meta_semanal || 0 }));
   state.producoes = (producoes || []).map((p) => ({ id: p.id, costureiraId: p.costureira_id, produtoId: p.produto_id, quantidade: p.quantidade, data: p.data, pago: p.pago, varianteId: p.variante_id || null }));
   state.variantes = (variantes || []).map((v) => ({ id: v.id, produtoId: v.produto_id, nome: v.nome, estoqueAtual: v.estoque_atual, skuVariante: v.sku_variante }));
   state.materiaPrima = (materiaPrima || []).map((m) => ({ id: m.id, cor: m.cor, rolosDisponiveis: m.rolos_disponiveis, custoMedioRolo: Number(m.custo_medio_rolo || 0) }));
@@ -319,7 +320,7 @@ function mapTxFromDb(row) {
   return { id: row.id, tipo: row.tipo, valor: Number(row.valor), categoria: row.categoria, natureza: row.natureza, descricao: row.descricao, data: row.data, recorrente: !!row.recorrente, recorrenteOrigemId: row.recorrente_origem_id || null, idPedido: row.id_pedido || null, conciliado: !!row.conciliado };
 }
 function mapProdutoFromDb(row) {
-  return { id: row.id, nome: row.nome, sku: row.sku, estoqueAtual: row.estoque_atual, estoqueMinimo: row.estoque_minimo, custoUnitario: Number(row.custo_unitario), totalVendido: row.total_vendido || 0, ultimaVenda: row.ultima_venda || null, valorMaoObra: Number(row.valor_mao_obra || 0), tipo: row.tipo || 'unitario' };
+  return { id: row.id, nome: row.nome, sku: row.sku, estoqueAtual: row.estoque_atual, estoqueMinimo: row.estoque_minimo, custoUnitario: Number(row.custo_unitario), totalVendido: row.total_vendido || 0, ultimaVenda: row.ultima_venda || null, valorMaoObra: Number(row.valor_mao_obra || 0), tipo: row.tipo || 'unitario', precoVendaMedio: Number(row.preco_venda_medio || 0) };
 }
 
 async function addTx(tx) {
@@ -676,6 +677,21 @@ async function registrarVendaProduto(id, novoEstoque, novoTotalVendido, dataVend
   const { error } = await sb.from('produtos').update({ estoque_atual: novoEstoque, total_vendido: novoTotalVendido, ultima_venda: dataVenda }).eq('id', id);
   if (error) alert('Erro ao registrar venda: ' + error.message);
 }
+// atualiza o preço médio de venda (ponderado pelo histórico) — só deve ser chamado pro SKU
+// que realmente vendeu direto no relatório, nunca pros produtos componentes de um kit
+async function atualizarPrecoVendaMedio(produtoId, valorTotalVendas, quantidadeVendida) {
+  if (quantidadeVendida <= 0) return;
+  const produto = state.produtos.find((p) => p.id === produtoId);
+  if (!produto) return;
+  const totalVendidoAntes = produto.totalVendido || 0;
+  const novoTotalVendido = totalVendidoAntes + quantidadeVendida;
+  const precoMedioAntes = produto.precoVendaMedio || 0;
+  const novoPrecoMedio = novoTotalVendido > 0
+    ? (precoMedioAntes * totalVendidoAntes + valorTotalVendas) / novoTotalVendido
+    : precoMedioAntes;
+  const { error } = await sb.from('produtos').update({ preco_venda_medio: novoPrecoMedio }).eq('id', produtoId);
+  if (error) alert('Erro ao atualizar preço médio de venda: ' + error.message);
+}
 async function removeProduto(id) {
   const { error } = await sb.from('produtos').delete().eq('id', id);
   if (error) alert('Erro ao remover produto: ' + error.message);
@@ -775,6 +791,10 @@ async function removePlataforma(id) {
 async function addCostureira(nome) {
   const { error } = await sb.from('costureiras').insert({ nome, ativa: true });
   if (error) alert('Erro ao adicionar costureira: ' + error.message);
+}
+async function updateCostureira(id, nome, ativa, metaSemanal) {
+  const { error } = await sb.from('costureiras').update({ nome, ativa, meta_semanal: metaSemanal }).eq('id', id);
+  if (error) alert('Erro ao atualizar costureira: ' + error.message);
 }
 async function removeCostureira(id) {
   const { error } = await sb.from('costureiras').delete().eq('id', id);
@@ -951,6 +971,17 @@ function renderProducaoDono(c) {
     porCostureira[p.costureiraId].porProduto[nomeProduto].valor += valorItem;
   });
 
+  // resumo geral: total de peças em mãos (todas costureiras) + total previsão de pagamento
+  const totalPecasEmProducao = state.distribuicoes.reduce((a, d) => a + Math.max(0, d.quantidadeDistribuida - d.quantidadeDevolvida), 0);
+  const totalPrevisaoPagamento = Object.values(porCostureira).reduce((a, info) => a + info.valor, 0);
+
+  // produção boa (não defeito) desta semana, por costureira — pra comparar com a meta semanal
+  const inicioSemanaAtual = inicioDaSemana(todayStr());
+  const producaoSemanaPorCostureira = {};
+  state.producoes.filter((p) => p.quantidade > 0 && p.data >= inicioSemanaAtual).forEach((p) => {
+    producaoSemanaPorCostureira[p.costureiraId] = (producaoSemanaPorCostureira[p.costureiraId] || 0) + p.quantidade;
+  });
+
   // defeitos da loja toda: total geral + por costureira + por modelo
   const todosDefeitos = state.producoes.filter((p) => p.quantidade < 0);
   const totalDefeitosLoja = todosDefeitos.reduce((a, p) => a + Math.abs(p.quantidade), 0);
@@ -968,6 +999,19 @@ function renderProducaoDono(c) {
   const rankingDefeitosProduto = Object.entries(defeitosPorProduto).sort((a, b) => b[1] - a[1]);
 
   return `
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon" style="background:rgba(255,182,39,0.1)">🧵</div>
+        <div class="stat-label">Peças em produção</div>
+        <div class="stat-value">${totalPecasEmProducao}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:rgba(255,46,126,0.1)">💰</div>
+        <div class="stat-label">Previsão de pagamento</div>
+        <div class="stat-value">${fmt(totalPrevisaoPagamento)}</div>
+      </div>
+    </div>
+
     <div class="section-title-wrap">
       <div><div class="section-title">Defeitos da loja</div><div class="section-subtitle">Total de peças perdidas por defeito, todas as costureiras</div></div>
       <button class="icon-btn-ghost" id="toggleTotalDefeitos">${state.showTotalDefeitos ? '✕ Fechar' : `⚠️ Ver total (${totalDefeitosLoja})`}</button>
@@ -1044,15 +1088,45 @@ function renderProducaoDono(c) {
     ` : ''}
 
     ${state.costureiras.length === 0 ? `<div class="empty-state">Nenhuma costureira cadastrada ainda.</div>` : `
-      <div class="tx-list" style="margin-bottom:28px">
-        ${state.costureiras.map((cost) => `
-          <div class="tx-row" style="cursor:pointer" data-abrir-costureira="${cost.id}">
-            <div class="tx-dot" style="background:${cost.ativa ? 'var(--teal)' : 'var(--text-muted)'}"></div>
-            <div style="flex:1"><div class="tx-categoria">${esc(cost.nome)}</div></div>
-            <span style="color:var(--text-muted);font-size:16px">›</span>
-            <button class="trash-btn" data-remover-costureira="${cost.id}">🗑</button>
-          </div>
-        `).join('')}
+      <div class="produto-list" style="margin-bottom:28px">
+        ${state.costureiras.map((cost) => {
+          if (state.editingCostureiraId === cost.id) {
+            return `
+              <div class="form-card">
+                <input type="text" id="editCostNome-${cost.id}" placeholder="Nome da costureira" value="${esc(cost.nome)}" />
+                <input type="text" id="editCostMeta-${cost.id}" placeholder="Meta de peças por semana (ex: 1500)" value="${cost.metaSemanal || ''}" inputmode="numeric" />
+                <label class="checkbox-label"><input type="checkbox" id="editCostAtiva-${cost.id}" ${cost.ativa ? 'checked' : ''} /> Costureira ativa</label>
+                <div class="form-row">
+                  <button class="confirm-btn" data-salvar-edit-costureira="${cost.id}">Salvar</button>
+                  <button class="toggle-btn" data-cancelar-edit-costureira="${cost.id}">Cancelar</button>
+                </div>
+              </div>
+            `;
+          }
+          const producaoSemana = producaoSemanaPorCostureira[cost.id] || 0;
+          const meta = cost.metaSemanal || 0;
+          const pct = meta > 0 ? Math.round((producaoSemana / meta) * 100) : null;
+          return `
+            <div class="produto-card" style="cursor:pointer" data-abrir-costureira="${cost.id}">
+              <div class="produto-header">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <div class="tx-dot" style="background:${cost.ativa ? 'var(--teal)' : 'var(--text-muted)'}"></div>
+                  <div class="produto-nome">${esc(cost.nome)}</div>
+                </div>
+                <div style="display:flex;gap:2px">
+                  <button class="trash-btn" data-editar-costureira="${cost.id}">✏️</button>
+                  <button class="trash-btn" data-remover-costureira="${cost.id}">🗑</button>
+                </div>
+              </div>
+              ${meta > 0 ? `
+                <div class="custo-bar" style="margin-top:8px">
+                  <div class="custo-bar-fill" style="width:${Math.min(100, pct)}%;background:${pct >= 100 ? 'var(--teal)' : 'var(--pink)'}"></div>
+                </div>
+                <div class="produto-meta" style="margin-top:4px;margin-left:0">${producaoSemana} / ${meta} peças esta semana · ${pct}%</div>
+              ` : `<div class="form-hint" style="margin-top:8px;margin-bottom:0">${producaoSemana} peças esta semana · sem meta definida (✏️ pra definir)</div>`}
+            </div>
+          `;
+        }).join('')}
       </div>
     `}
 
@@ -2499,6 +2573,12 @@ function renderFichaTecnica(c) {
               </div>
               <div class="produto-meta">Custo base (tecido/corte + mão de obra): <strong style="color:var(--text)">${fmt(custoBase)}</strong></div>
               <div class="produto-meta" style="margin-top:4px">Custo total (com insumos): <strong style="color:var(--teal)">${fmt(custoTotal)}</strong></div>
+              ${p.precoVendaMedio > 0 ? `
+                <div class="produto-meta" style="margin-top:4px">Preço médio de venda: <strong style="color:var(--text)">${fmt(p.precoVendaMedio)}</strong> <span style="color:var(--text-muted);font-size:10px">(aprendido automaticamente do import de vendas)</span></div>
+                <div class="produto-meta" style="margin-top:4px">Lucro estimado por peça: <strong style="color:${(p.precoVendaMedio - custoTotal) >= 0 ? 'var(--teal)' : 'var(--red)'}">${fmt(p.precoVendaMedio - custoTotal)}</strong> <span style="color:var(--text-muted);font-size:10px">(${(((p.precoVendaMedio - custoTotal) / p.precoVendaMedio) * 100).toFixed(1)}% de margem)</span></div>
+              ` : `
+                <div class="form-hint" style="margin-top:6px">Preço de venda ainda não disponível — aparece sozinho depois do primeiro import de vendas desse SKU.</div>
+              `}
               ${itens.length > 0 ? `
                 <div class="prod-breakdown" style="margin-top:8px">
                   ${itens.map((item) => {
@@ -3018,6 +3098,7 @@ function attachHandlers(c) {
       state.showResumoFinanceiro = false;
       state.showProdutosParados = false;
       state.showCostureiraForm = false;
+      state.editingCostureiraId = null;
       state.showProducaoForm = false;
       state.costureiraDetalheId = null;
       state.showValoresPecaForm = false;
@@ -3288,8 +3369,9 @@ function attachFinanceiroHandlers(c) {
         const produto = skuMap.get(sku.trim().toLowerCase());
         const qtd = guessQuantidadeField(row);
         if (produto) {
-          const atual = deducoes.get(produto.id) || { qtd: 0, ultimaData: dataLinha };
+          const atual = deducoes.get(produto.id) || { qtd: 0, ultimaData: dataLinha, faturamento: 0 };
           atual.qtd += qtd;
+          atual.faturamento += valor;
           if (dataLinha > atual.ultimaData) atual.ultimaData = dataLinha;
           deducoes.set(produto.id, atual);
         } else {
@@ -3307,13 +3389,14 @@ function attachFinanceiroHandlers(c) {
 
     await addTxBatch(novos);
 
-    // aplica baixa de estoque + soma no total vendido
+    // aplica baixa de estoque + soma no total vendido + atualiza preço médio de venda
     for (const [produtoId, info] of deducoes.entries()) {
       const produto = state.produtos.find((p) => p.id === produtoId);
       if (produto) {
         const novoEstoque = Math.max(0, produto.estoqueAtual - info.qtd);
         const novoTotalVendido = (produto.totalVendido || 0) + info.qtd;
         await registrarVendaProduto(produtoId, novoEstoque, novoTotalVendido, info.ultimaData);
+        await atualizarPrecoVendaMedio(produtoId, info.faturamento, info.qtd);
         // se o SKU vendido tem ficha técnica (ex: um kit), desconta insumos e produtos componentes também
         await baixarEstoquePorFichaTecnica(produtoId, info.qtd, info.ultimaData);
       }
@@ -3920,7 +4003,7 @@ function attachProducaoHandlers(c) {
 
   document.querySelectorAll('[data-abrir-costureira]').forEach((row) => {
     row.addEventListener('click', (e) => {
-      if (e.target.closest('[data-remover-costureira]')) return;
+      if (e.target.closest('[data-remover-costureira]') || e.target.closest('[data-editar-costureira]')) return;
       state.costureiraDetalheId = row.dataset.abrirCostureira;
       render();
     });
@@ -3933,6 +4016,34 @@ function attachProducaoHandlers(c) {
         await removeCostureira(btn.dataset.removerCostureira);
         await loadData();
       }
+    });
+  });
+
+  document.querySelectorAll('[data-editar-costureira]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      state.editingCostureiraId = btn.dataset.editarCostureira;
+      render();
+    });
+  });
+  document.querySelectorAll('[data-cancelar-edit-costureira]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      state.editingCostureiraId = null;
+      render();
+    });
+  });
+  document.querySelectorAll('[data-salvar-edit-costureira]').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.salvarEditCostureira;
+      const nome = document.getElementById(`editCostNome-${id}`).value.trim();
+      const meta = Number(document.getElementById(`editCostMeta-${id}`).value) || 0;
+      const ativa = document.getElementById(`editCostAtiva-${id}`).checked;
+      if (!nome) { alert('Informe o nome da costureira.'); return; }
+      await updateCostureira(id, nome, ativa, meta);
+      state.editingCostureiraId = null;
+      await loadData();
     });
   });
 
