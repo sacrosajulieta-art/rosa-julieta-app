@@ -2943,7 +2943,7 @@ function renderEstoque(c) {
           const showVarForm = state.showVarianteForm[p.id];
 
           return `
-            <div class="produto-card" style="border-color:${statusColor}55${(showVarForm || entradaOpen || temVariantes) ? ';grid-column:1 / -1' : ''}">
+            <div class="produto-card" style="border-color:${statusColor}55${(showVarForm || entradaOpen) ? ';grid-column:1 / -1' : ''}">
               <div class="produto-header">
                 <div>
                   <div class="produto-nome">${esc(p.nome)}</div>
