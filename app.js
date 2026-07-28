@@ -242,6 +242,7 @@ const state = {
   prodFiltroCostureiraId: null,
   showConciliacao: false,
   showResumoFinanceiro: false,
+  showContasAVencer: false,
   showProdutosParados: false,
   variantes: [],
   showVarianteForm: {},
@@ -2127,29 +2128,37 @@ function renderResumoFinanceiro(c) {
           </div>
         </div>
       `}
-
-      <div class="section-title" style="margin-bottom:2px">Contas a vencer</div>
-      <div class="section-subtitle" style="margin-bottom:12px">Próximos 7 dias — ainda não descontadas do saldo</div>
-      ${c.contasAVencer.length === 0 ? `<div class="empty-state">Nenhuma conta vencendo nos próximos 7 dias.</div>` : `
-        <div class="alert-list">
-          ${c.contasAVencer.map((t) => `
-            <div class="alert-card" style="border-color:var(--pink)55">
-              <div class="alert-card-row">
-                <div class="alert-dot" style="background:var(--pink)"></div>
-                <div style="flex:1">
-                  <div class="alert-name">${esc(t.categoria)}</div>
-                  ${t.descricao ? `<div class="alert-meta" style="margin-top:0">${esc(t.descricao)}</div>` : ''}
-                  <div class="alert-status" style="color:var(--pink)">${t.diasParaVencer === 0 ? '📅 Vence hoje' : t.diasParaVencer === 1 ? '📅 Vence amanhã' : `📅 Vence em ${t.diasParaVencer} dias`} — ${fmt(t.valor)}</div>
-                </div>
-              </div>
-              <button class="confirm-btn" style="background:var(--teal);margin-top:8px" data-marcar-pago="${t.id}">✅ Marcar como pago</button>
-            </div>
-          `).join('')}
-        </div>
-      `}
     </div>
   `;
 }
+// semáforo de contas a vencer: verde longe do prazo, âmbar alerta, vermelho vence hoje/amanhã
+function renderContasAVencer(c) {
+  const corUrgencia = (dias) => (dias <= 1 ? 'var(--red)' : dias <= 3 ? 'var(--amber)' : 'var(--teal)');
+  return `
+    <div class="section-title-wrap">
+      <div><div class="section-title">Contas a vencer</div><div class="section-subtitle">Próximos 7 dias — ainda não descontadas do saldo</div></div>
+      ${renderControleColunas('contasAVencer')}
+    </div>
+    ${c.contasAVencer.length === 0 ? `<div class="empty-state">Nenhuma conta vencendo nos próximos 7 dias 🎉</div>` : `
+      <div style="display:grid;grid-template-columns:${gridColumnsStyle('contasAVencer', 240)};gap:8px;margin-bottom:20px">
+        ${c.contasAVencer.map((t) => `
+          <div class="alert-card" style="border-color:${corUrgencia(t.diasParaVencer)}55">
+            <div class="alert-card-row">
+              <div class="alert-dot" style="background:${corUrgencia(t.diasParaVencer)}"></div>
+              <div style="flex:1">
+                <div class="alert-name">${esc(t.categoria)}</div>
+                ${t.descricao ? `<div class="alert-meta" style="margin-top:0">${esc(t.descricao)}</div>` : ''}
+                <div class="alert-status" style="color:${corUrgencia(t.diasParaVencer)}">${t.diasParaVencer === 0 ? '📅 Vence hoje' : t.diasParaVencer === 1 ? '📅 Vence amanhã' : `📅 Vence em ${t.diasParaVencer} dias`} — ${fmt(t.valor)}</div>
+              </div>
+            </div>
+            <button class="confirm-btn" style="background:var(--teal);margin-top:8px" data-marcar-pago="${t.id}">✅ Marcar como pago</button>
+          </div>
+        `).join('')}
+      </div>
+    `}
+  `;
+}
+
 // ---- Gate de acesso ----
 function renderGate(app) {
   app.innerHTML = `
@@ -2329,7 +2338,8 @@ function renderFinanceiro(c) {
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="icon-btn-ghost" id="toggleTaxas">⚙️ Taxas</button>
         <button class="icon-btn-ghost" id="toggleConciliacao">🔄 Conciliação</button>
-        <button class="icon-btn-ghost" id="toggleResumoFinanceiro">📊 Resumo</button>
+        <button class="icon-btn-ghost" id="toggleContasAVencer">⚠️ Contas a vencer${c.contasAVencer.length > 0 ? ` (${c.contasAVencer.length})` : ''}</button>
+        <button class="icon-btn-ghost" id="toggleResumoFinanceiro">📊 Custos</button>
         <button class="icon-btn-ghost" id="toggleSelect">${state.selectMode ? '✕ Cancelar' : '☑️ Selecionar'}</button>
         <button class="icon-btn-ghost" id="exportCsv">💾 Exportar</button>
         <button class="icon-btn-ghost" id="toggleUpload">📤 CSV</button>
@@ -2383,6 +2393,8 @@ function renderFinanceiro(c) {
     ` : ''}
 
     ${state.showConciliacao ? renderConciliacao(c) : ''}
+
+    ${state.showContasAVencer ? renderContasAVencer(c) : ''}
 
     ${state.showResumoFinanceiro ? renderResumoFinanceiro(c) : ''}
 
@@ -3155,6 +3167,7 @@ function attachHandlers(c) {
       state.showNovaPlataforma = false;
       state.showConciliacao = false;
       state.showResumoFinanceiro = false;
+      state.showContasAVencer = false;
       state.showProdutosParados = false;
       state.showCostureiraForm = false;
       state.editingCostureiraId = null;
@@ -3185,7 +3198,7 @@ function attachHandlers(c) {
     const alertaVencimento = document.querySelector('[data-ir-financeiro]');
     if (alertaVencimento) alertaVencimento.addEventListener('click', () => {
       state.tab = 'financeiro';
-      state.showResumoFinanceiro = true;
+      state.showContasAVencer = true;
       render();
     });
   }
@@ -3226,6 +3239,9 @@ function attachFinanceiroHandlers(c) {
 
   const toggleResumoFinanceiro = document.getElementById('toggleResumoFinanceiro');
   if (toggleResumoFinanceiro) toggleResumoFinanceiro.addEventListener('click', () => { state.showResumoFinanceiro = !state.showResumoFinanceiro; render(); });
+
+  const toggleContasAVencer = document.getElementById('toggleContasAVencer');
+  if (toggleContasAVencer) toggleContasAVencer.addEventListener('click', () => { state.showContasAVencer = !state.showContasAVencer; render(); });
 
   document.querySelectorAll('[data-marcar-pago]').forEach((btn) => {
     btn.addEventListener('click', async () => {
