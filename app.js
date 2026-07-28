@@ -3084,20 +3084,20 @@ function renderDashboard(c) {
     ` : ''}
 
     <div class="stats-grid">
-      <div class="stat-card">
-        <div class="stat-icon" style="background:rgba(0,212,160,0.1)">📈</div>
+      <div class="stat-card" style="border-color:var(--teal)55;background:rgba(0,212,160,0.06)">
+        <div class="stat-icon" style="background:rgba(0,212,160,0.15)">📈</div>
         <div class="stat-label">Entradas do mês</div>
-        <div class="stat-value">${fmt(c.entradasMes)}</div>
+        <div class="stat-value" style="color:var(--teal)">${fmt(c.entradasMes)}</div>
       </div>
-      <div class="stat-card">
-        <div class="stat-icon" style="background:rgba(255,46,126,0.1)">📉</div>
+      <div class="stat-card" style="border-color:var(--pink)55;background:rgba(255,46,126,0.06)">
+        <div class="stat-icon" style="background:rgba(255,46,126,0.15)">📉</div>
         <div class="stat-label">Saídas do mês</div>
-        <div class="stat-value">${fmt(c.saidasMes)}</div>
+        <div class="stat-value" style="color:var(--pink)">${fmt(c.saidasMes)}</div>
       </div>
-      <div class="stat-card">
-        <div class="stat-icon" style="background:${c.saldoTotal >= 0 ? 'rgba(0,212,160,0.1)' : 'rgba(255,71,87,0.1)'}">💰</div>
+      <div class="stat-card" style="border-color:${c.saldoTotal >= 0 ? 'var(--teal)' : 'var(--red)'}55;background:${c.saldoTotal >= 0 ? 'rgba(0,212,160,0.06)' : 'rgba(255,71,87,0.06)'}">
+        <div class="stat-icon" style="background:${c.saldoTotal >= 0 ? 'rgba(0,212,160,0.15)' : 'rgba(255,71,87,0.15)'}">💰</div>
         <div class="stat-label">Saldo total</div>
-        <div class="stat-value">${fmt(c.saldoTotal)}</div>
+        <div class="stat-value" style="color:${c.saldoTotal >= 0 ? 'var(--teal)' : 'var(--red)'}">${fmt(c.saldoTotal)}</div>
       </div>
     </div>
 
