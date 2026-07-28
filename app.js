@@ -285,11 +285,13 @@ const state = {
   editingPontoId: null,
   feriasTiradas: [],
   showFeriasForm: false,
+  solicitacoesPonto: [],
+  showSolicitarPontoId: null,
 };
 
 // ==================== DATA LAYER ====================
 async function loadData() {
-  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }, { data: feriasTiradas, error: e16 }] = await Promise.all([
+  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }, { data: feriasTiradas, error: e16 }, { data: solicitacoesPonto, error: e17 }] = await Promise.all([
     sb.from('transacoes').select('*').order('data', { ascending: false }),
     sb.from('produtos').select('*').order('created_at', { ascending: false }),
     sb.from('plataformas').select('*').order('nome', { ascending: true }),
@@ -306,6 +308,7 @@ async function loadData() {
     sb.from('funcionarias').select('*').order('nome', { ascending: true }),
     sb.from('pontos').select('*').order('horario', { ascending: false }),
     sb.from('ferias_tiradas').select('*').order('data_inicio', { ascending: false }),
+    sb.from('solicitacoes_ponto').select('*').order('created_at', { ascending: false }),
   ]);
   if (e1) console.error(e1);
   if (e2) console.error(e2);
@@ -323,6 +326,7 @@ async function loadData() {
   if (e14) console.error(e14);
   if (e15) console.error(e15);
   if (e16) console.error(e16);
+  if (e17) console.error(e17);
   state.tx = (tx || []).map(mapTxFromDb);
   state.produtos = (produtos || []).map(mapProdutoFromDb);
   state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0) }));
@@ -339,6 +343,7 @@ async function loadData() {
   state.funcionarias = (funcionarias || []).map((f) => ({ id: f.id, nome: f.nome, pin: f.pin, ativa: f.ativa, jornadaEntrada: (f.jornada_entrada || '08:00').slice(0, 5), jornadaSaidaAlmoco: (f.jornada_saida_almoco || '12:00').slice(0, 5), jornadaVoltaAlmoco: (f.jornada_volta_almoco || '13:00').slice(0, 5), jornadaSaida: (f.jornada_saida || '17:00').slice(0, 5), valorHora: Number(f.valor_hora || 0), dataAdmissao: f.data_admissao || null, jornadaSemanal: f.jornada_semanal || {} }));
   state.feriasTiradas = (feriasTiradas || []).map((v) => ({ id: v.id, funcionariaId: v.funcionaria_id, dataInicio: v.data_inicio, dataFim: v.data_fim }));
   state.pontos = (pontos || []).map((p) => ({ id: p.id, funcionariaId: p.funcionaria_id, data: p.data, tipo: p.tipo, horario: p.horario }));
+  state.solicitacoesPonto = (solicitacoesPonto || []).map((s) => ({ id: s.id, funcionariaId: s.funcionaria_id, data: s.data, tipo: s.tipo, horarioSolicitado: s.horario_solicitado, motivo: s.motivo || '', status: s.status, createdAt: s.created_at }));
   state.loading = false;
   render();
 }
@@ -1047,11 +1052,12 @@ function calcularHorasDia(pontosDoDia, funcionaria, dataStr) {
   const completo = !!(porTipo.entrada && porTipo.saida);
   return { horasTrabalhadas, jornadaEsperada, diferenca: horasTrabalhadas - jornadaEsperada, completo, porTipo, diaTrabalhavel: esperado.trabalha };
 }
-// procura, nos últimos N dias, dias em que ela deveria ter trabalhado mas não bateu ponto
-// (ou bateu incompleto) — hoje só conta como esquecido depois do horário de saída esperado
+// procura, nos últimos N dias, dias em que ela deveria ter trabalhado mas falta alguma
+// das 4 batidas — hoje só conta a partir do horário de saída esperado. Separa o que já
+// tem solicitação pendente daquilo que ainda não foi nem solicitado.
 function verificarPontosEsquecidos(funcionaria, diasParaTras) {
   diasParaTras = diasParaTras || 14;
-  const esquecidos = [];
+  const resultado = [];
   const hoje = new Date(todayStr() + 'T00:00:00');
   const agora = new Date();
   for (let i = 0; i <= diasParaTras; i++) {
@@ -1070,14 +1076,34 @@ function verificarPontosEsquecidos(funcionaria, diasParaTras) {
       if (agora < limiteHoje) continue;
     }
     const pontosDoDia = state.pontos.filter((p) => p.funcionariaId === funcionaria.id && p.data === dataStr);
-    if (pontosDoDia.length === 0) {
-      esquecidos.push({ data: dataStr, motivo: 'sem-batida' });
-    } else {
-      const calc = calcularHorasDia(pontosDoDia, funcionaria, dataStr);
-      if (!calc.completo) esquecidos.push({ data: dataStr, motivo: 'incompleto' });
-    }
+    const tiposBatidos = new Set(pontosDoDia.map((p) => p.tipo));
+    const tiposFaltandoTotal = ORDEM_PONTOS.filter((t) => !tiposBatidos.has(t));
+    if (tiposFaltandoTotal.length === 0) continue;
+    const tiposPendentesAprovacao = tiposFaltandoTotal.filter((t) =>
+      state.solicitacoesPonto.some((s) => s.funcionariaId === funcionaria.id && s.data === dataStr && s.tipo === t && s.status === 'pendente')
+    );
+    const tiposSemSolicitacao = tiposFaltandoTotal.filter((t) => !tiposPendentesAprovacao.includes(t));
+    resultado.push({ data: dataStr, tiposSemSolicitacao, tiposPendentesAprovacao });
   }
-  return esquecidos.sort((a, b) => b.data.localeCompare(a.data));
+  return resultado.sort((a, b) => b.data.localeCompare(a.data));
+}
+async function addSolicitacaoPonto(funcionariaId, data, tipo, horarioISO, motivo) {
+  const { error } = await sb.from('solicitacoes_ponto').insert({
+    funcionaria_id: funcionariaId, data, tipo, horario_solicitado: horarioISO, motivo: motivo || null, status: 'pendente',
+  });
+  if (error) alert('Erro ao enviar solicitação: ' + error.message);
+}
+async function aprovarSolicitacaoPonto(solicitacao) {
+  const { error: errPonto } = await sb.from('pontos').insert({
+    funcionaria_id: solicitacao.funcionariaId, data: solicitacao.data, tipo: solicitacao.tipo, horario: solicitacao.horarioSolicitado,
+  });
+  if (errPonto) { alert('Erro ao criar a batida: ' + errPonto.message); return; }
+  const { error } = await sb.from('solicitacoes_ponto').update({ status: 'aprovado', respondido_em: new Date().toISOString() }).eq('id', solicitacao.id);
+  if (error) alert('Erro ao aprovar solicitação: ' + error.message);
+}
+async function rejeitarSolicitacaoPonto(id) {
+  const { error } = await sb.from('solicitacoes_ponto').update({ status: 'rejeitado', respondido_em: new Date().toISOString() }).eq('id', id);
+  if (error) alert('Erro ao recusar solicitação: ' + error.message);
 }
 
 // ---- Costureiras & Produção ----
@@ -1764,13 +1790,41 @@ function renderModoPonto(app) {
       `}
 
       ${(() => {
-        const esquecidos = verificarPontosEsquecidos(funcionaria).filter((e) => e.data !== hoje);
-        if (esquecidos.length === 0) return '';
+        const dias = verificarPontosEsquecidos(funcionaria);
+        const diasComAlgo = dias.filter((e) => e.tiposSemSolicitacao.length > 0 || e.tiposPendentesAprovacao.length > 0);
+        if (diasComAlgo.length === 0) return '';
         return `
           <div class="form-card" style="border-color:var(--red)55;margin-bottom:24px">
-            <div style="font-size:13px;font-weight:600;color:var(--red);margin-bottom:6px">⚠️ Você tem ponto pendente</div>
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Fala com a gestão pra corrigir:</div>
-            ${esquecidos.map((e) => `<div style="font-size:12.5px;padding:2px 0">${new Date(e.data + 'T00:00:00').toLocaleDateString('pt-BR')} — ${e.motivo === 'sem-batida' ? 'nenhuma batida' : 'batida incompleta'}</div>`).join('')}
+            <div style="font-size:13px;font-weight:600;color:var(--red);margin-bottom:6px">⚠️ Ponto pendente</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Preencha o horário certo e o motivo — a gestão vai aprovar.</div>
+            ${diasComAlgo.map((e) => `
+              <div style="border-top:1px solid var(--border);padding-top:8px;margin-top:8px">
+                <div style="font-size:12.5px;font-weight:600;margin-bottom:4px">${new Date(e.data + 'T00:00:00').toLocaleDateString('pt-BR')}</div>
+                ${e.tiposPendentesAprovacao.map((t) => `<div style="font-size:12px;color:var(--amber);padding:2px 0">⏳ ${LABEL_PONTO[t]} — aguardando aprovação</div>`).join('')}
+                ${e.tiposSemSolicitacao.map((t) => {
+                  const chave = `${e.data}_${t}`;
+                  if (state.showSolicitarPontoId === chave) {
+                    return `
+                      <div class="entrada-box" style="margin-top:6px">
+                        <div class="form-hint" style="margin-bottom:2px">${LABEL_PONTO[t]} — horário certo</div>
+                        <input type="time" id="solicitarHora-${chave}" value="08:00" />
+                        <input type="text" id="solicitarMotivo-${chave}" placeholder="Motivo (ex: esqueci, celular sem bateria...)" />
+                        <div class="form-row">
+                          <button class="confirm-btn" data-enviar-solicitacao="${chave}" data-func="${funcionaria.id}" data-data="${e.data}" data-tipo="${t}">Enviar</button>
+                          <button class="toggle-btn" data-cancelar-solicitacao="1">Cancelar</button>
+                        </div>
+                      </div>
+                    `;
+                  }
+                  return `
+                    <div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0">
+                      <span style="font-size:12px;color:var(--text-muted)">${LABEL_PONTO[t]} — sem batida</span>
+                      <button class="trash-btn" data-abrir-solicitacao="${chave}">✏️ Corrigir</button>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            `).join('')}
           </div>
         `;
       })()}
@@ -1804,6 +1858,28 @@ function renderModoPonto(app) {
     if (!confirm(`Confirmar ${LABEL_PONTO[tipo]} agora (${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })})?`)) return;
     await registrarPonto(funcionaria.id, tipo);
     await loadData();
+  });
+
+  document.querySelectorAll('[data-abrir-solicitacao]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.showSolicitarPontoId = btn.dataset.abrirSolicitacao; render(); });
+  });
+  document.querySelectorAll('[data-cancelar-solicitacao]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.showSolicitarPontoId = null; render(); });
+  });
+  document.querySelectorAll('[data-enviar-solicitacao]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const chave = btn.dataset.enviarSolicitacao;
+      const funcionariaId = btn.dataset.func;
+      const data = btn.dataset.data;
+      const tipo = btn.dataset.tipo;
+      const hora = document.getElementById(`solicitarHora-${chave}`).value;
+      const motivo = document.getElementById(`solicitarMotivo-${chave}`).value.trim();
+      if (!hora) { alert('Preencha o horário.'); return; }
+      const horarioISO = new Date(`${data}T${hora}:00`).toISOString();
+      await addSolicitacaoPonto(funcionariaId, data, tipo, horarioISO, motivo);
+      state.showSolicitarPontoId = null;
+      await loadData();
+    });
   });
 }
 
@@ -3242,13 +3318,16 @@ function renderRH(c) {
   if (state.rhFuncionariaDetalheId) return renderFuncionariaDetalhe(state.rhFuncionariaDetalheId);
 
   const hoje = todayStr();
-  const esquecidosPorFuncionaria = {};
-  let totalDiasEsquecidos = 0;
+  const pendentesPorFuncionaria = {};
+  let totalProblemas = 0;
   state.funcionarias.filter((f) => f.ativa !== false).forEach((f) => {
-    const esquecidos = verificarPontosEsquecidos(f);
-    esquecidosPorFuncionaria[f.id] = esquecidos;
-    totalDiasEsquecidos += esquecidos.length;
+    const dias = verificarPontosEsquecidos(f);
+    const semSolicitacao = dias.reduce((a, d) => a + d.tiposSemSolicitacao.length, 0);
+    const aguardando = dias.reduce((a, d) => a + d.tiposPendentesAprovacao.length, 0);
+    pendentesPorFuncionaria[f.id] = { dias, semSolicitacao, aguardando };
+    totalProblemas += semSolicitacao + aguardando;
   });
+  const solicitacoesPendentes = state.solicitacoesPonto.filter((s) => s.status === 'pendente').sort((a, b) => a.data.localeCompare(b.data));
 
   return `
     <div class="section-title-wrap">
@@ -3256,9 +3335,33 @@ function renderRH(c) {
       <button class="icon-btn" id="toggleFuncionariaForm">＋ Funcionária</button>
     </div>
 
-    ${totalDiasEsquecidos > 0 ? `
+    ${totalProblemas > 0 ? `
       <div class="alerta-vencimento">
-        <span>⚠️ ${totalDiasEsquecidos} dia(s) com ponto pendente ou incompleto, ao todo</span>
+        <span>⚠️ ${totalProblemas} batida(s) pendente(s) ou incompleta(s), ao todo${solicitacoesPendentes.length > 0 ? ` — ${solicitacoesPendentes.length} aguardando sua aprovação` : ''}</span>
+      </div>
+    ` : ''}
+
+    ${solicitacoesPendentes.length > 0 ? `
+      <div class="section-title-wrap"><div><div class="section-title">Solicitações de ajuste</div><div class="section-subtitle">Enviadas pelas funcionárias, aguardando sua decisão</div></div></div>
+      <div class="tx-list" style="margin-bottom:28px">
+        ${solicitacoesPendentes.map((s) => {
+          const func = state.funcionarias.find((f) => f.id === s.funcionariaId);
+          return `
+            <div class="produto-card">
+              <div class="produto-header">
+                <div>
+                  <div class="produto-nome">${esc(func?.nome || 'Funcionária removida')} — ${LABEL_PONTO[s.tipo]}</div>
+                  <div class="produto-sku">${new Date(s.data + 'T00:00:00').toLocaleDateString('pt-BR')} às ${new Date(s.horarioSolicitado).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</div>
+                </div>
+              </div>
+              ${s.motivo ? `<div class="form-hint" style="margin-top:6px">Motivo: ${esc(s.motivo)}</div>` : `<div class="form-hint" style="margin-top:6px">Sem motivo informado.</div>`}
+              <div class="form-row" style="margin-top:10px">
+                <button class="confirm-btn" style="background:var(--teal)" data-aprovar-solicitacao="${s.id}">✅ Aceitar</button>
+                <button class="toggle-btn" data-recusar-solicitacao="${s.id}">✕ Recusar</button>
+              </div>
+            </div>
+          `;
+        }).join('')}
       </div>
     ` : ''}
 
@@ -3297,15 +3400,16 @@ function renderRH(c) {
           const pontosHoje = state.pontos.filter((p) => p.funcionariaId === f.id && p.data === hoje).sort((a, b) => new Date(a.horario) - new Date(b.horario));
           const ultimaBatida = pontosHoje[pontosHoje.length - 1];
           const statusFerias = calcularStatusFerias(f);
-          const esquecidos = esquecidosPorFuncionaria[f.id] || [];
+          const pendentes = pendentesPorFuncionaria[f.id] || { semSolicitacao: 0, aguardando: 0 };
           return `
             <div class="tx-row" style="cursor:pointer${f.ativa === false ? ';opacity:0.6' : ''}" data-abrir-funcionaria="${f.id}">
-              <div class="tx-dot" style="background:${esquecidos.length > 0 ? 'var(--red)' : f.ativa === false ? 'var(--text-muted)' : ultimaBatida ? 'var(--teal)' : 'var(--amber)'}"></div>
+              <div class="tx-dot" style="background:${pendentes.semSolicitacao > 0 ? 'var(--red)' : pendentes.aguardando > 0 ? 'var(--amber)' : f.ativa === false ? 'var(--text-muted)' : ultimaBatida ? 'var(--teal)' : 'var(--amber)'}"></div>
               <div style="flex:1">
                 <div class="tx-categoria">${esc(f.nome)}${f.ativa === false ? ' (inativa)' : ''}</div>
                 <div class="tx-desc">${ultimaBatida ? `Hoje: ${LABEL_PONTO[ultimaBatida.tipo]} às ${new Date(ultimaBatida.horario).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : 'Nenhuma batida hoje'}</div>
                 ${statusFerias ? `<div style="font-size:11px;color:${FERIAS_STATUS_LABEL[statusFerias.status].color};margin-top:2px">${FERIAS_STATUS_LABEL[statusFerias.status].label}</div>` : ''}
-                ${esquecidos.length > 0 ? `<div style="font-size:11px;color:var(--red);margin-top:2px">🔴 ${esquecidos.length} dia(s) sem bater ponto completo</div>` : ''}
+                ${pendentes.semSolicitacao > 0 ? `<div style="font-size:11px;color:var(--red);margin-top:2px">🔴 ${pendentes.semSolicitacao} batida(s) sem solicitação</div>` : ''}
+                ${pendentes.aguardando > 0 ? `<div style="font-size:11px;color:var(--amber);margin-top:2px">⏳ ${pendentes.aguardando} aguardando sua aprovação</div>` : ''}
               </div>
               <span style="color:var(--text-muted);font-size:16px">›</span>
               <button class="trash-btn" data-editar-func="${f.id}">✏️</button>
@@ -3341,7 +3445,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
   const feriasDaFuncionaria = state.feriasTiradas.filter((v) => v.funcionariaId === funcionariaId).sort((a, b) => b.dataFim.localeCompare(a.dataFim));
 
   const dataFmt = (d) => new Date(d + 'T00:00:00').toLocaleDateString('pt-BR');
-  const esquecidos = f ? verificarPontosEsquecidos(f) : [];
+  const diasPendentes = f ? verificarPontosEsquecidos(f).filter((e) => e.tiposSemSolicitacao.length > 0 || e.tiposPendentesAprovacao.length > 0) : [];
 
   return `
     <button class="icon-btn-ghost" id="voltarFuncionarias" style="margin-bottom:14px">← Voltar</button>
@@ -3350,21 +3454,44 @@ function renderFuncionariaDetalhe(funcionariaId) {
       <div><div class="section-title">${esc(f?.nome || 'Funcionária')}</div><div class="section-subtitle">${f ? [1, 2, 3, 4, 5, 6, 0].filter((dia) => (f.jornadaSemanal[dia] ? f.jornadaSemanal[dia].trabalha : (dia >= 1 && dia <= 5))).map((dia) => DIAS_SEMANA[dia].slice(0, 3)).join(', ') : ''}</div></div>
     </div>
 
-    ${esquecidos.length > 0 ? `
+    ${diasPendentes.length > 0 ? `
       <div class="form-card" style="border-color:var(--red)55">
         <div class="section-title" style="margin-bottom:2px;color:var(--red)">⚠️ Ponto pendente</div>
         <div class="section-subtitle" style="margin-bottom:10px">Dias esperados sem batida completa</div>
-        <div class="tx-list">
-          ${esquecidos.map((e) => `
-            <div class="tx-row">
-              <div class="tx-dot" style="background:var(--red)"></div>
-              <div style="flex:1"><div class="tx-categoria">${dataFmt(e.data)}</div></div>
-              <div style="font-size:11px;color:var(--red)">${e.motivo === 'sem-batida' ? 'Nenhuma batida' : 'Incompleto'}</div>
+        ${diasPendentes.map((e) => `
+          <div style="border-top:1px solid var(--border);padding-top:6px;margin-top:6px">
+            <div style="font-size:12.5px;font-weight:600">${dataFmt(e.data)}</div>
+            ${e.tiposPendentesAprovacao.map((t) => `<div style="font-size:11.5px;color:var(--amber);padding:2px 0">⏳ ${LABEL_PONTO[t]} — aguardando sua aprovação</div>`).join('')}
+            ${e.tiposSemSolicitacao.map((t) => `<div style="font-size:11.5px;color:var(--red);padding:2px 0">🔴 ${LABEL_PONTO[t]} — sem solicitação ainda</div>`).join('')}
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
+
+    ${(() => {
+      const solicitacoesDela = state.solicitacoesPonto.filter((s) => s.funcionariaId === funcionariaId && s.status === 'pendente');
+      if (solicitacoesDela.length === 0) return '';
+      return `
+        <div class="section-title-wrap"><div><div class="section-title">Solicitações aguardando decisão</div></div></div>
+        <div class="produto-list" style="margin-bottom:24px">
+          ${solicitacoesDela.map((s) => `
+            <div class="produto-card">
+              <div class="produto-header">
+                <div>
+                  <div class="produto-nome">${LABEL_PONTO[s.tipo]}</div>
+                  <div class="produto-sku">${dataFmt(s.data)} às ${new Date(s.horarioSolicitado).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</div>
+                </div>
+              </div>
+              ${s.motivo ? `<div class="form-hint" style="margin-top:6px">Motivo: ${esc(s.motivo)}</div>` : ''}
+              <div class="form-row" style="margin-top:10px">
+                <button class="confirm-btn" style="background:var(--teal)" data-aprovar-solicitacao="${s.id}">✅ Aceitar</button>
+                <button class="toggle-btn" data-recusar-solicitacao="${s.id}">✕ Recusar</button>
+              </div>
             </div>
           `).join('')}
         </div>
-      </div>
-    ` : ''}
+      `;
+    })()}
 
     <div class="section-title-wrap">
       <div><div class="section-title">Férias</div></div>
@@ -3484,6 +3611,23 @@ function renderFuncionariaDetalhe(funcionariaId) {
 }
 
 function attachRHHandlers(c) {
+  document.querySelectorAll('[data-aprovar-solicitacao]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const solicitacao = state.solicitacoesPonto.find((s) => s.id === btn.dataset.aprovarSolicitacao);
+      if (!solicitacao) return;
+      if (!confirm('Aceitar essa solicitação? Isso cria a batida de ponto oficialmente.')) return;
+      await aprovarSolicitacaoPonto(solicitacao);
+      await loadData();
+    });
+  });
+  document.querySelectorAll('[data-recusar-solicitacao]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Recusar essa solicitação?')) return;
+      await rejeitarSolicitacaoPonto(btn.dataset.recusarSolicitacao);
+      await loadData();
+    });
+  });
+
   document.querySelectorAll('[data-toggle-dia-horario]').forEach((cb) => {
     cb.addEventListener('change', () => {
       const el = document.getElementById(cb.dataset.toggleDiaHorario);
