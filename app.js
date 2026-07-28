@@ -1047,6 +1047,38 @@ function calcularHorasDia(pontosDoDia, funcionaria, dataStr) {
   const completo = !!(porTipo.entrada && porTipo.saida);
   return { horasTrabalhadas, jornadaEsperada, diferenca: horasTrabalhadas - jornadaEsperada, completo, porTipo, diaTrabalhavel: esperado.trabalha };
 }
+// procura, nos últimos N dias, dias em que ela deveria ter trabalhado mas não bateu ponto
+// (ou bateu incompleto) — hoje só conta como esquecido depois do horário de saída esperado
+function verificarPontosEsquecidos(funcionaria, diasParaTras) {
+  diasParaTras = diasParaTras || 14;
+  const esquecidos = [];
+  const hoje = new Date(todayStr() + 'T00:00:00');
+  const agora = new Date();
+  for (let i = 0; i <= diasParaTras; i++) {
+    const d = new Date(hoje);
+    d.setDate(d.getDate() - i);
+    const dataStr = d.toISOString().slice(0, 10);
+    if (funcionaria.dataAdmissao && dataStr < funcionaria.dataAdmissao) continue;
+    const esperado = jornadaEsperadaDoDia(funcionaria, dataStr);
+    if (!esperado.trabalha) continue;
+    if (i === 0) {
+      const configHoje = (funcionaria.jornadaSemanal || {})[d.getDay()];
+      const saidaEsperada = configHoje?.saida || funcionaria.jornadaSaida;
+      const [hS, mS] = saidaEsperada.split(':').map(Number);
+      const limiteHoje = new Date(hoje);
+      limiteHoje.setHours(hS, mS, 0, 0);
+      if (agora < limiteHoje) continue;
+    }
+    const pontosDoDia = state.pontos.filter((p) => p.funcionariaId === funcionaria.id && p.data === dataStr);
+    if (pontosDoDia.length === 0) {
+      esquecidos.push({ data: dataStr, motivo: 'sem-batida' });
+    } else {
+      const calc = calcularHorasDia(pontosDoDia, funcionaria, dataStr);
+      if (!calc.completo) esquecidos.push({ data: dataStr, motivo: 'incompleto' });
+    }
+  }
+  return esquecidos.sort((a, b) => b.data.localeCompare(a.data));
+}
 
 // ---- Costureiras & Produção ----
 async function addCostureira(nome) {
@@ -1730,6 +1762,18 @@ function renderModoPonto(app) {
       ` : `
         <div class="empty-state" style="margin-bottom:24px">✅ Jornada de hoje completa!</div>
       `}
+
+      ${(() => {
+        const esquecidos = verificarPontosEsquecidos(funcionaria).filter((e) => e.data !== hoje);
+        if (esquecidos.length === 0) return '';
+        return `
+          <div class="form-card" style="border-color:var(--red)55;margin-bottom:24px">
+            <div style="font-size:13px;font-weight:600;color:var(--red);margin-bottom:6px">⚠️ Você tem ponto pendente</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Fala com a gestão pra corrigir:</div>
+            ${esquecidos.map((e) => `<div style="font-size:12.5px;padding:2px 0">${new Date(e.data + 'T00:00:00').toLocaleDateString('pt-BR')} — ${e.motivo === 'sem-batida' ? 'nenhuma batida' : 'batida incompleta'}</div>`).join('')}
+          </div>
+        `;
+      })()}
 
       <div class="section-title-wrap"><div><div class="section-title">Hoje</div></div></div>
       ${pontosHoje.length === 0 ? `<div class="empty-state">Nenhuma batida ainda hoje.</div>` : `
@@ -3198,12 +3242,25 @@ function renderRH(c) {
   if (state.rhFuncionariaDetalheId) return renderFuncionariaDetalhe(state.rhFuncionariaDetalheId);
 
   const hoje = todayStr();
+  const esquecidosPorFuncionaria = {};
+  let totalDiasEsquecidos = 0;
+  state.funcionarias.filter((f) => f.ativa !== false).forEach((f) => {
+    const esquecidos = verificarPontosEsquecidos(f);
+    esquecidosPorFuncionaria[f.id] = esquecidos;
+    totalDiasEsquecidos += esquecidos.length;
+  });
 
   return `
     <div class="section-title-wrap">
       <div><div class="section-title">RH</div><div class="section-subtitle">Funcionárias e ponto eletrônico</div></div>
       <button class="icon-btn" id="toggleFuncionariaForm">＋ Funcionária</button>
     </div>
+
+    ${totalDiasEsquecidos > 0 ? `
+      <div class="alerta-vencimento">
+        <span>⚠️ ${totalDiasEsquecidos} dia(s) com ponto pendente ou incompleto, ao todo</span>
+      </div>
+    ` : ''}
 
     ${state.showFuncionariaForm ? `
       <div class="form-card">
@@ -3240,13 +3297,15 @@ function renderRH(c) {
           const pontosHoje = state.pontos.filter((p) => p.funcionariaId === f.id && p.data === hoje).sort((a, b) => new Date(a.horario) - new Date(b.horario));
           const ultimaBatida = pontosHoje[pontosHoje.length - 1];
           const statusFerias = calcularStatusFerias(f);
+          const esquecidos = esquecidosPorFuncionaria[f.id] || [];
           return `
             <div class="tx-row" style="cursor:pointer${f.ativa === false ? ';opacity:0.6' : ''}" data-abrir-funcionaria="${f.id}">
-              <div class="tx-dot" style="background:${f.ativa === false ? 'var(--text-muted)' : ultimaBatida ? 'var(--teal)' : 'var(--amber)'}"></div>
+              <div class="tx-dot" style="background:${esquecidos.length > 0 ? 'var(--red)' : f.ativa === false ? 'var(--text-muted)' : ultimaBatida ? 'var(--teal)' : 'var(--amber)'}"></div>
               <div style="flex:1">
                 <div class="tx-categoria">${esc(f.nome)}${f.ativa === false ? ' (inativa)' : ''}</div>
                 <div class="tx-desc">${ultimaBatida ? `Hoje: ${LABEL_PONTO[ultimaBatida.tipo]} às ${new Date(ultimaBatida.horario).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : 'Nenhuma batida hoje'}</div>
                 ${statusFerias ? `<div style="font-size:11px;color:${FERIAS_STATUS_LABEL[statusFerias.status].color};margin-top:2px">${FERIAS_STATUS_LABEL[statusFerias.status].label}</div>` : ''}
+                ${esquecidos.length > 0 ? `<div style="font-size:11px;color:var(--red);margin-top:2px">🔴 ${esquecidos.length} dia(s) sem bater ponto completo</div>` : ''}
               </div>
               <span style="color:var(--text-muted);font-size:16px">›</span>
               <button class="trash-btn" data-editar-func="${f.id}">✏️</button>
@@ -3282,6 +3341,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
   const feriasDaFuncionaria = state.feriasTiradas.filter((v) => v.funcionariaId === funcionariaId).sort((a, b) => b.dataFim.localeCompare(a.dataFim));
 
   const dataFmt = (d) => new Date(d + 'T00:00:00').toLocaleDateString('pt-BR');
+  const esquecidos = f ? verificarPontosEsquecidos(f) : [];
 
   return `
     <button class="icon-btn-ghost" id="voltarFuncionarias" style="margin-bottom:14px">← Voltar</button>
@@ -3289,6 +3349,22 @@ function renderFuncionariaDetalhe(funcionariaId) {
     <div class="section-title-wrap">
       <div><div class="section-title">${esc(f?.nome || 'Funcionária')}</div><div class="section-subtitle">${f ? [1, 2, 3, 4, 5, 6, 0].filter((dia) => (f.jornadaSemanal[dia] ? f.jornadaSemanal[dia].trabalha : (dia >= 1 && dia <= 5))).map((dia) => DIAS_SEMANA[dia].slice(0, 3)).join(', ') : ''}</div></div>
     </div>
+
+    ${esquecidos.length > 0 ? `
+      <div class="form-card" style="border-color:var(--red)55">
+        <div class="section-title" style="margin-bottom:2px;color:var(--red)">⚠️ Ponto pendente</div>
+        <div class="section-subtitle" style="margin-bottom:10px">Dias esperados sem batida completa</div>
+        <div class="tx-list">
+          ${esquecidos.map((e) => `
+            <div class="tx-row">
+              <div class="tx-dot" style="background:var(--red)"></div>
+              <div style="flex:1"><div class="tx-categoria">${dataFmt(e.data)}</div></div>
+              <div style="font-size:11px;color:var(--red)">${e.motivo === 'sem-batida' ? 'Nenhuma batida' : 'Incompleto'}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    ` : ''}
 
     <div class="section-title-wrap">
       <div><div class="section-title">Férias</div></div>
