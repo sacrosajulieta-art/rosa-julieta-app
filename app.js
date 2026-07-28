@@ -11,6 +11,30 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const CODIGO_DONO = 'ROSA2026';
 const CODIGO_SUPERVISORA = 'EXPED2026';
 
+// Sessão de ponto: se ela marcou "lembrar", fica salvo com prazo (localStorage);
+// se não marcou, dura só enquanto a aba/navegador ficar aberto (sessionStorage).
+function carregarSessaoInicial() {
+  const papelSalvo = localStorage.getItem('rj_papel');
+  if (papelSalvo === 'ponto') {
+    const expiraEm = localStorage.getItem('rj_ponto_expira_em');
+    if (expiraEm && Date.now() > Number(expiraEm)) {
+      localStorage.removeItem('rj_papel');
+      localStorage.removeItem('rj_funcionaria_id');
+      localStorage.removeItem('rj_ponto_expira_em');
+    } else {
+      return { papel: 'ponto', funcionariaId: localStorage.getItem('rj_funcionaria_id') };
+    }
+  } else if (papelSalvo) {
+    return { papel: papelSalvo, funcionariaId: null };
+  }
+  const papelSessao = sessionStorage.getItem('rj_papel_sessao');
+  if (papelSessao === 'ponto') {
+    return { papel: 'ponto', funcionariaId: sessionStorage.getItem('rj_funcionaria_id_sessao') };
+  }
+  return { papel: null, funcionariaId: null };
+}
+const SESSAO_INICIAL = carregarSessaoInicial();
+
 const CATEGORIAS_SAIDA = {
   'Custos fixos': [
     'Aluguel', 'Funcionários — salário', 'Funcionários — encargos/benefícios',
@@ -228,7 +252,7 @@ const state = {
   showTaxasForm: false,
   showNovaPlataforma: false,
   filtroTipo: 'todos',
-  papel: localStorage.getItem('rj_papel') || null,
+  papel: SESSAO_INICIAL.papel,
   costureiras: [],
   producoes: [],
   showCostureiraForm: false,
@@ -276,7 +300,7 @@ const state = {
   configEnvioInsumoId: null,
   funcionarias: [],
   pontos: [],
-  funcionariaLogadaId: localStorage.getItem('rj_funcionaria_id') || null,
+  funcionariaLogadaId: SESSAO_INICIAL.funcionariaId,
   showFuncionariaForm: false,
   editingFuncionariaId: null,
   rhFuncionariaDetalheId: null,
@@ -291,7 +315,7 @@ const state = {
 
 // ==================== DATA LAYER ====================
 async function loadData() {
-  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }, { data: feriasTiradas, error: e16 }, { data: solicitacoesPonto, error: e17 }] = await Promise.all([
+  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }, { data: feriasTiradas, error: e16 }, { data: solicitacoesPonto, error: e17 }, { data: horasExtrasLiquidadas, error: e18 }, { data: bancoHorasLancamentos, error: e19 }] = await Promise.all([
     sb.from('transacoes').select('*').order('data', { ascending: false }),
     sb.from('produtos').select('*').order('created_at', { ascending: false }),
     sb.from('plataformas').select('*').order('nome', { ascending: true }),
@@ -309,6 +333,8 @@ async function loadData() {
     sb.from('pontos').select('*').order('horario', { ascending: false }),
     sb.from('ferias_tiradas').select('*').order('data_inicio', { ascending: false }),
     sb.from('solicitacoes_ponto').select('*').order('created_at', { ascending: false }),
+    sb.from('horas_extras_liquidadas').select('*'),
+    sb.from('banco_horas_lancamentos').select('*').order('data', { ascending: false }),
   ]);
   if (e1) console.error(e1);
   if (e2) console.error(e2);
@@ -327,6 +353,8 @@ async function loadData() {
   if (e15) console.error(e15);
   if (e16) console.error(e16);
   if (e17) console.error(e17);
+  if (e18) console.error(e18);
+  if (e19) console.error(e19);
   state.tx = (tx || []).map(mapTxFromDb);
   state.produtos = (produtos || []).map(mapProdutoFromDb);
   state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0) }));
@@ -340,10 +368,12 @@ async function loadData() {
   state.distribuicoes = (distribuicoes || []).map((d) => ({ id: d.id, ordemItemId: d.ordem_item_id, produtoId: d.produto_id, varianteId: d.variante_id || null, costureiraId: d.costureira_id, quantidadeDistribuida: d.quantidade_distribuida, quantidadeDevolvida: d.quantidade_devolvida, data: d.data }));
   state.fichaTecnicaItens = (fichaTecnicaItens || []).map((f) => ({ id: f.id, produtoId: f.produto_id, tipoItem: f.tipo_item, insumoId: f.insumo_id || null, componenteProdutoId: f.componente_produto_id || null, quantidade: Number(f.quantidade), momento: f.momento || 'venda' }));
   state.insumoPlataformaQtd = (insumoPlataformaQtd || []).map((q) => ({ id: q.id, insumoId: q.insumo_id, plataformaId: q.plataforma_id, quantidade: Number(q.quantidade) }));
-  state.funcionarias = (funcionarias || []).map((f) => ({ id: f.id, nome: f.nome, pin: f.pin, ativa: f.ativa, jornadaEntrada: (f.jornada_entrada || '08:00').slice(0, 5), jornadaSaidaAlmoco: (f.jornada_saida_almoco || '12:00').slice(0, 5), jornadaVoltaAlmoco: (f.jornada_volta_almoco || '13:00').slice(0, 5), jornadaSaida: (f.jornada_saida || '17:00').slice(0, 5), valorHora: Number(f.valor_hora || 0), dataAdmissao: f.data_admissao || null, jornadaSemanal: f.jornada_semanal || {} }));
+  state.funcionarias = (funcionarias || []).map((f) => ({ id: f.id, nome: f.nome, pin: f.pin, ativa: f.ativa, jornadaEntrada: (f.jornada_entrada || '08:00').slice(0, 5), jornadaSaidaAlmoco: (f.jornada_saida_almoco || '12:00').slice(0, 5), jornadaVoltaAlmoco: (f.jornada_volta_almoco || '13:00').slice(0, 5), jornadaSaida: (f.jornada_saida || '17:00').slice(0, 5), valorHora: Number(f.valor_hora || 0), dataAdmissao: f.data_admissao || null, jornadaSemanal: f.jornada_semanal || {}, percentualHoraExtra: Number(f.percentual_hora_extra != null ? f.percentual_hora_extra : 50), modoCompensacaoPadrao: f.modo_compensacao_padrao || 'dinheiro' }));
   state.feriasTiradas = (feriasTiradas || []).map((v) => ({ id: v.id, funcionariaId: v.funcionaria_id, dataInicio: v.data_inicio, dataFim: v.data_fim }));
   state.pontos = (pontos || []).map((p) => ({ id: p.id, funcionariaId: p.funcionaria_id, data: p.data, tipo: p.tipo, horario: p.horario }));
   state.solicitacoesPonto = (solicitacoesPonto || []).map((s) => ({ id: s.id, funcionariaId: s.funcionaria_id, data: s.data, tipo: s.tipo, horarioSolicitado: s.horario_solicitado, motivo: s.motivo || '', status: s.status, createdAt: s.created_at }));
+  state.horasExtrasLiquidadas = (horasExtrasLiquidadas || []).map((h) => ({ id: h.id, funcionariaId: h.funcionaria_id, data: h.data, horas: Number(h.horas), modo: h.modo, valorPago: h.valor_pago != null ? Number(h.valor_pago) : null }));
+  state.bancoHorasLancamentos = (bancoHorasLancamentos || []).map((b) => ({ id: b.id, funcionariaId: b.funcionaria_id, data: b.data, tipo: b.tipo, horas: Number(b.horas), descricao: b.descricao || '' }));
   state.loading = false;
   render();
 }
@@ -1751,6 +1781,9 @@ function renderModoPonto(app) {
   if (!funcionaria) {
     localStorage.removeItem('rj_papel');
     localStorage.removeItem('rj_funcionaria_id');
+    localStorage.removeItem('rj_ponto_expira_em');
+    sessionStorage.removeItem('rj_papel_sessao');
+    sessionStorage.removeItem('rj_funcionaria_id_sessao');
     state.papel = null;
     state.funcionariaLogadaId = null;
     render();
@@ -1847,6 +1880,9 @@ function renderModoPonto(app) {
   document.getElementById('sairPonto').addEventListener('click', () => {
     localStorage.removeItem('rj_papel');
     localStorage.removeItem('rj_funcionaria_id');
+    localStorage.removeItem('rj_ponto_expira_em');
+    sessionStorage.removeItem('rj_papel_sessao');
+    sessionStorage.removeItem('rj_funcionaria_id_sessao');
     state.papel = null;
     state.funcionariaLogadaId = null;
     render();
@@ -2690,6 +2726,7 @@ function renderGate(app) {
           <div class="section-title" style="margin-bottom:4px">Bater ponto</div>
           <div class="section-subtitle" style="margin-bottom:16px">Digite seu PIN pessoal</div>
           <input type="password" id="gatePin" inputmode="numeric" placeholder="PIN" />
+          <label class="checkbox-label" style="margin-top:6px"><input type="checkbox" id="gateLembrarPin" checked /> Lembrar meu PIN por 15 dias neste aparelho</label>
           <button class="confirm-btn" id="gateEntrarPin" style="margin-top:10px">Entrar</button>
           <div id="gateErroPin" style="color:var(--red);font-size:12px;margin-top:8px;display:none">PIN inválido, tente de novo.</div>
           <button class="sair-link" id="gateVoltarCodigo" style="margin-top:14px">← Voltar pro código de acesso</button>
@@ -2724,10 +2761,23 @@ function renderGate(app) {
   } else {
     const tentarPin = () => {
       const pin = document.getElementById('gatePin').value.trim();
+      const lembrar = document.getElementById('gateLembrarPin').checked;
       const funcionaria = state.funcionarias.find((f) => f.pin === pin && f.ativa !== false);
       if (funcionaria) {
-        localStorage.setItem('rj_papel', 'ponto');
-        localStorage.setItem('rj_funcionaria_id', funcionaria.id);
+        if (lembrar) {
+          const expiraEm = Date.now() + 15 * 24 * 60 * 60 * 1000;
+          localStorage.setItem('rj_papel', 'ponto');
+          localStorage.setItem('rj_funcionaria_id', funcionaria.id);
+          localStorage.setItem('rj_ponto_expira_em', String(expiraEm));
+          sessionStorage.removeItem('rj_papel_sessao');
+          sessionStorage.removeItem('rj_funcionaria_id_sessao');
+        } else {
+          sessionStorage.setItem('rj_papel_sessao', 'ponto');
+          sessionStorage.setItem('rj_funcionaria_id_sessao', funcionaria.id);
+          localStorage.removeItem('rj_papel');
+          localStorage.removeItem('rj_funcionaria_id');
+          localStorage.removeItem('rj_ponto_expira_em');
+        }
         state.papel = 'ponto';
         state.funcionariaLogadaId = funcionaria.id;
         window.__gateModoPonto = false;
