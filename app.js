@@ -2114,18 +2114,55 @@ function renderResumoFinanceiro(c) {
   const custoTotal = c.custoFixo + c.custoVariavel || 1;
   const pctFixo = Math.round((c.custoFixo / custoTotal) * 100);
   const pctVariavel = 100 - pctFixo;
+  const circunferencia = 2 * Math.PI * 50;
+  const arcoFixo = (pctFixo / 100) * circunferencia;
+  const arcoVariavel = (pctVariavel / 100) * circunferencia;
+
+  // maiores categorias de gasto no mês (fixo + variável juntos, ordenado)
+  const porCategoria = {};
+  c.txMes.filter((t) => t.tipo === 'saida').forEach((t) => {
+    if (!porCategoria[t.categoria]) porCategoria[t.categoria] = { valor: 0, natureza: t.natureza };
+    porCategoria[t.categoria].valor += t.valor;
+  });
+  const categoriasOrdenadas = Object.entries(porCategoria).sort((a, b) => b[1].valor - a[1].valor);
+  const maiorValor = categoriasOrdenadas.length ? categoriasOrdenadas[0][1].valor : 1;
 
   return `
     <div class="form-card">
       <div class="section-title" style="margin-bottom:2px">Custos fixos x variáveis</div>
-      <div class="section-subtitle" style="margin-bottom:12px">Baseado nos lançamentos do mês selecionado</div>
+      <div class="section-subtitle" style="margin-bottom:14px">Baseado nos lançamentos do mês selecionado</div>
       ${c.custoFixo + c.custoVariavel === 0 ? `<div class="empty-state">Nenhuma saída lançada neste mês ainda.</div>` : `
-        <div class="custo-box">
-          <div class="custo-bar"><div class="custo-bar-fill" style="width:${pctFixo}%"></div></div>
-          <div class="custo-legend">
-            <div class="custo-legend-item"><span class="legend-dot" style="background:var(--pink)"></span>Fixos — ${fmt(c.custoFixo)} (${pctFixo}%)</div>
-            <div class="custo-legend-item"><span class="legend-dot" style="background:var(--surface2);border:1px solid var(--border)"></span>Variáveis — ${fmt(c.custoVariavel)} (${pctVariavel}%)</div>
+        <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;margin-bottom:22px">
+          <svg viewBox="0 0 120 120" width="110" height="110" style="flex-shrink:0">
+            <circle cx="60" cy="60" r="50" fill="none" stroke="var(--surface2)" stroke-width="16" />
+            <circle cx="60" cy="60" r="50" fill="none" stroke="var(--pink)" stroke-width="16"
+              stroke-dasharray="${arcoFixo} ${circunferencia}" stroke-linecap="round" transform="rotate(-90 60 60)" />
+            <circle cx="60" cy="60" r="50" fill="none" stroke="var(--teal)" stroke-width="16"
+              stroke-dasharray="${arcoVariavel} ${circunferencia}" stroke-dashoffset="${-arcoFixo}" stroke-linecap="round" transform="rotate(-90 60 60)" />
+          </svg>
+          <div style="flex:1;min-width:150px">
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Total de saídas no mês</div>
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:700;margin-bottom:10px">${fmt(c.custoFixo + c.custoVariavel)}</div>
+            <div class="custo-legend">
+              <div class="custo-legend-item"><span class="legend-dot" style="background:var(--pink)"></span>Fixos — ${fmt(c.custoFixo)} (${pctFixo}%)</div>
+              <div class="custo-legend-item"><span class="legend-dot" style="background:var(--teal)"></span>Variáveis — ${fmt(c.custoVariavel)} (${pctVariavel}%)</div>
+            </div>
           </div>
+        </div>
+
+        <div class="section-title" style="margin-bottom:10px;font-size:13px">Maiores categorias de gasto</div>
+        <div style="display:flex;flex-direction:column;gap:9px">
+          ${categoriasOrdenadas.slice(0, 8).map(([cat, info]) => `
+            <div>
+              <div style="display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:3px">
+                <span>${esc(cat)}</span>
+                <span style="color:var(--text-muted);font-family:'IBM Plex Mono',monospace">${fmt(info.valor)}</span>
+              </div>
+              <div style="height:8px;border-radius:4px;background:var(--surface2);overflow:hidden">
+                <div style="height:100%;width:${Math.max(4, (info.valor / maiorValor) * 100)}%;background:${info.natureza === 'fixo' ? 'var(--pink)' : 'var(--teal)'}"></div>
+              </div>
+            </div>
+          `).join('')}
         </div>
       `}
     </div>
@@ -2338,7 +2375,7 @@ function renderFinanceiro(c) {
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="icon-btn-ghost" id="toggleTaxas">⚙️ Taxas</button>
         <button class="icon-btn-ghost" id="toggleConciliacao">🔄 Conciliação</button>
-        <button class="icon-btn-ghost" id="toggleContasAVencer">⚠️ Contas a vencer${c.contasAVencer.length > 0 ? ` (${c.contasAVencer.length})` : ''}</button>
+        <button class="icon-btn-ghost" id="toggleContasAVencer" style="background:rgba(255,182,39,0.15);border:1.5px solid var(--amber);color:var(--amber);font-weight:700;padding:10px 16px;font-size:13.5px">⚠️ Contas a vencer${c.contasAVencer.length > 0 ? ` (${c.contasAVencer.length})` : ''}</button>
         <button class="icon-btn-ghost" id="toggleResumoFinanceiro">📊 Custos</button>
         <button class="icon-btn-ghost" id="toggleSelect">${state.selectMode ? '✕ Cancelar' : '☑️ Selecionar'}</button>
         <button class="icon-btn-ghost" id="exportCsv">💾 Exportar</button>
