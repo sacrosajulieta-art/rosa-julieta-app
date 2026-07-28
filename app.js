@@ -336,7 +336,7 @@ async function loadData() {
   state.distribuicoes = (distribuicoes || []).map((d) => ({ id: d.id, ordemItemId: d.ordem_item_id, produtoId: d.produto_id, varianteId: d.variante_id || null, costureiraId: d.costureira_id, quantidadeDistribuida: d.quantidade_distribuida, quantidadeDevolvida: d.quantidade_devolvida, data: d.data }));
   state.fichaTecnicaItens = (fichaTecnicaItens || []).map((f) => ({ id: f.id, produtoId: f.produto_id, tipoItem: f.tipo_item, insumoId: f.insumo_id || null, componenteProdutoId: f.componente_produto_id || null, quantidade: Number(f.quantidade), momento: f.momento || 'venda' }));
   state.insumoPlataformaQtd = (insumoPlataformaQtd || []).map((q) => ({ id: q.id, insumoId: q.insumo_id, plataformaId: q.plataforma_id, quantidade: Number(q.quantidade) }));
-  state.funcionarias = (funcionarias || []).map((f) => ({ id: f.id, nome: f.nome, pin: f.pin, ativa: f.ativa, jornadaEntrada: (f.jornada_entrada || '08:00').slice(0, 5), jornadaSaidaAlmoco: (f.jornada_saida_almoco || '12:00').slice(0, 5), jornadaVoltaAlmoco: (f.jornada_volta_almoco || '13:00').slice(0, 5), jornadaSaida: (f.jornada_saida || '17:00').slice(0, 5), valorHora: Number(f.valor_hora || 0), dataAdmissao: f.data_admissao || null }));
+  state.funcionarias = (funcionarias || []).map((f) => ({ id: f.id, nome: f.nome, pin: f.pin, ativa: f.ativa, jornadaEntrada: (f.jornada_entrada || '08:00').slice(0, 5), jornadaSaidaAlmoco: (f.jornada_saida_almoco || '12:00').slice(0, 5), jornadaVoltaAlmoco: (f.jornada_volta_almoco || '13:00').slice(0, 5), jornadaSaida: (f.jornada_saida || '17:00').slice(0, 5), valorHora: Number(f.valor_hora || 0), dataAdmissao: f.data_admissao || null, jornadaSemanal: f.jornada_semanal || {} }));
   state.feriasTiradas = (feriasTiradas || []).map((v) => ({ id: v.id, funcionariaId: v.funcionaria_id, dataInicio: v.data_inicio, dataFim: v.data_fim }));
   state.pontos = (pontos || []).map((p) => ({ id: p.id, funcionariaId: p.funcionaria_id, data: p.data, tipo: p.tipo, horario: p.horario }));
   state.loading = false;
@@ -845,6 +845,7 @@ async function addFuncionaria(dados) {
     jornada_entrada: dados.jornadaEntrada, jornada_saida_almoco: dados.jornadaSaidaAlmoco,
     jornada_volta_almoco: dados.jornadaVoltaAlmoco, jornada_saida: dados.jornadaSaida,
     valor_hora: dados.valorHora || 0, data_admissao: dados.dataAdmissao || null,
+    jornada_semanal: dados.jornadaSemanal || {},
   });
   if (error) alert('Erro ao adicionar funcionária: ' + error.message);
 }
@@ -854,6 +855,7 @@ async function updateFuncionaria(id, dados) {
     jornada_entrada: dados.jornadaEntrada, jornada_saida_almoco: dados.jornadaSaidaAlmoco,
     jornada_volta_almoco: dados.jornadaVoltaAlmoco, jornada_saida: dados.jornadaSaida,
     valor_hora: dados.valorHora || 0, data_admissao: dados.dataAdmissao || null,
+    jornada_semanal: dados.jornadaSemanal || {},
   }).eq('id', id);
   if (error) alert('Erro ao atualizar funcionária: ' + error.message);
 }
@@ -924,8 +926,81 @@ const FERIAS_STATUS_LABEL = {
   'vencendo': { label: '🟡 Vencendo em breve', color: 'var(--amber)' },
   'vencidas': { label: '🔴 Vencidas', color: 'var(--red)' },
 };
-// calcula horas trabalhadas e a diferença (extra/falta) num dia, a partir das batidas
-function calcularHorasDia(pontosDoDia, funcionaria) {
+const DIAS_SEMANA = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+function renderLinhaJornadaDia(prefixo, dia, cfgExistente, jornadaPadrao) {
+  const trabalha = cfgExistente ? !!cfgExistente.trabalha : (dia >= 1 && dia <= 5);
+  const entrada = cfgExistente?.entrada || jornadaPadrao.entrada;
+  const saidaAlmoco = cfgExistente?.saidaAlmoco || jornadaPadrao.saidaAlmoco;
+  const voltaAlmoco = cfgExistente?.voltaAlmoco || jornadaPadrao.voltaAlmoco;
+  const saida = cfgExistente?.saida || jornadaPadrao.saida;
+  const idHorarios = `${prefixo}Horarios-${dia}`;
+  return `
+    <div style="border-top:1px solid var(--border);padding-top:8px;margin-top:8px">
+      <label class="checkbox-label">
+        <input type="checkbox" id="${prefixo}Trabalha-${dia}" ${trabalha ? 'checked' : ''} data-toggle-dia-horario="${idHorarios}" />
+        ${DIAS_SEMANA[dia]}
+      </label>
+      <div id="${idHorarios}" style="${trabalha ? '' : 'display:none'}">
+        <div class="form-row" style="margin-top:6px">
+          <input type="time" id="${prefixo}Entrada-${dia}" value="${entrada}" />
+          <input type="time" id="${prefixo}SaidaAlmoco-${dia}" value="${saidaAlmoco}" />
+        </div>
+        <div class="form-row" style="margin-top:6px">
+          <input type="time" id="${prefixo}VoltaAlmoco-${dia}" value="${voltaAlmoco}" />
+          <input type="time" id="${prefixo}Saida-${dia}" value="${saida}" />
+        </div>
+      </div>
+    </div>
+  `;
+}
+function renderEditorJornadaSemanal(prefixo, jornadaSemanalAtual, jornadaPadrao) {
+  return [1, 2, 3, 4, 5, 6, 0].map((dia) => renderLinhaJornadaDia(prefixo, dia, (jornadaSemanalAtual || {})[dia], jornadaPadrao)).join('');
+}
+function coletarJornadaSemanal(prefixo) {
+  const resultado = {};
+  [0, 1, 2, 3, 4, 5, 6].forEach((dia) => {
+    const trabalha = document.getElementById(`${prefixo}Trabalha-${dia}`)?.checked;
+    if (trabalha) {
+      resultado[dia] = {
+        trabalha: true,
+        entrada: document.getElementById(`${prefixo}Entrada-${dia}`).value,
+        saidaAlmoco: document.getElementById(`${prefixo}SaidaAlmoco-${dia}`).value,
+        voltaAlmoco: document.getElementById(`${prefixo}VoltaAlmoco-${dia}`).value,
+        saida: document.getElementById(`${prefixo}Saida-${dia}`).value,
+      };
+    } else {
+      resultado[dia] = { trabalha: false };
+    }
+  });
+  return resultado;
+}
+
+// pega a jornada esperada pra um dia específico (0=domingo...6=sábado), olhando primeiro
+// a configuração por dia da semana; se não tiver, cai no padrão antigo (seg-sex fixo, sem sáb/dom)
+function jornadaEsperadaDoDia(funcionaria, dataStr) {
+  const diaSemana = new Date(dataStr + 'T00:00:00').getDay();
+  const config = (funcionaria.jornadaSemanal || {})[diaSemana];
+  if (config) {
+    if (!config.trabalha) return { trabalha: false, minutos: 0 };
+    const [hE, mE] = config.entrada.split(':').map(Number);
+    const [hSA, mSA] = config.saidaAlmoco.split(':').map(Number);
+    const [hVA, mVA] = config.voltaAlmoco.split(':').map(Number);
+    const [hS, mS] = config.saida.split(':').map(Number);
+    const minutos = ((hSA * 60 + mSA) - (hE * 60 + mE)) + ((hS * 60 + mS) - (hVA * 60 + mVA));
+    return { trabalha: true, minutos };
+  }
+  // sem jornada semanal configurada: usa o padrão antigo (só seg-sex)
+  if (diaSemana === 0 || diaSemana === 6) return { trabalha: false, minutos: 0 };
+  const [hE, mE] = funcionaria.jornadaEntrada.split(':').map(Number);
+  const [hSA, mSA] = funcionaria.jornadaSaidaAlmoco.split(':').map(Number);
+  const [hVA, mVA] = funcionaria.jornadaVoltaAlmoco.split(':').map(Number);
+  const [hS, mS] = funcionaria.jornadaSaida.split(':').map(Number);
+  const minutos = ((hSA * 60 + mSA) - (hE * 60 + mE)) + ((hS * 60 + mS) - (hVA * 60 + mVA));
+  return { trabalha: true, minutos };
+}
+// calcula horas trabalhadas e a diferença (extra/falta) num dia, a partir das batidas —
+// a jornada esperada agora varia por dia da semana (ex: acordo de não trabalhar sábado)
+function calcularHorasDia(pontosDoDia, funcionaria, dataStr) {
   const porTipo = {};
   pontosDoDia.forEach((p) => { porTipo[p.tipo] = new Date(p.horario); });
   let horasTrabalhadas = 0;
@@ -935,13 +1010,10 @@ function calcularHorasDia(pontosDoDia, funcionaria) {
   if (porTipo.entrada && porTipo.saida && !porTipo.saida_almoco && !porTipo.volta_almoco) {
     horasTrabalhadas = (porTipo.saida - porTipo.entrada) / 3600000;
   }
-  const [hE, mE] = funcionaria.jornadaEntrada.split(':').map(Number);
-  const [hSA, mSA] = funcionaria.jornadaSaidaAlmoco.split(':').map(Number);
-  const [hVA, mVA] = funcionaria.jornadaVoltaAlmoco.split(':').map(Number);
-  const [hS, mS] = funcionaria.jornadaSaida.split(':').map(Number);
-  const jornadaEsperada = ((hSA * 60 + mSA) - (hE * 60 + mE) + (hS * 60 + mS) - (hVA * 60 + mVA)) / 60;
+  const esperado = jornadaEsperadaDoDia(funcionaria, dataStr);
+  const jornadaEsperada = esperado.minutos / 60;
   const completo = !!(porTipo.entrada && porTipo.saida);
-  return { horasTrabalhadas, jornadaEsperada, diferenca: horasTrabalhadas - jornadaEsperada, completo, porTipo };
+  return { horasTrabalhadas, jornadaEsperada, diferenca: horasTrabalhadas - jornadaEsperada, completo, porTipo, diaTrabalhavel: esperado.trabalha };
 }
 
 // ---- Costureiras & Produção ----
@@ -3107,16 +3179,9 @@ function renderRH(c) {
         <input type="text" id="funcPin" placeholder="PIN pessoal (ex: 4 dígitos)" inputmode="numeric" />
         <div class="form-hint" style="margin-bottom:2px">Data de admissão (usada pra calcular as férias)</div>
         <input type="date" id="funcAdmissao" />
-        <div class="form-hint">Jornada de trabalho padrão dela</div>
-        <div class="form-row">
-          <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Entrada</div><input type="time" id="funcEntrada" value="08:00" /></div>
-          <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Saída almoço</div><input type="time" id="funcSaidaAlmoco" value="12:00" /></div>
-        </div>
-        <div class="form-row">
-          <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Volta almoço</div><input type="time" id="funcVoltaAlmoco" value="13:00" /></div>
-          <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Saída</div><input type="time" id="funcSaida" value="17:00" /></div>
-        </div>
-        <button class="confirm-btn" id="salvarFuncionaria">Adicionar</button>
+        <div class="form-hint">Jornada de trabalho — marque os dias que ela trabalha e o horário de cada um (dá pra deixar diferente por dia, ex: compensar sábado)</div>
+        ${renderEditorJornadaSemanal('func', {}, { entrada: '08:00', saidaAlmoco: '12:00', voltaAlmoco: '13:00', saida: '17:00' })}
+        <button class="confirm-btn" id="salvarFuncionaria" style="margin-top:12px">Adicionar</button>
       </div>
     ` : ''}
 
@@ -3130,15 +3195,9 @@ function renderRH(c) {
                 <input type="text" id="editFuncPin-${f.id}" placeholder="PIN pessoal" value="${esc(f.pin)}" inputmode="numeric" />
                 <div class="form-hint" style="margin-bottom:2px">Data de admissão</div>
                 <input type="date" id="editFuncAdmissao-${f.id}" value="${f.dataAdmissao || ''}" />
-                <div class="form-row">
-                  <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Entrada</div><input type="time" id="editFuncEntrada-${f.id}" value="${f.jornadaEntrada}" /></div>
-                  <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Saída almoço</div><input type="time" id="editFuncSaidaAlmoco-${f.id}" value="${f.jornadaSaidaAlmoco}" /></div>
-                </div>
-                <div class="form-row">
-                  <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Volta almoço</div><input type="time" id="editFuncVoltaAlmoco-${f.id}" value="${f.jornadaVoltaAlmoco}" /></div>
-                  <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Saída</div><input type="time" id="editFuncSaida-${f.id}" value="${f.jornadaSaida}" /></div>
-                </div>
-                <label class="checkbox-label"><input type="checkbox" id="editFuncAtiva-${f.id}" ${f.ativa !== false ? 'checked' : ''} /> Ativa</label>
+                <div class="form-hint">Jornada de trabalho — marque os dias que ela trabalha e o horário de cada um</div>
+                ${renderEditorJornadaSemanal(`editFunc${f.id}`, f.jornadaSemanal, { entrada: f.jornadaEntrada, saidaAlmoco: f.jornadaSaidaAlmoco, voltaAlmoco: f.jornadaVoltaAlmoco, saida: f.jornadaSaida })}
+                <label class="checkbox-label" style="margin-top:10px"><input type="checkbox" id="editFuncAtiva-${f.id}" ${f.ativa !== false ? 'checked' : ''} /> Ativa</label>
                 <div class="form-row">
                   <button class="confirm-btn" data-salvar-edit-func="${f.id}">Salvar</button>
                   <button class="toggle-btn" data-cancelar-edit-func="${f.id}">Cancelar</button>
@@ -3196,7 +3255,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
     <button class="icon-btn-ghost" id="voltarFuncionarias" style="margin-bottom:14px">← Voltar</button>
 
     <div class="section-title-wrap">
-      <div><div class="section-title">${esc(f?.nome || 'Funcionária')}</div><div class="section-subtitle">Jornada: ${f?.jornadaEntrada}–${f?.jornadaSaidaAlmoco} / ${f?.jornadaVoltaAlmoco}–${f?.jornadaSaida}</div></div>
+      <div><div class="section-title">${esc(f?.nome || 'Funcionária')}</div><div class="section-subtitle">${f ? [1, 2, 3, 4, 5, 6, 0].filter((dia) => (f.jornadaSemanal[dia] ? f.jornadaSemanal[dia].trabalha : (dia >= 1 && dia <= 5))).map((dia) => DIAS_SEMANA[dia].slice(0, 3)).join(', ') : ''}</div></div>
     </div>
 
     <div class="section-title-wrap">
@@ -3260,7 +3319,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
       <div class="tx-list">
         ${diasOrdenados.map((dia) => {
           const pontosDoDia = porDia[dia].sort((a, b) => new Date(a.horario) - new Date(b.horario));
-          const calc = f ? calcularHorasDia(pontosDoDia, f) : null;
+          const calc = f ? calcularHorasDia(pontosDoDia, f, dia) : null;
           if (calc && calc.completo) {
             if (calc.diferenca >= 0) totalExtra += calc.diferenca; else totalFalta += Math.abs(calc.diferenca);
           }
@@ -3317,6 +3376,13 @@ function renderFuncionariaDetalhe(funcionariaId) {
 }
 
 function attachRHHandlers(c) {
+  document.querySelectorAll('[data-toggle-dia-horario]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const el = document.getElementById(cb.dataset.toggleDiaHorario);
+      if (el) el.style.display = cb.checked ? '' : 'none';
+    });
+  });
+
   if (state.rhFuncionariaDetalheId) {
     const voltar = document.getElementById('voltarFuncionarias');
     if (voltar) voltar.addEventListener('click', () => { state.rhFuncionariaDetalheId = null; state.editingPontoId = null; state.showFeriasForm = false; render(); });
@@ -3406,11 +3472,12 @@ function attachRHHandlers(c) {
     if (!nome || !pin) { alert('Informe o nome e o PIN.'); return; }
     if (state.funcionarias.some((f) => f.pin === pin)) { alert('Esse PIN já está em uso por outra funcionária. Escolha um diferente.'); return; }
     const dataAdmissao = document.getElementById('funcAdmissao').value || null;
-    const jornadaEntrada = document.getElementById('funcEntrada').value;
-    const jornadaSaidaAlmoco = document.getElementById('funcSaidaAlmoco').value;
-    const jornadaVoltaAlmoco = document.getElementById('funcVoltaAlmoco').value;
-    const jornadaSaida = document.getElementById('funcSaida').value;
-    await addFuncionaria({ nome, pin, dataAdmissao, jornadaEntrada, jornadaSaidaAlmoco, jornadaVoltaAlmoco, jornadaSaida });
+    const jornadaSemanal = coletarJornadaSemanal('func');
+    const segunda = jornadaSemanal[1]?.trabalha ? jornadaSemanal[1] : { entrada: '08:00', saidaAlmoco: '12:00', voltaAlmoco: '13:00', saida: '17:00' };
+    await addFuncionaria({
+      nome, pin, dataAdmissao, jornadaSemanal,
+      jornadaEntrada: segunda.entrada, jornadaSaidaAlmoco: segunda.saidaAlmoco, jornadaVoltaAlmoco: segunda.voltaAlmoco, jornadaSaida: segunda.saida,
+    });
     state.showFuncionariaForm = false;
     await loadData();
   });
@@ -3438,11 +3505,12 @@ function attachRHHandlers(c) {
       if (state.funcionarias.some((f) => f.pin === pin && f.id !== id)) { alert('Esse PIN já está em uso por outra funcionária.'); return; }
       const dataAdmissao = document.getElementById(`editFuncAdmissao-${id}`).value || null;
       const ativa = document.getElementById(`editFuncAtiva-${id}`).checked;
-      const jornadaEntrada = document.getElementById(`editFuncEntrada-${id}`).value;
-      const jornadaSaidaAlmoco = document.getElementById(`editFuncSaidaAlmoco-${id}`).value;
-      const jornadaVoltaAlmoco = document.getElementById(`editFuncVoltaAlmoco-${id}`).value;
-      const jornadaSaida = document.getElementById(`editFuncSaida-${id}`).value;
-      await updateFuncionaria(id, { nome, pin, dataAdmissao, ativa, jornadaEntrada, jornadaSaidaAlmoco, jornadaVoltaAlmoco, jornadaSaida });
+      const jornadaSemanal = coletarJornadaSemanal(`editFunc${id}`);
+      const segunda = jornadaSemanal[1]?.trabalha ? jornadaSemanal[1] : { entrada: '08:00', saidaAlmoco: '12:00', voltaAlmoco: '13:00', saida: '17:00' };
+      await updateFuncionaria(id, {
+        nome, pin, dataAdmissao, ativa, jornadaSemanal,
+        jornadaEntrada: segunda.entrada, jornadaSaidaAlmoco: segunda.saidaAlmoco, jornadaVoltaAlmoco: segunda.voltaAlmoco, jornadaSaida: segunda.saida,
+      });
       state.editingFuncionariaId = null;
       await loadData();
     });
