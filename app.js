@@ -1701,7 +1701,12 @@ function renderMateriais(c) {
 
     ${state.showCompraInsumoForm ? `
       <div class="form-card">
-        <input type="text" id="insumoNome" placeholder="Nome (ex: Zíper 20cm, Bojo P, Etiqueta)" />
+        <select id="insumoSelect">
+          <option value="" ${!window.__insumoSelecionado ? 'selected' : ''}>Selecione o insumo...</option>
+          ${state.insumos.map((i) => `<option value="${esc(i.nome)}" ${window.__insumoSelecionado === i.nome ? 'selected' : ''}>${esc(i.nome)} (${i.quantidadeDisponivel} ${esc(i.unidade)} em estoque)</option>`).join('')}
+          <option value="__novo__" ${window.__insumoNovo ? 'selected' : ''}>➕ Novo insumo</option>
+        </select>
+        ${window.__insumoNovo ? `<input type="text" id="insumoNomeNovo" placeholder="Nome do novo insumo (ex: Zíper 20cm)" value="${esc(window.__insumoNomeNovoTexto || '')}" />` : ''}
         <div class="form-row">
           <input type="text" id="insumoQuantidade" placeholder="Quantidade" inputmode="decimal" />
           <select id="insumoUnidade">
@@ -3599,20 +3604,42 @@ function attachTecidoHandlers(c) {
   });
 
   const toggleCompraInsumo = document.getElementById('toggleCompraInsumo');
-  if (toggleCompraInsumo) toggleCompraInsumo.addEventListener('click', () => { state.showCompraInsumoForm = !state.showCompraInsumoForm; render(); });
+  if (toggleCompraInsumo) toggleCompraInsumo.addEventListener('click', () => {
+    state.showCompraInsumoForm = !state.showCompraInsumoForm;
+    window.__insumoNovo = false;
+    window.__insumoSelecionado = '';
+    window.__insumoNomeNovoTexto = '';
+    render();
+  });
+
+  const insumoSelect = document.getElementById('insumoSelect');
+  if (insumoSelect) insumoSelect.addEventListener('change', (e) => {
+    window.__insumoSelecionado = e.target.value;
+    window.__insumoNovo = e.target.value === '__novo__';
+    render();
+  });
+
+  const insumoNomeNovoInput = document.getElementById('insumoNomeNovo');
+  if (insumoNomeNovoInput) insumoNomeNovoInput.addEventListener('input', (e) => { window.__insumoNomeNovoTexto = e.target.value; });
 
   const salvarCompraInsumo = document.getElementById('salvarCompraInsumo');
   if (salvarCompraInsumo) salvarCompraInsumo.addEventListener('click', async () => {
-    const nome = document.getElementById('insumoNome').value.trim();
+    const selecionado = document.getElementById('insumoSelect').value;
+    const nome = selecionado === '__novo__'
+      ? document.getElementById('insumoNomeNovo').value.trim()
+      : selecionado.trim();
     const quantidade = parseBRNumber(document.getElementById('insumoQuantidade').value);
     const unidade = document.getElementById('insumoUnidade').value;
     const valor = parseBRNumber(document.getElementById('insumoValor').value);
     const categoria = document.getElementById('insumoCategoria').value;
     const data = document.getElementById('insumoData').value || todayStr();
     const historico = document.getElementById('insumoHistorico')?.checked;
-    if (!nome || !quantidade || quantidade <= 0 || !valor) { alert('Preencha nome, quantidade e valor.'); return; }
+    if (!nome || !quantidade || quantidade <= 0 || !valor) { alert('Selecione ou digite o insumo, e preencha quantidade e valor.'); return; }
     await comprarInsumo(nome, unidade, quantidade, valor, categoria, data, !historico);
     state.showCompraInsumoForm = false;
+    window.__insumoNovo = false;
+    window.__insumoSelecionado = '';
+    window.__insumoNomeNovoTexto = '';
     await loadData();
   });
 
