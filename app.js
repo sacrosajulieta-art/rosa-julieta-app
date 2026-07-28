@@ -2044,7 +2044,12 @@ function renderCorte(c) {
               <div class="prod-breakdown">
                 ${itens.map((i) => {
                   const produto = state.produtos.find((p) => p.id === i.produtoId);
-                  return `<div class="prod-breakdown-item"><span>${esc(produto?.nome || 'Produto removido')}</span><span>${i.quantidade} peças</span></div>`;
+                  const jaDistribuido = state.distribuicoes.filter((d) => d.ordemItemId === i.id).reduce((a, d) => a + d.quantidadeDistribuida, 0);
+                  const restante = i.quantidade - jaDistribuido;
+                  const status = restante <= 0
+                    ? `<span style="color:var(--teal)">✅ distribuído</span>`
+                    : `<span style="color:var(--amber)">⚠️ faltam ${restante}</span>`;
+                  return `<div class="prod-breakdown-item"><span>${esc(produto?.nome || 'Produto removido')}</span><span>${i.quantidade} peças · ${status}</span></div>`;
                 }).join('')}
               </div>
               <div class="produto-meta" style="margin-top:8px">
