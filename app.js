@@ -2588,20 +2588,24 @@ function renderCorte(c) {
                     return `
                       <div style="border-top:1px solid var(--border);padding-top:8px;margin-top:4px">
                         <div class="form-hint" style="margin-bottom:6px">${esc(produto?.nome || '')} — distribuído ${jaDistribuido}/${i.quantidade} (restam ${restante})</div>
-                        <div class="form-row">
-                          <select id="distCostureira-${i.id}">
-                            <option value="">Costureira</option>
-                            ${state.costureiras.filter((c) => c.ativa).map((c) => `<option value="${c.id}">${esc(c.nome)}</option>`).join('')}
+                        ${restante > 0 ? `
+                          <div class="form-row">
+                            <select id="distCostureira-${i.id}">
+                              <option value="">Costureira</option>
+                              ${state.costureiras.filter((c) => c.ativa).map((c) => `<option value="${c.id}">${esc(c.nome)}</option>`).join('')}
+                            </select>
+                            <input type="text" id="distQtd-${i.id}" placeholder="Quantidade" inputmode="numeric" max="${restante}" />
+                          </div>
+                          <select id="distVariante-${i.id}" data-dist-variante-select="${i.id}">
+                            <option value="">Sem cor específica</option>
+                            ${vs.map((v) => `<option value="${v.id}">${esc(v.nome)}</option>`).join('')}
+                            <option value="__nova__">➕ Nova cor (corte misturado)</option>
                           </select>
-                          <input type="text" id="distQtd-${i.id}" placeholder="Quantidade" inputmode="numeric" />
-                        </div>
-                        <select id="distVariante-${i.id}" data-dist-variante-select="${i.id}">
-                          <option value="">Sem cor específica</option>
-                          ${vs.map((v) => `<option value="${v.id}">${esc(v.nome)}</option>`).join('')}
-                          <option value="__nova__">➕ Nova cor (corte misturado)</option>
-                        </select>
-                        <input type="text" id="distVarianteNova-${i.id}" placeholder="Nome da nova cor" style="display:none;margin-top:6px" />
-                        <button class="entrada-btn" data-confirmar-distribuicao="${i.id}" data-produto="${i.produtoId}">＋ Adicionar distribuição</button>
+                          <input type="text" id="distVarianteNova-${i.id}" placeholder="Nome da nova cor" style="display:none;margin-top:6px" />
+                          <button class="entrada-btn" data-confirmar-distribuicao="${i.id}" data-produto="${i.produtoId}" data-restante="${restante}">＋ Adicionar distribuição</button>
+                        ` : `
+                          <div class="empty-state" style="margin-bottom:0;padding:12px 0">✅ Distribuição completa — nada mais pra distribuir desse modelo</div>
+                        `}
                         ${state.distribuicoes.filter((d) => d.ordemItemId === i.id).map((d) => {
                           const cost = state.costureiras.find((c) => c.id === d.costureiraId);
                           const varianteNome = d.varianteId ? state.variantes.find((v) => v.id === d.varianteId)?.nome : null;
@@ -5095,9 +5099,11 @@ function attachTecidoHandlers(c) {
       const produtoId = btn.dataset.produto;
       const costureiraId = document.getElementById(`distCostureira-${itemId}`).value;
       const quantidade = Number(document.getElementById(`distQtd-${itemId}`).value);
+      const restante = Number(btn.dataset.restante);
       const varianteSelect = document.getElementById(`distVariante-${itemId}`);
       let varianteId = varianteSelect ? varianteSelect.value : '';
       if (!costureiraId || !quantidade || quantidade <= 0) { alert('Selecione a costureira e informe a quantidade.'); return; }
+      if (quantidade > restante) { alert(`Só restam ${restante} peça(s) desse modelo pra distribuir.`); return; }
       if (varianteId === '__nova__') {
         const nomeCor = document.getElementById(`distVarianteNova-${itemId}`).value.trim();
         if (!nomeCor) { alert('Digite o nome da cor nova.'); return; }
