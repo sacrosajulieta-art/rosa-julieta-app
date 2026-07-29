@@ -86,6 +86,18 @@ function parseBRNumber(str) {
   }
   return parseFloat(cleaned.replace(/,/g, '')) || 0;
 }
+// nos campos de estoque editável: "+63" soma ao valor atual, "-10" subtrai,
+// e um número puro (ex: "63") substitui o valor direto — pra não precisar somar de cabeça
+function calcularNovoValorEstoque(textoDigitado, valorAtual) {
+  const texto = (textoDigitado || '').trim();
+  if (texto.startsWith('+') || texto.startsWith('-')) {
+    const delta = Number(texto);
+    if (isNaN(delta)) return valorAtual;
+    return Math.max(0, valorAtual + delta);
+  }
+  const novo = Number(texto);
+  return Math.max(0, isNaN(novo) ? valorAtual : novo);
+}
 
 function parseCSV(text) {
   const lines = text.split(/\r?\n/).filter((l) => l.trim().length);
@@ -4098,7 +4110,7 @@ function renderEstoque(c) {
                     <div class="variante-row">
                       <span class="variante-nome">${esc(v.nome)}</span>
                       <button class="step-btn" data-var-step="-1" data-variante="${v.id}" data-atual="${v.estoqueAtual}">-</button>
-                      <input type="text" class="variante-qtd-input" inputmode="numeric" value="${v.estoqueAtual}" data-var-editar="${v.id}" style="width:52px;text-align:center;padding:6px 4px" />
+                      <input type="text" class="variante-qtd-input" inputmode="numeric" value="${v.estoqueAtual}" data-var-editar="${v.id}" data-atual="${v.estoqueAtual}" placeholder="ex: +63" style="width:52px;text-align:center;padding:6px 4px" />
                       <button class="step-btn" data-var-step="1" data-variante="${v.id}" data-atual="${v.estoqueAtual}">+</button>
                       <button class="trash-btn" data-remover-variante="${v.id}">🗑</button>
                     </div>
@@ -4108,7 +4120,7 @@ function renderEstoque(c) {
               ` : `
                 <div class="produto-stock-row">
                   <button class="step-btn" data-step="-1" data-produto="${p.id}" data-atual="${p.estoqueAtual}">-</button>
-                  <input type="text" class="stock-value-input" inputmode="numeric" value="${p.estoqueAtual}" data-produto-editar="${p.id}" style="width:64px;text-align:center;font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600" />
+                  <input type="text" class="stock-value-input" inputmode="numeric" value="${p.estoqueAtual}" data-produto-editar="${p.id}" data-atual="${p.estoqueAtual}" placeholder="ex: +63" style="width:64px;text-align:center;font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600" />
                   <button class="step-btn" data-step="1" data-produto="${p.id}" data-atual="${p.estoqueAtual}">+</button>
                   <div class="produto-meta">mín. ${p.estoqueMinimo} · ${fmt(p.custoTotalUnitario)}/un</div>
                 </div>
@@ -5467,7 +5479,8 @@ function attachEstoqueHandlers(c) {
   });
   document.querySelectorAll('[data-var-editar]').forEach((input) => {
     const salvar = async () => {
-      const novo = Math.max(0, Number(input.value) || 0);
+      const atual = Number(input.dataset.atual) || 0;
+      const novo = calcularNovoValorEstoque(input.value, atual);
       await updateVarianteEstoque(input.dataset.varEditar, novo);
       await loadData();
     };
@@ -5494,7 +5507,8 @@ function attachEstoqueHandlers(c) {
   });
   document.querySelectorAll('[data-produto-editar]').forEach((input) => {
     const salvar = async () => {
-      const novo = Math.max(0, Number(input.value) || 0);
+      const atual = Number(input.dataset.atual) || 0;
+      const novo = calcularNovoValorEstoque(input.value, atual);
       await updateProdutoEstoque(input.dataset.produtoEditar, novo);
       await loadData();
     };
