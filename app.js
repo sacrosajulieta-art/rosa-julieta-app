@@ -2730,6 +2730,20 @@ function renderGate(app) {
           <button class="confirm-btn" id="gateEntrarPin" style="margin-top:10px">Entrar</button>
           <div id="gateErroPin" style="color:var(--red);font-size:12px;margin-top:8px;display:none">PIN inválido, tente de novo.</div>
           <button class="sair-link" id="gateVoltarCodigo" style="margin-top:14px">← Voltar pro código de acesso</button>
+          <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);font-size:10.5px;color:var(--text-muted);font-family:'IBM Plex Mono',monospace">
+            ${(() => {
+              const papelLS = localStorage.getItem('rj_papel');
+              const expiraLS = localStorage.getItem('rj_ponto_expira_em');
+              const papelSess = sessionStorage.getItem('rj_papel_sessao');
+              if (papelLS === 'ponto' && expiraLS) {
+                const restante = Math.round((Number(expiraLS) - Date.now()) / 86400000);
+                return `diag: sessão salva (localStorage), expira em ${restante} dia(s)`;
+              }
+              if (papelLS === 'ponto') return 'diag: sessão salva (localStorage), sem prazo definido';
+              if (papelSess === 'ponto') return 'diag: sessão salva só nesta aba (sessionStorage)';
+              return 'diag: nenhuma sessão salva no momento';
+            })()}
+          </div>
         ` : `
           <div class="section-title" style="margin-bottom:4px">Código de acesso</div>
           <div class="section-subtitle" style="margin-bottom:16px">Digite o código que você recebeu</div>
