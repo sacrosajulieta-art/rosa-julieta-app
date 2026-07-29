@@ -4088,7 +4088,7 @@ function renderEstoque(c) {
                     <div class="variante-row">
                       <span class="variante-nome">${esc(v.nome)}</span>
                       <button class="step-btn" data-var-step="-1" data-variante="${v.id}" data-atual="${v.estoqueAtual}">-</button>
-                      <span class="variante-qtd">${v.estoqueAtual}</span>
+                      <input type="text" class="variante-qtd-input" inputmode="numeric" value="${v.estoqueAtual}" data-var-editar="${v.id}" style="width:52px;text-align:center;padding:6px 4px" />
                       <button class="step-btn" data-var-step="1" data-variante="${v.id}" data-atual="${v.estoqueAtual}">+</button>
                       <button class="trash-btn" data-remover-variante="${v.id}">🗑</button>
                     </div>
@@ -4098,7 +4098,7 @@ function renderEstoque(c) {
               ` : `
                 <div class="produto-stock-row">
                   <button class="step-btn" data-step="-1" data-produto="${p.id}" data-atual="${p.estoqueAtual}">-</button>
-                  <div class="stock-value">${p.estoqueAtual} <span class="stock-unit">un</span></div>
+                  <input type="text" class="stock-value-input" inputmode="numeric" value="${p.estoqueAtual}" data-produto-editar="${p.id}" style="width:64px;text-align:center;font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600" />
                   <button class="step-btn" data-step="1" data-produto="${p.id}" data-atual="${p.estoqueAtual}">+</button>
                   <div class="produto-meta">mín. ${p.estoqueMinimo} · ${fmt(p.custoTotalUnitario)}/un</div>
                 </div>
@@ -5439,6 +5439,15 @@ function attachEstoqueHandlers(c) {
       await loadData();
     });
   });
+  document.querySelectorAll('[data-var-editar]').forEach((input) => {
+    const salvar = async () => {
+      const novo = Math.max(0, Number(input.value) || 0);
+      await updateVarianteEstoque(input.dataset.varEditar, novo);
+      await loadData();
+    };
+    input.addEventListener('change', salvar);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') input.blur(); });
+  });
   document.querySelectorAll('[data-remover-variante]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       if (confirm('Remover essa cor? O estoque dela some junto.')) {
@@ -5456,6 +5465,15 @@ function attachEstoqueHandlers(c) {
       await updateProdutoEstoque(btn.dataset.produto, novo);
       await loadData();
     });
+  });
+  document.querySelectorAll('[data-produto-editar]').forEach((input) => {
+    const salvar = async () => {
+      const novo = Math.max(0, Number(input.value) || 0);
+      await updateProdutoEstoque(input.dataset.produtoEditar, novo);
+      await loadData();
+    };
+    input.addEventListener('change', salvar);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') input.blur(); });
   });
 
   document.querySelectorAll('[data-remove-produto]').forEach((btn) => {
