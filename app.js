@@ -1565,9 +1565,11 @@ function renderCostureiraDetalhe(costureiraId) {
     const variante = d.varianteId ? state.variantes.find((v) => v.id === d.varianteId) : null;
     const chaveId = `${d.produtoId}|${d.varianteId || ''}`;
     const nome = `${produto?.nome || 'Produto removido'}${variante ? ' — ' + variante.nome : ''}`;
-    if (!emMaosMap[chaveId]) emMaosMap[chaveId] = { nome, qtd: 0, produtoId: d.produtoId, varianteId: d.varianteId || null };
+    if (!emMaosMap[chaveId]) emMaosMap[chaveId] = { nome, qtd: 0, produtoId: d.produtoId, varianteId: d.varianteId || null, lotes: [] };
     emMaosMap[chaveId].qtd += restante;
+    emMaosMap[chaveId].lotes.push({ data: d.data, qtd: restante });
   });
+  Object.values(emMaosMap).forEach((item) => item.lotes.sort((a, b) => b.data.localeCompare(a.data)));
   const emMaosLista = Object.values(emMaosMap).sort((a, b) => b.qtd - a.qtd);
 
   // defeitos: total de peças perdidas por defeito, dessa costureira
@@ -1597,7 +1599,10 @@ function renderCostureiraDetalhe(costureiraId) {
           return `
           <div class="tx-row">
             <div class="tx-dot" style="background:var(--amber)"></div>
-            <div style="flex:1"><div class="tx-categoria">${esc(item.nome)}</div></div>
+            <div style="flex:1">
+              <div class="tx-categoria">${esc(item.nome)}</div>
+              <div class="tx-desc">${item.lotes.map((l) => `${l.qtd} em ${new Date(l.data + 'T00:00:00').toLocaleDateString('pt-BR')}`).join(' · ')}</div>
+            </div>
             ${editando ? `
               <input type="text" id="editEmMaosQtd" value="${item.qtd}" style="width:70px;margin-right:6px" />
               <button class="confirm-btn" style="width:auto;padding:8px 10px" data-salvar-em-maos="1" data-produto="${item.produtoId}" data-variante="${item.varianteId || ''}" data-costureira="${costureiraId}">OK</button>
