@@ -412,8 +412,9 @@ function estoqueEfetivo(produto) {
   return vs.length ? vs.reduce((a, v) => a + v.estoqueAtual, 0) : produto.estoqueAtual;
 }
 async function addVariante(produtoId, nome, skuVariante) {
-  const { error } = await sb.from('variantes').insert({ produto_id: produtoId, nome, estoque_atual: 0, sku_variante: skuVariante || null });
-  if (error) alert('Erro ao adicionar cor: ' + error.message);
+  const { data, error } = await sb.from('variantes').insert({ produto_id: produtoId, nome, estoque_atual: 0, sku_variante: skuVariante || null }).select().single();
+  if (error) { alert('Erro ao adicionar cor: ' + error.message); return null; }
+  return data;
 }
 async function updateVarianteEstoque(id, novoEstoque) {
   const { error } = await sb.from('variantes').update({ estoque_atual: Math.max(0, novoEstoque) }).eq('id', id);
@@ -2594,12 +2595,12 @@ function renderCorte(c) {
                           </select>
                           <input type="text" id="distQtd-${i.id}" placeholder="Quantidade" inputmode="numeric" />
                         </div>
-                        ${vs.length > 0 ? `
-                          <select id="distVariante-${i.id}">
-                            <option value="">Sem cor específica</option>
-                            ${vs.map((v) => `<option value="${v.id}">${esc(v.nome)}</option>`).join('')}
-                          </select>
-                        ` : ''}
+                        <select id="distVariante-${i.id}" data-dist-variante-select="${i.id}">
+                          <option value="">Sem cor específica</option>
+                          ${vs.map((v) => `<option value="${v.id}">${esc(v.nome)}</option>`).join('')}
+                          <option value="__nova__">➕ Nova cor (corte misturado)</option>
+                        </select>
+                        <input type="text" id="distVarianteNova-${i.id}" placeholder="Nome da nova cor" style="display:none;margin-top:6px" />
                         <button class="entrada-btn" data-confirmar-distribuicao="${i.id}" data-produto="${i.produtoId}">＋ Adicionar distribuição</button>
                         ${state.distribuicoes.filter((d) => d.ordemItemId === i.id).map((d) => {
                           const cost = state.costureiras.find((c) => c.id === d.costureiraId);
@@ -5081,6 +5082,13 @@ function attachTecidoHandlers(c) {
   document.querySelectorAll('[data-fechar-distribuicao]').forEach((btn) => {
     btn.addEventListener('click', () => { state.distribuindoOrdemId = null; render(); });
   });
+  document.querySelectorAll('[data-dist-variante-select]').forEach((sel) => {
+    sel.addEventListener('change', () => {
+      const input = document.getElementById(`distVarianteNova-${sel.dataset.distVarianteSelect}`);
+      if (input) input.style.display = sel.value === '__nova__' ? '' : 'none';
+    });
+  });
+
   document.querySelectorAll('[data-confirmar-distribuicao]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const itemId = btn.dataset.confirmarDistribuicao;
@@ -5088,8 +5096,15 @@ function attachTecidoHandlers(c) {
       const costureiraId = document.getElementById(`distCostureira-${itemId}`).value;
       const quantidade = Number(document.getElementById(`distQtd-${itemId}`).value);
       const varianteSelect = document.getElementById(`distVariante-${itemId}`);
-      const varianteId = varianteSelect ? varianteSelect.value : '';
+      let varianteId = varianteSelect ? varianteSelect.value : '';
       if (!costureiraId || !quantidade || quantidade <= 0) { alert('Selecione a costureira e informe a quantidade.'); return; }
+      if (varianteId === '__nova__') {
+        const nomeCor = document.getElementById(`distVarianteNova-${itemId}`).value.trim();
+        if (!nomeCor) { alert('Digite o nome da cor nova.'); return; }
+        const criada = await addVariante(produtoId, nomeCor, '');
+        if (!criada) return;
+        varianteId = criada.id;
+      }
       await distribuirPecas(itemId, produtoId, varianteId || null, costureiraId, quantidade, todayStr());
       await loadData();
     });
