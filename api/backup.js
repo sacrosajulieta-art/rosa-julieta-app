@@ -48,11 +48,8 @@ module.exports = async (req, res) => {
   }
 
   try {
-    // MODO TESTE TEMPORÁRIO: acessando com ?debug=1 na URL, pula a checagem de senha,
-    // só pra ver a mensagem de erro direto no navegador. Remover depois de resolver o problema.
-    const modoDebug = req.query && req.query.debug === '1';
     const auth = req.headers['authorization'];
-    if (!modoDebug && auth !== `Bearer ${process.env.CRON_SECRET}`) {
+    if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
       return res.status(401).json({ error: 'Não autorizado' });
     }
 
