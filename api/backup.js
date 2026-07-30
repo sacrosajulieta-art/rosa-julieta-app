@@ -12,7 +12,18 @@ const TABELAS = [
   'ordens_corte',
   'ordens_corte_itens',
   'insumos',
-  'distribuicoes'
+  'distribuicoes',
+  'ficha_tecnica_itens',
+  'insumo_plataforma_qtd',
+  'funcionarias',
+  'pontos',
+  'ferias_tiradas',
+  'solicitacoes_ponto',
+  'horas_extras_liquidadas',
+  'banco_horas_lancamentos',
+  'emprestimos',
+  'emprestimo_parcelas',
+  'cartoes_credito'
 ];
 
 const RETENCAO_DIAS = 30; // apaga backups com mais de 30 dias pra não estourar o limite de storage
@@ -36,10 +47,16 @@ module.exports = async (req, res) => {
 
   try {
     const dump = { gerado_em: new Date().toISOString(), tabelas: {} };
+    const tabelasComErro = [];
 
     for (const tabela of TABELAS) {
       const { data, error } = await supabase.from(tabela).select('*');
-      if (error) throw new Error(`Erro ao ler tabela "${tabela}": ${error.message}`);
+      if (error) {
+        // não derruba o backup inteiro se UMA tabela nova ainda não existir no banco —
+        // só registra o aviso e segue salvando o resto
+        tabelasComErro.push(`${tabela}: ${error.message}`);
+        continue;
+      }
       dump.tabelas[tabela] = data;
     }
 
@@ -77,7 +94,8 @@ module.exports = async (req, res) => {
     return res.status(200).json({
       status: 'ok',
       arquivo: nomeArquivo,
-      tabelas_salvas: TABELAS.length,
+      tabelas_salvas: TABELAS.length - tabelasComErro.length,
+      tabelas_com_erro: tabelasComErro,
       backups_antigos_removidos: removidos
     });
   } catch (err) {
