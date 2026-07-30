@@ -430,6 +430,17 @@ async function loadData() {
   render();
 }
 
+// Antes do login, a tela de gate ainda precisa validar o PIN de ponto contra alguém —
+// então busca SÓ a tabela de funcionárias (nada de financeiro/estoque/produção) pra isso
+// funcionar sem expor o resto do sistema antes da pessoa se autenticar.
+async function loadFuncionariasParaGate() {
+  const { data: funcionarias, error } = await sb.from('funcionarias').select('*').order('nome', { ascending: true });
+  if (error) console.error(error);
+  state.funcionarias = (funcionarias || []).map((f) => ({ id: f.id, nome: f.nome, pin: f.pin, ativa: f.ativa, jornadaEntrada: (f.jornada_entrada || '08:00').slice(0, 5), jornadaSaidaAlmoco: (f.jornada_saida_almoco || '12:00').slice(0, 5), jornadaVoltaAlmoco: (f.jornada_volta_almoco || '13:00').slice(0, 5), jornadaSaida: (f.jornada_saida || '17:00').slice(0, 5), valorHora: Number(f.valor_hora || 0), dataAdmissao: f.data_admissao || null, jornadaSemanal: f.jornada_semanal || {}, percentualHoraExtra: Number(f.percentual_hora_extra != null ? f.percentual_hora_extra : 50), modoCompensacaoPadrao: f.modo_compensacao_padrao || 'dinheiro' }));
+  state.loading = false;
+  render();
+}
+
 function mapTxFromDb(row) {
   return { id: row.id, tipo: row.tipo, valor: Number(row.valor), categoria: row.categoria, natureza: row.natureza, descricao: row.descricao, data: row.data, recorrente: !!row.recorrente, recorrenteOrigemId: row.recorrente_origem_id || null, idPedido: row.id_pedido || null, conciliado: !!row.conciliado, pago: row.pago !== false, cartaoId: row.cartao_id || null };
 }
@@ -3134,7 +3145,7 @@ function renderGate(app) {
       </div>
     </div>
   `;
-  const tentar = () => {
+  const tentar = async () => {
     const valor = document.getElementById('gateCodigo').value.trim();
     let papel = null;
     if (valor === CODIGO_DONO) papel = 'dono';
@@ -3142,7 +3153,13 @@ function renderGate(app) {
     if (papel) {
       localStorage.setItem('rj_papel', papel);
       state.papel = papel;
+      state.loading = true;
       render();
+      // só busca o resto dos dados (financeiro, estoque, produção etc.) agora que o
+      // código foi confirmado — antes disso nada além das funcionárias é carregado
+      await loadData();
+      await garantirRecorrentes();
+      setupRealtime();
     } else {
       document.getElementById('gateErro').style.display = 'block';
     }
@@ -3152,7 +3169,7 @@ function renderGate(app) {
     document.getElementById('gateCodigo').addEventListener('keydown', (e) => { if (e.key === 'Enter') tentar(); });
     document.getElementById('gateIrPonto').addEventListener('click', () => { window.__gateModoPonto = true; render(); });
   } else {
-    const tentarPin = () => {
+    const tentarPin = async () => {
       const pin = document.getElementById('gatePin').value.trim();
       const lembrar = document.getElementById('gateLembrarPin').checked;
       const funcionaria = state.funcionarias.find((f) => f.pin === pin && f.ativa !== false);
@@ -3174,7 +3191,12 @@ function renderGate(app) {
         state.papel = 'ponto';
         state.funcionariaLogadaId = funcionaria.id;
         window.__gateModoPonto = false;
+        state.loading = true;
         render();
+        // agora que o PIN foi validado, busca o resto (pontos batidos, férias etc.)
+        await loadData();
+        await garantirRecorrentes();
+        setupRealtime();
       } else {
         document.getElementById('gateErroPin').style.display = 'block';
       }
@@ -6167,8 +6189,16 @@ if (new URLSearchParams(window.location.search).get('ponto')) {
   window.__gateModoPonto = true;
 }
 
+// Segurança: se já existe sessão salva (a pessoa já tinha feito login antes), carrega
+// tudo normalmente. Se ainda não, NÃO busca o financeiro/estoque/produção — só o mínimo
+// (funcionárias) pra tela de gate conseguir validar o PIN de ponto. O resto só entra
+// depois que o código de acesso ou o PIN forem confirmados (ver renderGate).
 (async () => {
-  await loadData();
-  await garantirRecorrentes();
+  if (state.papel) {
+    await loadData();
+    await garantirRecorrentes();
+    setupRealtime();
+  } else {
+    await loadFuncionariasParaGate();
+  }
 })();
-setupRealtime();
