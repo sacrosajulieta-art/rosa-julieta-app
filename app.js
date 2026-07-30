@@ -535,13 +535,14 @@ async function removeEmprestimo(id) {
 // corrige o valor recebido (ex: valor contratado x valor realmente liberado pelo banco,
 // depois de descontar IOF/tarifas) — atualiza o empréstimo E o lançamento de entrada juntos,
 // pra não ficar um número no card e outro no Financeiro
-async function updateEmprestimoValorRecebido(id, novoValor) {
+async function updateEmprestimoValorRecebido(id, novoValor, novaData) {
   const emprestimo = state.emprestimos.find((e) => e.id === id);
   if (!emprestimo) return;
-  const { error: errEmp } = await sb.from('emprestimos').update({ valor_recebido: novoValor }).eq('id', id);
+  const { error: errEmp } = await sb.from('emprestimos').update({ valor_recebido: novoValor, data_recebimento: novaData }).eq('id', id);
   if (errEmp) { alert('Erro ao atualizar empréstimo: ' + errEmp.message); return; }
   if (emprestimo.transacaoRecebimentoId) {
-    const { error: errTx } = await sb.from('transacoes').update({ valor: novoValor }).eq('id', emprestimo.transacaoRecebimentoId);
+    const pago = novaData <= todayStr();
+    const { error: errTx } = await sb.from('transacoes').update({ valor: novoValor, data: novaData, pago }).eq('id', emprestimo.transacaoRecebimentoId);
     if (errTx) alert('Erro ao atualizar o lançamento vinculado: ' + errTx.message);
   }
 }
@@ -2967,6 +2968,8 @@ function renderEmprestimos(c) {
                 <div class="produto-nome" style="margin-bottom:4px">${esc(e.descricao)}${e.instituicao ? ' — ' + esc(e.instituicao) : ''}</div>
                 <div class="form-hint">Corrige o valor que realmente caiu na sua conta (o "valor liberado" do banco pode ser menor que o "valor contratado", por causa de IOF/tarifas). Isso não muda as parcelas nem os juros, só o lançamento de entrada no Financeiro.</div>
                 <input type="text" id="editEmpValorRecebido-${e.id}" placeholder="Valor recebido (R$)" value="${e.valorRecebido.toFixed(2).replace('.', ',')}" />
+                <div class="form-hint" style="margin-bottom:2px">Data que o dinheiro realmente caiu na conta</div>
+                <input type="date" id="editEmpDataRecebimento-${e.id}" value="${e.dataRecebimento}" />
                 <div class="form-row">
                   <button class="confirm-btn" data-salvar-valor-emprestimo="${e.id}">Salvar</button>
                   <button class="toggle-btn" data-cancelar-valor-emprestimo="1">Cancelar</button>
@@ -4834,8 +4837,9 @@ function attachFinanceiroHandlers(c) {
     btn.addEventListener('click', async () => {
       const id = btn.dataset.salvarValorEmprestimo;
       const novoValor = parseBRNumber(document.getElementById(`editEmpValorRecebido-${id}`).value);
-      if (!novoValor || novoValor <= 0) { alert('Informe um valor válido.'); return; }
-      await updateEmprestimoValorRecebido(id, novoValor);
+      const novaData = document.getElementById(`editEmpDataRecebimento-${id}`).value;
+      if (!novoValor || novoValor <= 0 || !novaData) { alert('Informe um valor e uma data válidos.'); return; }
+      await updateEmprestimoValorRecebido(id, novoValor, novaData);
       state.editingEmprestimoValorId = null;
       await loadData();
     });
