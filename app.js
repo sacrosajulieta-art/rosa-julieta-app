@@ -353,6 +353,7 @@ const state = {
   showCartaoForm: false,
   editingCartaoId: null,
   editingEmprestimoValorId: null,
+  showCompraCartaoId: null,
 };
 
 // ==================== DATA LAYER ====================
@@ -3046,8 +3047,7 @@ function renderCartoes(c) {
           const disponivel = Math.max(0, cart.limite - comprometido);
           const porFatura = {};
           txCartao.forEach((t) => { porFatura[t.data] = (porFatura[t.data] || 0) + t.valor; });
-          const faturas = Object.entries(porFatura).sort((a, b) => a[0].localeCompare(b[0]));
-          const proximaFatura = faturas.find(([data]) => data > hoje);
+          const faturasFuturas = Object.entries(porFatura).filter(([data]) => data > hoje).sort((a, b) => a[0].localeCompare(b[0]));
           return `
             <div class="produto-card">
               <div class="produto-header">
@@ -3063,7 +3063,27 @@ function renderCartoes(c) {
               <div class="produto-meta" style="margin-left:0;margin-top:6px">Limite: <strong style="color:var(--text)">${fmt(cart.limite)}</strong></div>
               <div class="produto-meta" style="margin-left:0;margin-top:4px">Comprometido (faturas em aberto): <strong style="color:var(--amber)">${fmt(comprometido)}</strong></div>
               <div class="produto-meta" style="margin-left:0;margin-top:4px">Disponível: <strong style="color:${disponivel > 0 ? 'var(--teal)' : 'var(--red)'}">${fmt(disponivel)}</strong></div>
-              ${proximaFatura ? `<div class="produto-meta" style="margin-left:0;margin-top:4px">Próxima fatura: <strong style="color:var(--text)">${fmt(proximaFatura[1])}</strong> em ${new Date(proximaFatura[0] + 'T00:00:00').toLocaleDateString('pt-BR')}</div>` : ''}
+              ${faturasFuturas.length > 0 ? `
+                <div class="form-hint" style="margin-top:10px;margin-bottom:4px">Próximas faturas</div>
+                <div class="prod-breakdown">
+                  ${faturasFuturas.map(([data, valor]) => `<div class="prod-breakdown-item"><span>${new Date(data + 'T00:00:00').toLocaleDateString('pt-BR')}</span><span>${fmt(valor)}</span></div>`).join('')}
+                </div>
+              ` : ''}
+              ${state.showCompraCartaoId === cart.id ? `
+                <div class="entrada-box">
+                  <input type="text" id="compCartDescricao-${cart.id}" placeholder="Descrição (ex: Máquina de costura nova)" />
+                  <select id="compCartCategoria-${cart.id}"><option value="">Selecione a categoria</option>${categoriaOptionsHtml()}</select>
+                  <div class="form-row">
+                    <input type="text" id="compCartValor-${cart.id}" placeholder="Valor total (R$)" inputmode="decimal" />
+                    <input type="date" id="compCartData-${cart.id}" value="${hoje}" />
+                  </div>
+                  <input type="text" id="compCartParcelas-${cart.id}" placeholder="Número de parcelas (1 = à vista)" inputmode="numeric" value="1" />
+                  <div class="form-row">
+                    <button class="confirm-btn" data-salvar-compra-cartao="${cart.id}">Lançar compra</button>
+                    <button class="toggle-btn" data-cancelar-compra-cartao="1">Cancelar</button>
+                  </div>
+                </div>
+              ` : `<button class="entrada-btn" data-abrir-compra-cartao="${cart.id}">＋ Nova compra nesse cartão</button>`}
             </div>
           `;
         }).join('')}
@@ -4692,6 +4712,7 @@ function attachHandlers(c) {
       state.showCartaoForm = false;
       state.editingCartaoId = null;
       state.editingEmprestimoValorId = null;
+      state.showCompraCartaoId = null;
       state.showProdutosParados = false;
       state.showCostureiraForm = false;
       state.editingCostureiraId = null;
@@ -4841,6 +4862,30 @@ function attachFinanceiroHandlers(c) {
       if (!novoValor || novoValor <= 0 || !novaData) { alert('Informe um valor e uma data válidos.'); return; }
       await updateEmprestimoValorRecebido(id, novoValor, novaData);
       state.editingEmprestimoValorId = null;
+      await loadData();
+    });
+  });
+
+  document.querySelectorAll('[data-abrir-compra-cartao]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.showCompraCartaoId = btn.dataset.abrirCompraCartao; render(); });
+  });
+  document.querySelectorAll('[data-cancelar-compra-cartao]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.showCompraCartaoId = null; render(); });
+  });
+  document.querySelectorAll('[data-salvar-compra-cartao]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const cartaoId = btn.dataset.salvarCompraCartao;
+      const cartao = state.cartoesCredito.find((cc) => cc.id === cartaoId);
+      if (!cartao) return;
+      const descricao = document.getElementById(`compCartDescricao-${cartaoId}`).value.trim();
+      const categoria = document.getElementById(`compCartCategoria-${cartaoId}`).value;
+      const valor = parseBRNumber(document.getElementById(`compCartValor-${cartaoId}`).value);
+      const data = document.getElementById(`compCartData-${cartaoId}`).value || todayStr();
+      const numParcelas = Number(document.getElementById(`compCartParcelas-${cartaoId}`).value) || 1;
+      if (!descricao || !categoria || !valor) { alert('Preencha descrição, categoria e valor.'); return; }
+      const natureza = NATUREZA_POR_CATEGORIA[categoria] || 'variavel';
+      await criarSaidasCartao({ cartao, categoria, natureza, descricaoBase: descricao, valorTotal: valor, numParcelas, dataCompra: data });
+      state.showCompraCartaoId = null;
       await loadData();
     });
   });
