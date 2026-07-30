@@ -411,18 +411,23 @@ async function loadData() {
 }
 
 function mapTxFromDb(row) {
-  return { id: row.id, tipo: row.tipo, valor: Number(row.valor), categoria: row.categoria, natureza: row.natureza, descricao: row.descricao, data: row.data, recorrente: !!row.recorrente, recorrenteOrigemId: row.recorrente_origem_id || null, idPedido: row.id_pedido || null, conciliado: !!row.conciliado };
+  return { id: row.id, tipo: row.tipo, valor: Number(row.valor), categoria: row.categoria, natureza: row.natureza, descricao: row.descricao, data: row.data, recorrente: !!row.recorrente, recorrenteOrigemId: row.recorrente_origem_id || null, idPedido: row.id_pedido || null, conciliado: !!row.conciliado, pago: row.pago !== false };
 }
 function mapProdutoFromDb(row) {
   return { id: row.id, nome: row.nome, sku: row.sku, estoqueAtual: row.estoque_atual, estoqueMinimo: row.estoque_minimo, custoUnitario: Number(row.custo_unitario), totalVendido: row.total_vendido || 0, ultimaVenda: row.ultima_venda || null, valorMaoObra: Number(row.valor_mao_obra || 0), tipo: row.tipo || 'unitario', precoVendaMedio: Number(row.preco_venda_medio || 0), ativo: row.ativo !== false };
 }
 
 async function addTx(tx) {
+  const pago = tx.pago !== undefined ? tx.pago : tx.data <= todayStr();
   const { data, error } = await sb.from('transacoes').insert({
-    tipo: tx.tipo, valor: tx.valor, categoria: tx.categoria, natureza: tx.natureza || null, descricao: tx.descricao || null, data: tx.data, recorrente: !!tx.recorrente,
+    tipo: tx.tipo, valor: tx.valor, categoria: tx.categoria, natureza: tx.natureza || null, descricao: tx.descricao || null, data: tx.data, recorrente: !!tx.recorrente, pago,
   }).select().single();
   if (error) { alert('Erro ao salvar: ' + error.message); return null; }
   return data;
+}
+async function marcarTxComoPago(id) {
+  const { error } = await sb.from('transacoes').update({ pago: true }).eq('id', id);
+  if (error) alert('Erro ao confirmar pagamento: ' + error.message);
 }
 async function addTxBatch(rows) {
   const { error } = await sb.from('transacoes').insert(rows.map((tx) => ({
@@ -1374,6 +1379,14 @@ function getComputed() {
     .filter((t) => t.diasParaVencer <= JANELA_VENCIMENTO)
     .sort((a, b) => a.diasParaVencer - b.diasParaVencer);
 
+  // contas vencidas que ninguém confirmou como pagas — a data já chegou/passou, mas o
+  // pagamento nunca foi confirmado clicando em "marcar como pago"; alerta em vermelho
+  // porque pode ter sido esquecida (diferente da contasAVencer, que é só o aviso prévio)
+  const contasVencidasNaoConfirmadas = state.tx
+    .filter((t) => t.tipo === 'saida' && t.data <= hoje && t.pago === false)
+    .map((t) => ({ ...t, diasVencida: Math.round((new Date(hoje + 'T00:00:00') - new Date(t.data + 'T00:00:00')) / 86400000) }))
+    .sort((a, b) => b.diasVencida - a.diasVencida);
+
   // valor real do estoque: matéria-prima + insumos parados + peças prontas (custo total: tecido+corte+mão de obra+insumos)
   const valorInsumos = state.insumos.reduce((a, i) => a + i.quantidadeDisponivel * i.custoMedioUnitario, 0);
   const valorMateriaPrima = state.materiaPrima.reduce((a, m) => a + m.rolosDisponiveis * m.custoMedioRolo, 0) + valorInsumos;
@@ -1389,7 +1402,7 @@ function getComputed() {
     .map((p) => [`${p.nome} (${p.estoqueAtual} un)`, p.estoqueAtual * p.custoTotalUnitario])
     .sort((a, b) => b[1] - a[1]);
 
-  return { saldoTotal, txMes, entradasMes, saidasMes, custoFixo, custoVariavel, produtosStatus, produtosParados, contasAVencer, valorMateriaPrima, valorPecasProntas, valorEstoqueTotal, materiaPrimaDetalhe, pecasProntasDetalhe };
+  return { saldoTotal, txMes, entradasMes, saidasMes, custoFixo, custoVariavel, produtosStatus, produtosParados, contasAVencer, contasVencidasNaoConfirmadas, valorMateriaPrima, valorPecasProntas, valorEstoqueTotal, materiaPrimaDetalhe, pecasProntasDetalhe };
 }
 
 // ==================== RENDER ====================
@@ -2807,6 +2820,27 @@ function renderResumoFinanceiro(c) {
 function renderContasAVencer(c) {
   const corUrgencia = (dias) => (dias <= 1 ? 'var(--red)' : dias <= 3 ? 'var(--amber)' : 'var(--teal)');
   return `
+    ${c.contasVencidasNaoConfirmadas.length > 0 ? `
+      <div class="section-title-wrap">
+        <div><div class="section-title" style="color:var(--red)">🔴 Vencidas sem confirmação</div><div class="section-subtitle">A data já passou e ninguém marcou como pago — confere se não foi esquecida</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:${gridColumnsStyle('contasVencidas', 240)};gap:8px;margin-bottom:24px">
+        ${c.contasVencidasNaoConfirmadas.map((t) => `
+          <div class="alert-card" style="border-color:var(--red)">
+            <div class="alert-card-row">
+              <div class="alert-dot" style="background:var(--red)"></div>
+              <div style="flex:1">
+                <div class="alert-name">${esc(t.categoria)}</div>
+                ${t.descricao ? `<div class="alert-meta" style="margin-top:0">${esc(t.descricao)}</div>` : ''}
+                <div class="alert-status" style="color:var(--red)">${t.diasVencida === 0 ? '🔴 Venceu hoje' : `🔴 Venceu há ${t.diasVencida} dia(s)`} — ${fmt(t.valor)}</div>
+              </div>
+            </div>
+            <button class="confirm-btn" style="background:var(--teal);margin-top:8px" data-marcar-pago="${t.id}">✅ Marcar como pago</button>
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
+
     <div class="section-title-wrap">
       <div><div class="section-title">Contas a vencer</div><div class="section-subtitle">Próximos 7 dias — ainda não descontadas do saldo</div></div>
       ${renderControleColunas('contasAVencer')}
@@ -3132,7 +3166,7 @@ function renderFinanceiro(c) {
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="icon-btn-ghost" id="toggleTaxas">⚙️ Taxas</button>
         <button class="icon-btn-ghost" id="toggleConciliacao">🔄 Conciliação</button>
-        <button class="icon-btn-ghost" id="toggleContasAVencer" style="background:rgba(255,182,39,0.15);border:1.5px solid var(--amber);color:var(--amber);font-weight:700;padding:10px 16px;font-size:13.5px">⚠️ Contas a vencer${c.contasAVencer.length > 0 ? ` (${c.contasAVencer.length})` : ''}</button>
+        <button class="icon-btn-ghost" id="toggleContasAVencer" style="background:${c.contasVencidasNaoConfirmadas.length > 0 ? 'rgba(255,71,87,0.15)' : 'rgba(255,182,39,0.15)'};border:1.5px solid ${c.contasVencidasNaoConfirmadas.length > 0 ? 'var(--red)' : 'var(--amber)'};color:${c.contasVencidasNaoConfirmadas.length > 0 ? 'var(--red)' : 'var(--amber)'};font-weight:700;padding:10px 16px;font-size:13.5px">${c.contasVencidasNaoConfirmadas.length > 0 ? '🔴' : '⚠️'} Contas a vencer${(c.contasAVencer.length + c.contasVencidasNaoConfirmadas.length) > 0 ? ` (${c.contasAVencer.length + c.contasVencidasNaoConfirmadas.length})` : ''}</button>
         <button class="icon-btn-ghost" id="toggleResumoFinanceiro">📊 Custos</button>
         <button class="icon-btn-ghost" id="toggleEmprestimos">🏦 Empréstimos</button>
         <button class="icon-btn-ghost" id="toggleSelect">${state.selectMode ? '✕ Cancelar' : '☑️ Selecionar'}</button>
@@ -4343,6 +4377,13 @@ function renderDashboard(c) {
   return `
     <input type="month" class="month-input" id="dashboardMonthSelect" value="${state.selectedMonth}" />
 
+    ${c.contasVencidasNaoConfirmadas.length > 0 ? `
+      <div class="alerta-vencimento" data-ir-financeiro="1" style="background:rgba(255,71,87,0.1);border-color:var(--red);color:var(--red)">
+        <span>🔴 ${c.contasVencidasNaoConfirmadas.length} conta(s) vencida(s) sem confirmação — ${fmt(c.contasVencidasNaoConfirmadas.reduce((a, t) => a + t.valor, 0))}</span>
+        <span class="alerta-vencimento-link">Ver no Financeiro ›</span>
+      </div>
+    ` : ''}
+
     ${c.contasAVencer.length > 0 ? `
       <div class="alerta-vencimento" data-ir-financeiro="1">
         <span>📅 ${c.contasAVencer.length} conta(s) vencendo nos próximos 7 dias — ${fmt(c.contasAVencer.reduce((a, t) => a + t.valor, 0))}</span>
@@ -4513,12 +4554,11 @@ function attachHandlers(c) {
     const dashboardMonthSelect = document.getElementById('dashboardMonthSelect');
     if (dashboardMonthSelect) dashboardMonthSelect.addEventListener('change', (e) => { state.selectedMonth = e.target.value; render(); });
 
-    const alertaVencimento = document.querySelector('[data-ir-financeiro]');
-    if (alertaVencimento) alertaVencimento.addEventListener('click', () => {
+    document.querySelectorAll('[data-ir-financeiro]').forEach((el) => el.addEventListener('click', () => {
       state.tab = 'financeiro';
       state.showContasAVencer = true;
       render();
-    });
+    }));
   }
   if (state.tab === 'financeiro') attachFinanceiroHandlers(c);
   if (state.tab === 'estoque') attachEstoqueHandlers(c);
@@ -4598,10 +4638,7 @@ function attachFinanceiroHandlers(c) {
 
   document.querySelectorAll('[data-marcar-pago]').forEach((btn) => {
     btn.addEventListener('click', async () => {
-      const id = btn.dataset.marcarPago;
-      const t = state.tx.find((x) => x.id === id);
-      if (!t) return;
-      await updateTx(id, { tipo: t.tipo, valor: t.valor, categoria: t.categoria, natureza: t.natureza, descricao: t.descricao, data: todayStr(), recorrente: t.recorrente });
+      await marcarTxComoPago(btn.dataset.marcarPago);
       await loadData();
     });
   });
