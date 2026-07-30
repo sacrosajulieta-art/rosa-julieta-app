@@ -79,6 +79,17 @@ function dataParcela(dataBase, indice) {
   const diaFinal = Math.min(dia, daysInMonth(mesAlvo));
   return `${mesAlvo}-${String(diaFinal).padStart(2, '0')}`;
 }
+// calcula em qual fatura (e quando ela vence) uma compra no cartão cai — se a compra foi
+// depois do dia de fechamento, cai na fatura seguinte; parcelaIndex soma mais um ciclo por parcela
+function dataVencimentoFatura(dataCompra, cartao, parcelaIndex) {
+  const dia = Number(dataCompra.slice(8, 10));
+  let mesFechamento = monthKey(dataCompra);
+  if (dia > cartao.diaFechamento) mesFechamento = addMonths(mesFechamento, 1);
+  let mesVencimento = cartao.diaVencimento < cartao.diaFechamento ? addMonths(mesFechamento, 1) : mesFechamento;
+  mesVencimento = addMonths(mesVencimento, parcelaIndex || 0);
+  const diaFinal = Math.min(cartao.diaVencimento, daysInMonth(mesVencimento));
+  return `${mesVencimento}-${String(diaFinal).padStart(2, '0')}`;
+}
 function inicioDaSemana(dataStr) {
   const d = new Date(dataStr + 'T00:00:00');
   const dia = d.getDay();
@@ -337,11 +348,15 @@ const state = {
   emprestimoParcelas: [],
   showEmprestimos: false,
   showEmprestimoForm: false,
+  cartoesCredito: [],
+  showCartoes: false,
+  showCartaoForm: false,
+  editingCartaoId: null,
 };
 
 // ==================== DATA LAYER ====================
 async function loadData() {
-  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }, { data: feriasTiradas, error: e16 }, { data: solicitacoesPonto, error: e17 }, { data: horasExtrasLiquidadas, error: e18 }, { data: bancoHorasLancamentos, error: e19 }, { data: emprestimos, error: e20 }, { data: emprestimoParcelas, error: e21 }] = await Promise.all([
+  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }, { data: feriasTiradas, error: e16 }, { data: solicitacoesPonto, error: e17 }, { data: horasExtrasLiquidadas, error: e18 }, { data: bancoHorasLancamentos, error: e19 }, { data: emprestimos, error: e20 }, { data: emprestimoParcelas, error: e21 }, { data: cartoesCredito, error: e22 }] = await Promise.all([
     sb.from('transacoes').select('*').order('data', { ascending: false }),
     sb.from('produtos').select('*').order('created_at', { ascending: false }),
     sb.from('plataformas').select('*').order('nome', { ascending: true }),
@@ -363,6 +378,7 @@ async function loadData() {
     sb.from('banco_horas_lancamentos').select('*').order('data', { ascending: false }),
     sb.from('emprestimos').select('*').order('data_recebimento', { ascending: false }),
     sb.from('emprestimo_parcelas').select('*').order('numero', { ascending: true }),
+    sb.from('cartoes_credito').select('*').order('nome', { ascending: true }),
   ]);
   if (e1) console.error(e1);
   if (e2) console.error(e2);
@@ -385,6 +401,7 @@ async function loadData() {
   if (e19) console.error(e19);
   if (e20) console.error(e20);
   if (e21) console.error(e21);
+  if (e22) console.error(e22);
   state.tx = (tx || []).map(mapTxFromDb);
   state.produtos = (produtos || []).map(mapProdutoFromDb);
   state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0) }));
@@ -406,12 +423,13 @@ async function loadData() {
   state.bancoHorasLancamentos = (bancoHorasLancamentos || []).map((b) => ({ id: b.id, funcionariaId: b.funcionaria_id, data: b.data, tipo: b.tipo, horas: Number(b.horas), descricao: b.descricao || '' }));
   state.emprestimos = (emprestimos || []).map((e) => ({ id: e.id, descricao: e.descricao, instituicao: e.instituicao || '', valorRecebido: Number(e.valor_recebido), numeroParcelas: e.numero_parcelas, valorParcela: Number(e.valor_parcela), dataRecebimento: e.data_recebimento, dataPrimeiraParcela: e.data_primeira_parcela, transacaoRecebimentoId: e.transacao_recebimento_id || null }));
   state.emprestimoParcelas = (emprestimoParcelas || []).map((p) => ({ id: p.id, emprestimoId: p.emprestimo_id, numero: p.numero, valor: Number(p.valor), dataVencimento: p.data_vencimento, transacaoId: p.transacao_id || null }));
+  state.cartoesCredito = (cartoesCredito || []).map((c) => ({ id: c.id, nome: c.nome, limite: Number(c.limite || 0), diaFechamento: c.dia_fechamento, diaVencimento: c.dia_vencimento, ativo: c.ativo !== false }));
   state.loading = false;
   render();
 }
 
 function mapTxFromDb(row) {
-  return { id: row.id, tipo: row.tipo, valor: Number(row.valor), categoria: row.categoria, natureza: row.natureza, descricao: row.descricao, data: row.data, recorrente: !!row.recorrente, recorrenteOrigemId: row.recorrente_origem_id || null, idPedido: row.id_pedido || null, conciliado: !!row.conciliado, pago: row.pago !== false };
+  return { id: row.id, tipo: row.tipo, valor: Number(row.valor), categoria: row.categoria, natureza: row.natureza, descricao: row.descricao, data: row.data, recorrente: !!row.recorrente, recorrenteOrigemId: row.recorrente_origem_id || null, idPedido: row.id_pedido || null, conciliado: !!row.conciliado, pago: row.pago !== false, cartaoId: row.cartao_id || null };
 }
 function mapProdutoFromDb(row) {
   return { id: row.id, nome: row.nome, sku: row.sku, estoqueAtual: row.estoque_atual, estoqueMinimo: row.estoque_minimo, custoUnitario: Number(row.custo_unitario), totalVendido: row.total_vendido || 0, ultimaVenda: row.ultima_venda || null, valorMaoObra: Number(row.valor_mao_obra || 0), tipo: row.tipo || 'unitario', precoVendaMedio: Number(row.preco_venda_medio || 0), ativo: row.ativo !== false };
@@ -420,7 +438,7 @@ function mapProdutoFromDb(row) {
 async function addTx(tx) {
   const pago = tx.pago !== undefined ? tx.pago : tx.data <= todayStr();
   const { data, error } = await sb.from('transacoes').insert({
-    tipo: tx.tipo, valor: tx.valor, categoria: tx.categoria, natureza: tx.natureza || null, descricao: tx.descricao || null, data: tx.data, recorrente: !!tx.recorrente, pago,
+    tipo: tx.tipo, valor: tx.valor, categoria: tx.categoria, natureza: tx.natureza || null, descricao: tx.descricao || null, data: tx.data, recorrente: !!tx.recorrente, pago, cartao_id: tx.cartaoId || null,
   }).select().single();
   if (error) { alert('Erro ao salvar: ' + error.message); return null; }
   return data;
@@ -447,6 +465,38 @@ async function criarSaidasParceladas({ categoria, natureza, descricaoBase, valor
     const data = i === 0 ? dataPrimeiraParcela : dataParcela(dataPrimeiraParcela, i);
     await addTx({ tipo: 'saida', valor, categoria, natureza, descricao: `${descricaoBase} (parcela ${i + 1}/${numParcelas})`, data });
   }
+}
+// mesma coisa, mas as datas seguem o ciclo de fechamento/vencimento do cartão escolhido,
+// em vez de "1 mês a partir da compra" — reflete quando o dinheiro sai de verdade
+async function criarSaidasCartao({ cartao, categoria, natureza, descricaoBase, valorTotal, numParcelas, dataCompra }) {
+  const n = numParcelas || 1;
+  const valorParcela = Math.round((valorTotal / n) * 100) / 100;
+  let somaParcial = 0;
+  for (let i = 0; i < n; i++) {
+    const ultima = i === n - 1;
+    const valor = ultima ? Math.round((valorTotal - somaParcial) * 100) / 100 : valorParcela;
+    somaParcial += valor;
+    const data = dataVencimentoFatura(dataCompra, cartao, i);
+    const descricao = n > 1 ? `${descricaoBase} (parcela ${i + 1}/${n})` : descricaoBase;
+    await addTx({ tipo: 'saida', valor, categoria, natureza, descricao, data, cartaoId: cartao.id });
+  }
+}
+// ---- Cartões de crédito ----
+async function addCartao(dados) {
+  const { error } = await sb.from('cartoes_credito').insert({
+    nome: dados.nome, limite: dados.limite || 0, dia_fechamento: dados.diaFechamento, dia_vencimento: dados.diaVencimento, ativo: true,
+  });
+  if (error) alert('Erro ao adicionar cartão: ' + error.message);
+}
+async function updateCartao(id, dados) {
+  const { error } = await sb.from('cartoes_credito').update({
+    nome: dados.nome, limite: dados.limite || 0, dia_fechamento: dados.diaFechamento, dia_vencimento: dados.diaVencimento, ativo: dados.ativo,
+  }).eq('id', id);
+  if (error) alert('Erro ao atualizar cartão: ' + error.message);
+}
+async function removeCartao(id) {
+  const { error } = await sb.from('cartoes_credito').delete().eq('id', id);
+  if (error) alert('Erro ao remover cartão: ' + error.message);
 }
 // ---- Empréstimos ----
 async function criarEmprestimo({ descricao, instituicao, valorRecebido, dataRecebimento, numeroParcelas, valorParcela, dataPrimeiraParcela }) {
@@ -509,7 +559,7 @@ async function removeVariante(id) {
 }
 
 // ---- Matéria-prima (tecido) ----
-async function comprarTecido(cor, quantidadeRolos, valorTotal, data, lancarFinanceiro, parcelas) {
+async function comprarTecido(cor, quantidadeRolos, valorTotal, data, lancarFinanceiro, parcelas, cartao) {
   const existente = state.materiaPrima.find((m) => m.cor.trim().toLowerCase() === cor.trim().toLowerCase());
   if (existente) {
     const novoTotalRolos = existente.rolosDisponiveis + quantidadeRolos;
@@ -524,16 +574,13 @@ async function comprarTecido(cor, quantidadeRolos, valorTotal, data, lancarFinan
     if (error) { alert('Erro ao registrar compra: ' + error.message); return; }
   }
   if (lancarFinanceiro) {
-    if (parcelas && parcelas > 1) {
-      await criarSaidasParceladas({
-        categoria: 'Tecido', natureza: 'variavel', descricaoBase: `${quantidadeRolos} rolo(s) — ${cor}`,
-        valorTotal, numParcelas: parcelas, dataPrimeiraParcela: data,
-      });
+    const descricaoBase = `${quantidadeRolos} rolo(s) — ${cor}`;
+    if (cartao) {
+      await criarSaidasCartao({ cartao, categoria: 'Tecido', natureza: 'variavel', descricaoBase, valorTotal, numParcelas: parcelas || 1, dataCompra: data });
+    } else if (parcelas && parcelas > 1) {
+      await criarSaidasParceladas({ categoria: 'Tecido', natureza: 'variavel', descricaoBase, valorTotal, numParcelas: parcelas, dataPrimeiraParcela: data });
     } else {
-      await addTx({
-        tipo: 'saida', valor: valorTotal, categoria: 'Tecido', natureza: 'variavel',
-        descricao: `${quantidadeRolos} rolo(s) — ${cor}`, data,
-      });
+      await addTx({ tipo: 'saida', valor: valorTotal, categoria: 'Tecido', natureza: 'variavel', descricao: descricaoBase, data });
     }
   }
 }
@@ -604,7 +651,7 @@ async function updateOrdemCorte(id, { cor, quantidadeRolos, valorTecido, valorCo
 }
 
 // ---- Insumos (aviamentos, embalagem, etiquetas...) ----
-async function comprarInsumo(nome, unidade, quantidade, valorTotal, categoria, data, lancarFinanceiro, parcelas) {
+async function comprarInsumo(nome, unidade, quantidade, valorTotal, categoria, data, lancarFinanceiro, parcelas, cartao) {
   const existente = state.insumos.find((i) => i.nome.trim().toLowerCase() === nome.trim().toLowerCase());
   if (existente) {
     const novaQtd = existente.quantidadeDisponivel + quantidade;
@@ -617,16 +664,13 @@ async function comprarInsumo(nome, unidade, quantidade, valorTotal, categoria, d
     if (error) { alert('Erro ao registrar compra: ' + error.message); return; }
   }
   if (lancarFinanceiro) {
-    if (parcelas && parcelas > 1) {
-      await criarSaidasParceladas({
-        categoria, natureza: 'variavel', descricaoBase: `${quantidade} ${unidade} — ${nome}`,
-        valorTotal, numParcelas: parcelas, dataPrimeiraParcela: data,
-      });
+    const descricaoBase = `${quantidade} ${unidade} — ${nome}`;
+    if (cartao) {
+      await criarSaidasCartao({ cartao, categoria, natureza: 'variavel', descricaoBase, valorTotal, numParcelas: parcelas || 1, dataCompra: data });
+    } else if (parcelas && parcelas > 1) {
+      await criarSaidasParceladas({ categoria, natureza: 'variavel', descricaoBase, valorTotal, numParcelas: parcelas, dataPrimeiraParcela: data });
     } else {
-      await addTx({
-        tipo: 'saida', valor: valorTotal, categoria, natureza: 'variavel',
-        descricao: `${quantidade} ${unidade} — ${nome}`, data,
-      });
+      await addTx({ tipo: 'saida', valor: valorTotal, categoria, natureza: 'variavel', descricao: descricaoBase, data });
     }
   }
 }
@@ -2371,13 +2415,14 @@ function renderMateriais(c) {
         <div class="form-hint" id="tecidoPreviewCusto" style="display:none"></div>
         <input type="date" id="tecidoData" value="${todayStr()}" />
         <label class="checkbox-label"><input type="checkbox" id="tecidoHistorico" /> 📦 Já tinha esse tecido antes do sistema (não lançar despesa)</label>
-        <label class="checkbox-label"><input type="checkbox" id="tecidoParcelarToggle" data-toggle-parcelas="tecidoParcelasBox" /> 💳 Comprei parcelado no cartão</label>
+        <div class="form-hint" style="margin-bottom:2px">Forma de pagamento</div>
+        <select id="tecidoCartaoSelect" data-toggle-parcelas-select="tecidoParcelasBox">
+          <option value="">Outro (à vista, PIX, boleto...)</option>
+          ${state.cartoesCredito.filter((cc) => cc.ativo !== false).map((cc) => `<option value="${cc.id}">${esc(cc.nome)}</option>`).join('')}
+        </select>
         <div id="tecidoParcelasBox" style="display:none">
-          <div class="form-row">
-            <input type="text" id="tecidoNumParcelas" placeholder="Número de parcelas" inputmode="numeric" />
-            <input type="date" id="tecidoDataPrimeiraParcela" value="${todayStr()}" />
-          </div>
-          <div class="form-hint">O tecido entra no estoque hoje; o Financeiro lança uma saída por mês, na data de cada parcela.</div>
+          <input type="text" id="tecidoNumParcelas" placeholder="Número de parcelas (1 = à vista)" inputmode="numeric" value="1" />
+          <div class="form-hint">A data de cada parcela é calculada sozinha, pelo fechamento/vencimento do cartão — não pela data da compra.</div>
         </div>
         <button class="confirm-btn" id="salvarCompraTecido">Registrar compra</button>
       </div>
@@ -2460,13 +2505,14 @@ function renderMateriais(c) {
         </select>
         <input type="date" id="insumoData" value="${todayStr()}" />
         <label class="checkbox-label"><input type="checkbox" id="insumoHistorico" /> 📦 Já tinha antes do sistema (não lançar despesa)</label>
-        <label class="checkbox-label"><input type="checkbox" id="insumoParcelarToggle" data-toggle-parcelas="insumoParcelasBox" /> 💳 Comprei parcelado no cartão</label>
+        <div class="form-hint" style="margin-bottom:2px">Forma de pagamento</div>
+        <select id="insumoCartaoSelect" data-toggle-parcelas-select="insumoParcelasBox">
+          <option value="">Outro (à vista, PIX, boleto...)</option>
+          ${state.cartoesCredito.filter((cc) => cc.ativo !== false).map((cc) => `<option value="${cc.id}">${esc(cc.nome)}</option>`).join('')}
+        </select>
         <div id="insumoParcelasBox" style="display:none">
-          <div class="form-row">
-            <input type="text" id="insumoNumParcelas" placeholder="Número de parcelas" inputmode="numeric" />
-            <input type="date" id="insumoDataPrimeiraParcela" value="${todayStr()}" />
-          </div>
-          <div class="form-hint">O insumo entra no estoque hoje; o Financeiro lança uma saída por mês, na data de cada parcela.</div>
+          <input type="text" id="insumoNumParcelas" placeholder="Número de parcelas (1 = à vista)" inputmode="numeric" value="1" />
+          <div class="form-hint">A data de cada parcela é calculada sozinha, pelo fechamento/vencimento do cartão.</div>
         </div>
         <button class="confirm-btn" id="salvarCompraInsumo">Registrar compra</button>
       </div>
@@ -2921,6 +2967,78 @@ function renderEmprestimos(c) {
   `;
 }
 
+// ---- Cartões de crédito ----
+function renderCartoes(c) {
+  const hoje = todayStr();
+  return `
+    <div class="section-title-wrap">
+      <div><div class="section-title">Cartões de Crédito</div><div class="section-subtitle">Faturas e limite disponível</div></div>
+      <button class="icon-btn-ghost" id="toggleCartaoForm">＋ Novo cartão</button>
+    </div>
+
+    ${state.showCartaoForm ? `
+      <div class="form-card">
+        <input type="text" id="cartNome" placeholder="Nome do cartão (ex: Nubank Empresarial)" />
+        <input type="text" id="cartLimite" placeholder="Limite (R$)" inputmode="decimal" />
+        <div class="form-row">
+          <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Dia de fechamento</div><input type="text" id="cartFechamento" placeholder="ex: 20" inputmode="numeric" /></div>
+          <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Dia de vencimento</div><input type="text" id="cartVencimento" placeholder="ex: 27" inputmode="numeric" /></div>
+        </div>
+        <button class="confirm-btn" id="salvarCartao">Adicionar</button>
+      </div>
+    ` : ''}
+
+    ${state.cartoesCredito.length === 0 ? `<div class="empty-state">Nenhum cartão cadastrado.</div>` : `
+      <div class="produto-list">
+        ${state.cartoesCredito.map((cart) => {
+          if (state.editingCartaoId === cart.id) {
+            return `
+              <div class="form-card">
+                <input type="text" id="editCartNome-${cart.id}" placeholder="Nome" value="${esc(cart.nome)}" />
+                <input type="text" id="editCartLimite-${cart.id}" placeholder="Limite" value="${cart.limite.toFixed(2).replace('.', ',')}" />
+                <div class="form-row">
+                  <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Fechamento</div><input type="text" id="editCartFechamento-${cart.id}" value="${cart.diaFechamento}" inputmode="numeric" /></div>
+                  <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Vencimento</div><input type="text" id="editCartVencimento-${cart.id}" value="${cart.diaVencimento}" inputmode="numeric" /></div>
+                </div>
+                <label class="checkbox-label"><input type="checkbox" id="editCartAtivo-${cart.id}" ${cart.ativo !== false ? 'checked' : ''} /> Ativo</label>
+                <div class="form-row">
+                  <button class="confirm-btn" data-salvar-edit-cartao="${cart.id}">Salvar</button>
+                  <button class="toggle-btn" data-cancelar-edit-cartao="${cart.id}">Cancelar</button>
+                </div>
+              </div>
+            `;
+          }
+          const txCartao = state.tx.filter((t) => t.cartaoId === cart.id && t.tipo === 'saida');
+          const comprometido = txCartao.filter((t) => !t.pago).reduce((a, t) => a + t.valor, 0);
+          const disponivel = Math.max(0, cart.limite - comprometido);
+          const porFatura = {};
+          txCartao.forEach((t) => { porFatura[t.data] = (porFatura[t.data] || 0) + t.valor; });
+          const faturas = Object.entries(porFatura).sort((a, b) => a[0].localeCompare(b[0]));
+          const proximaFatura = faturas.find(([data]) => data > hoje);
+          return `
+            <div class="produto-card">
+              <div class="produto-header">
+                <div>
+                  <div class="produto-nome">${esc(cart.nome)}${cart.ativo === false ? ' (inativo)' : ''}</div>
+                  <div class="produto-sku">Fecha dia ${cart.diaFechamento}, vence dia ${cart.diaVencimento}</div>
+                </div>
+                <div style="display:flex;gap:2px">
+                  <button class="trash-btn" data-editar-cartao="${cart.id}">✏️</button>
+                  <button class="trash-btn" data-remover-cartao="${cart.id}">🗑</button>
+                </div>
+              </div>
+              <div class="produto-meta" style="margin-left:0;margin-top:6px">Limite: <strong style="color:var(--text)">${fmt(cart.limite)}</strong></div>
+              <div class="produto-meta" style="margin-left:0;margin-top:4px">Comprometido (faturas em aberto): <strong style="color:var(--amber)">${fmt(comprometido)}</strong></div>
+              <div class="produto-meta" style="margin-left:0;margin-top:4px">Disponível: <strong style="color:${disponivel > 0 ? 'var(--teal)' : 'var(--red)'}">${fmt(disponivel)}</strong></div>
+              ${proximaFatura ? `<div class="produto-meta" style="margin-left:0;margin-top:4px">Próxima fatura: <strong style="color:var(--text)">${fmt(proximaFatura[1])}</strong> em ${new Date(proximaFatura[0] + 'T00:00:00').toLocaleDateString('pt-BR')}</div>` : ''}
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `}
+  `;
+}
+
 // ---- Gate de acesso ----
 function renderGate(app) {
   const modoPonto = window.__gateModoPonto;
@@ -3169,6 +3287,7 @@ function renderFinanceiro(c) {
         <button class="icon-btn-ghost" id="toggleContasAVencer" style="background:${c.contasVencidasNaoConfirmadas.length > 0 ? 'rgba(255,71,87,0.15)' : 'rgba(255,182,39,0.15)'};border:1.5px solid ${c.contasVencidasNaoConfirmadas.length > 0 ? 'var(--red)' : 'var(--amber)'};color:${c.contasVencidasNaoConfirmadas.length > 0 ? 'var(--red)' : 'var(--amber)'};font-weight:700;padding:10px 16px;font-size:13.5px">${c.contasVencidasNaoConfirmadas.length > 0 ? '🔴' : '⚠️'} Contas a vencer${(c.contasAVencer.length + c.contasVencidasNaoConfirmadas.length) > 0 ? ` (${c.contasAVencer.length + c.contasVencidasNaoConfirmadas.length})` : ''}</button>
         <button class="icon-btn-ghost" id="toggleResumoFinanceiro">📊 Custos</button>
         <button class="icon-btn-ghost" id="toggleEmprestimos">🏦 Empréstimos</button>
+        <button class="icon-btn-ghost" id="toggleCartoes">💳 Cartões</button>
         <button class="icon-btn-ghost" id="toggleSelect">${state.selectMode ? '✕ Cancelar' : '☑️ Selecionar'}</button>
         <button class="icon-btn-ghost" id="exportCsv">💾 Exportar</button>
         <button class="icon-btn-ghost" id="toggleUpload">📤 CSV</button>
@@ -3227,6 +3346,8 @@ function renderFinanceiro(c) {
 
     ${state.showEmprestimos ? renderEmprestimos(c) : ''}
 
+    ${state.showCartoes ? renderCartoes(c) : ''}
+
     ${state.showResumoFinanceiro ? renderResumoFinanceiro(c) : ''}
 
     ${state.showUpload ? `
@@ -3254,10 +3375,15 @@ function renderFinanceiro(c) {
         <input type="date" id="txData" value="${todayStr()}" />
         <label class="checkbox-label"><input type="checkbox" id="txRecorrente" /> 🔁 Repetir todos os meses</label>
         ${tipo === 'saida' ? `
-          <label class="checkbox-label"><input type="checkbox" id="txParcelarToggle" data-toggle-parcelas="txParcelasBox" /> 💳 Compra parcelada no cartão</label>
+          <div class="form-hint" style="margin-bottom:2px">Forma de pagamento</div>
+          <select id="txCartaoSelect" data-toggle-parcelas-select="txParcelasBox">
+            <option value="">Outro (à vista, PIX, boleto...)</option>
+            <option value="__parcelado_sem_cartao__">💳 Parcelado sem cartão vinculado (ex: boleto)</option>
+            ${state.cartoesCredito.filter((cc) => cc.ativo !== false).map((cc) => `<option value="${cc.id}">${esc(cc.nome)}</option>`).join('')}
+          </select>
           <div id="txParcelasBox" style="display:none">
             <div class="form-hint">O valor digitado acima é o TOTAL da compra — o sistema divide pelas parcelas.</div>
-            <input type="text" id="txNumParcelas" placeholder="Número de parcelas" inputmode="numeric" />
+            <input type="text" id="txNumParcelas" placeholder="Número de parcelas (1 = à vista)" inputmode="numeric" value="1" />
           </div>
         ` : ''}
         <button class="confirm-btn" id="salvarTx">Salvar lançamento</button>
@@ -4475,6 +4601,13 @@ function attachHandlers(c) {
     });
   });
 
+  document.querySelectorAll('[data-toggle-parcelas-select]').forEach((sel) => {
+    sel.addEventListener('change', () => {
+      const el = document.getElementById(sel.dataset.toggleParcelasSelect);
+      if (el) el.style.display = sel.value ? '' : 'none';
+    });
+  });
+
   const sairBtn = document.getElementById('sairApp');
   if (sairBtn) sairBtn.addEventListener('click', () => {
     if (confirm('Sair e pedir o código de acesso de novo?')) {
@@ -4522,6 +4655,9 @@ function attachHandlers(c) {
       state.showContasAVencer = false;
       state.showEmprestimos = false;
       state.showEmprestimoForm = false;
+      state.showCartoes = false;
+      state.showCartaoForm = false;
+      state.editingCartaoId = null;
       state.showProdutosParados = false;
       state.showCostureiraForm = false;
       state.editingCostureiraId = null;
@@ -4575,6 +4711,56 @@ function attachHandlers(c) {
 function attachFinanceiroHandlers(c) {
   const toggleEmprestimos = document.getElementById('toggleEmprestimos');
   if (toggleEmprestimos) toggleEmprestimos.addEventListener('click', () => { state.showEmprestimos = !state.showEmprestimos; render(); });
+
+  const toggleCartoes = document.getElementById('toggleCartoes');
+  if (toggleCartoes) toggleCartoes.addEventListener('click', () => { state.showCartoes = !state.showCartoes; render(); });
+
+  const toggleCartaoForm = document.getElementById('toggleCartaoForm');
+  if (toggleCartaoForm) toggleCartaoForm.addEventListener('click', () => { state.showCartaoForm = !state.showCartaoForm; render(); });
+
+  const salvarCartao = document.getElementById('salvarCartao');
+  if (salvarCartao) salvarCartao.addEventListener('click', async () => {
+    const nome = document.getElementById('cartNome').value.trim();
+    const limite = parseBRNumber(document.getElementById('cartLimite').value);
+    const diaFechamento = Number(document.getElementById('cartFechamento').value);
+    const diaVencimento = Number(document.getElementById('cartVencimento').value);
+    if (!nome || !diaFechamento || diaFechamento < 1 || diaFechamento > 31 || !diaVencimento || diaVencimento < 1 || diaVencimento > 31) {
+      alert('Preencha o nome e os dias de fechamento/vencimento (1 a 31).');
+      return;
+    }
+    await addCartao({ nome, limite, diaFechamento, diaVencimento });
+    state.showCartaoForm = false;
+    await loadData();
+  });
+
+  document.querySelectorAll('[data-editar-cartao]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.editingCartaoId = btn.dataset.editarCartao; render(); });
+  });
+  document.querySelectorAll('[data-cancelar-edit-cartao]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.editingCartaoId = null; render(); });
+  });
+  document.querySelectorAll('[data-salvar-edit-cartao]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.salvarEditCartao;
+      const nome = document.getElementById(`editCartNome-${id}`).value.trim();
+      const limite = parseBRNumber(document.getElementById(`editCartLimite-${id}`).value);
+      const diaFechamento = Number(document.getElementById(`editCartFechamento-${id}`).value);
+      const diaVencimento = Number(document.getElementById(`editCartVencimento-${id}`).value);
+      const ativo = document.getElementById(`editCartAtivo-${id}`).checked;
+      if (!nome || !diaFechamento || !diaVencimento) { alert('Preencha nome e os dias de fechamento/vencimento.'); return; }
+      await updateCartao(id, { nome, limite, diaFechamento, diaVencimento, ativo });
+      state.editingCartaoId = null;
+      await loadData();
+    });
+  });
+  document.querySelectorAll('[data-remover-cartao]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (confirm('Remover esse cartão? As compras já lançadas continuam no Financeiro, só perdem o vínculo com o cartão.')) {
+        await removeCartao(btn.dataset.removerCartao);
+        await loadData();
+      }
+    });
+  });
 
   const toggleEmprestimoForm = document.getElementById('toggleEmprestimoForm');
   if (toggleEmprestimoForm) toggleEmprestimoForm.addEventListener('click', () => { state.showEmprestimoForm = !state.showEmprestimoForm; render(); });
@@ -4934,12 +5120,16 @@ function attachFinanceiroHandlers(c) {
     const descricao = document.getElementById('txDescricao').value;
     const data = document.getElementById('txData').value || todayStr();
     const recorrente = document.getElementById('txRecorrente')?.checked || false;
-    const parcelado = tipo === 'saida' && document.getElementById('txParcelarToggle')?.checked;
-    const numParcelas = parcelado ? Number(document.getElementById('txNumParcelas').value) : 1;
+    const formaPagamento = tipo === 'saida' ? document.getElementById('txCartaoSelect')?.value : '';
+    const cartao = (formaPagamento && formaPagamento !== '__parcelado_sem_cartao__') ? state.cartoesCredito.find((cc) => cc.id === formaPagamento) : null;
+    const parceladoSemCartao = formaPagamento === '__parcelado_sem_cartao__';
+    const numParcelas = (cartao || parceladoSemCartao) ? (Number(document.getElementById('txNumParcelas').value) || 1) : 1;
     if (!valor || !categoria) { alert('Preencha valor e categoria.'); return; }
-    if (parcelado && (!numParcelas || numParcelas <= 1)) { alert('Informe um número de parcelas maior que 1, ou desmarque "compra parcelada".'); return; }
+    if (parceladoSemCartao && (!numParcelas || numParcelas <= 1)) { alert('Informe um número de parcelas maior que 1, ou escolha "Outro".'); return; }
     const natureza = tipo === 'saida' ? (NATUREZA_POR_CATEGORIA[categoria] || 'variavel') : null;
-    if (parcelado) {
+    if (cartao) {
+      await criarSaidasCartao({ cartao, categoria, natureza, descricaoBase: descricao || categoria, valorTotal: valor, numParcelas, dataCompra: data });
+    } else if (parceladoSemCartao) {
       await criarSaidasParceladas({ categoria, natureza, descricaoBase: descricao || categoria, valorTotal: valor, numParcelas, dataPrimeiraParcela: data });
     } else {
       await addTx({ tipo, valor, categoria, natureza, descricao, data, recorrente });
@@ -5052,12 +5242,11 @@ function attachTecidoHandlers(c) {
     const valor = parseBRNumber(document.getElementById('tecidoValor').value);
     const data = document.getElementById('tecidoData').value || todayStr();
     const historico = document.getElementById('tecidoHistorico')?.checked;
-    const parcelado = document.getElementById('tecidoParcelarToggle')?.checked;
-    const numParcelas = parcelado ? Number(document.getElementById('tecidoNumParcelas').value) : 1;
-    const dataPrimeiraParcela = parcelado ? (document.getElementById('tecidoDataPrimeiraParcela').value || data) : data;
+    const cartaoId = document.getElementById('tecidoCartaoSelect')?.value;
+    const cartao = cartaoId ? state.cartoesCredito.find((cc) => cc.id === cartaoId) : null;
+    const numParcelas = cartao ? (Number(document.getElementById('tecidoNumParcelas').value) || 1) : 1;
     if (!cor || !rolos || rolos <= 0 || !valor) { alert('Selecione ou digite a cor, e preencha quantidade de rolos e valor.'); return; }
-    if (parcelado && (!numParcelas || numParcelas <= 1)) { alert('Informe um número de parcelas maior que 1, ou desmarque "comprei parcelado".'); return; }
-    await comprarTecido(cor, rolos, valor, dataPrimeiraParcela, !historico, parcelado ? numParcelas : 1);
+    await comprarTecido(cor, rolos, valor, data, !historico, numParcelas, cartao);
     window.__tecidoCorNova = false;
     window.__tecidoCorSelecionada = '';
     window.__tecidoCorNovaTexto = '';
@@ -5260,12 +5449,11 @@ function attachTecidoHandlers(c) {
     const categoria = document.getElementById('insumoCategoria').value;
     const data = document.getElementById('insumoData').value || todayStr();
     const historico = document.getElementById('insumoHistorico')?.checked;
-    const parcelado = document.getElementById('insumoParcelarToggle')?.checked;
-    const numParcelas = parcelado ? Number(document.getElementById('insumoNumParcelas').value) : 1;
-    const dataPrimeiraParcela = parcelado ? (document.getElementById('insumoDataPrimeiraParcela').value || data) : data;
+    const cartaoId = document.getElementById('insumoCartaoSelect')?.value;
+    const cartao = cartaoId ? state.cartoesCredito.find((cc) => cc.id === cartaoId) : null;
+    const numParcelas = cartao ? (Number(document.getElementById('insumoNumParcelas').value) || 1) : 1;
     if (!nome || !quantidade || quantidade <= 0 || !valor) { alert('Selecione ou digite o insumo, e preencha quantidade e valor.'); return; }
-    if (parcelado && (!numParcelas || numParcelas <= 1)) { alert('Informe um número de parcelas maior que 1, ou desmarque "comprei parcelado".'); return; }
-    await comprarInsumo(nome, unidade, quantidade, valor, categoria, dataPrimeiraParcela, !historico, parcelado ? numParcelas : 1);
+    await comprarInsumo(nome, unidade, quantidade, valor, categoria, data, !historico, numParcelas, cartao);
     state.showCompraInsumoForm = false;
     window.__insumoNovo = false;
     window.__insumoSelecionado = '';
