@@ -352,6 +352,7 @@ const state = {
   showCartoes: false,
   showCartaoForm: false,
   editingCartaoId: null,
+  editingEmprestimoValorId: null,
 };
 
 // ==================== DATA LAYER ====================
@@ -530,6 +531,19 @@ async function removeEmprestimo(id) {
   if (idsTransacoes.length > 0) await sb.from('transacoes').delete().in('id', idsTransacoes);
   const { error } = await sb.from('emprestimos').delete().eq('id', id);
   if (error) alert('Erro ao remover empréstimo: ' + error.message);
+}
+// corrige o valor recebido (ex: valor contratado x valor realmente liberado pelo banco,
+// depois de descontar IOF/tarifas) — atualiza o empréstimo E o lançamento de entrada juntos,
+// pra não ficar um número no card e outro no Financeiro
+async function updateEmprestimoValorRecebido(id, novoValor) {
+  const emprestimo = state.emprestimos.find((e) => e.id === id);
+  if (!emprestimo) return;
+  const { error: errEmp } = await sb.from('emprestimos').update({ valor_recebido: novoValor }).eq('id', id);
+  if (errEmp) { alert('Erro ao atualizar empréstimo: ' + errEmp.message); return; }
+  if (emprestimo.transacaoRecebimentoId) {
+    const { error: errTx } = await sb.from('transacoes').update({ valor: novoValor }).eq('id', emprestimo.transacaoRecebimentoId);
+    if (errTx) alert('Erro ao atualizar o lançamento vinculado: ' + errTx.message);
+  }
 }
 async function marcarTxConciliada(id, conciliado) {
   const { error } = await sb.from('transacoes').update({ conciliado }).eq('id', id);
@@ -2947,6 +2961,19 @@ function renderEmprestimos(c) {
           const restantes = parcelas.filter((p) => p.dataVencimento > hoje);
           const saldoDevedor = restantes.reduce((a, p) => a + p.valor, 0);
           const proxima = restantes[0];
+          if (state.editingEmprestimoValorId === e.id) {
+            return `
+              <div class="form-card">
+                <div class="produto-nome" style="margin-bottom:4px">${esc(e.descricao)}${e.instituicao ? ' — ' + esc(e.instituicao) : ''}</div>
+                <div class="form-hint">Corrige o valor que realmente caiu na sua conta (o "valor liberado" do banco pode ser menor que o "valor contratado", por causa de IOF/tarifas). Isso não muda as parcelas nem os juros, só o lançamento de entrada no Financeiro.</div>
+                <input type="text" id="editEmpValorRecebido-${e.id}" placeholder="Valor recebido (R$)" value="${e.valorRecebido.toFixed(2).replace('.', ',')}" />
+                <div class="form-row">
+                  <button class="confirm-btn" data-salvar-valor-emprestimo="${e.id}">Salvar</button>
+                  <button class="toggle-btn" data-cancelar-valor-emprestimo="1">Cancelar</button>
+                </div>
+              </div>
+            `;
+          }
           return `
             <div class="produto-card">
               <div class="produto-header">
@@ -2954,10 +2981,13 @@ function renderEmprestimos(c) {
                   <div class="produto-nome">${esc(e.descricao)}${e.instituicao ? ' — ' + esc(e.instituicao) : ''}</div>
                   <div class="produto-sku">Recebido ${fmt(e.valorRecebido)} em ${new Date(e.dataRecebimento + 'T00:00:00').toLocaleDateString('pt-BR')}</div>
                 </div>
-                <button class="trash-btn" data-remover-emprestimo="${e.id}">🗑</button>
+                <div style="display:flex;gap:2px">
+                  <button class="trash-btn" data-editar-valor-emprestimo="${e.id}">✏️</button>
+                  <button class="trash-btn" data-remover-emprestimo="${e.id}">🗑</button>
+                </div>
               </div>
               <div class="produto-meta" style="margin-left:0;margin-top:6px">Parcelas: <strong style="color:var(--text)">${pagas.length}/${parcelas.length} pagas</strong></div>
-              <div class="produto-meta" style="margin-left:0;margin-top:4px">Saldo devedor: <strong style="color:var(--amber)">${fmt(saldoDevedor)}</strong></div>
+              <div class="produto-meta" style="margin-left:0;margin-top:4px">Total restante a pagar <span style="font-size:10px">(com juros das parcelas futuras)</span>: <strong style="color:var(--amber)">${fmt(saldoDevedor)}</strong></div>
               ${proxima ? `<div class="produto-meta" style="margin-left:0;margin-top:4px">Próxima parcela: <strong style="color:var(--text)">${fmt(proxima.valor)}</strong> em ${new Date(proxima.dataVencimento + 'T00:00:00').toLocaleDateString('pt-BR')}</div>` : `<div class="produto-meta" style="margin-left:0;margin-top:4px;color:var(--teal)">✅ Quitado</div>`}
             </div>
           `;
@@ -4658,6 +4688,7 @@ function attachHandlers(c) {
       state.showCartoes = false;
       state.showCartaoForm = false;
       state.editingCartaoId = null;
+      state.editingEmprestimoValorId = null;
       state.showProdutosParados = false;
       state.showCostureiraForm = false;
       state.editingCostureiraId = null;
@@ -4790,6 +4821,23 @@ function attachFinanceiroHandlers(c) {
         await removeEmprestimo(btn.dataset.removerEmprestimo);
         await loadData();
       }
+    });
+  });
+
+  document.querySelectorAll('[data-editar-valor-emprestimo]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.editingEmprestimoValorId = btn.dataset.editarValorEmprestimo; render(); });
+  });
+  document.querySelectorAll('[data-cancelar-valor-emprestimo]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.editingEmprestimoValorId = null; render(); });
+  });
+  document.querySelectorAll('[data-salvar-valor-emprestimo]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.salvarValorEmprestimo;
+      const novoValor = parseBRNumber(document.getElementById(`editEmpValorRecebido-${id}`).value);
+      if (!novoValor || novoValor <= 0) { alert('Informe um valor válido.'); return; }
+      await updateEmprestimoValorRecebido(id, novoValor);
+      state.editingEmprestimoValorId = null;
+      await loadData();
     });
   });
 
