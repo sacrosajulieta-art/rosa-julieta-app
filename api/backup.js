@@ -1,4 +1,13 @@
-const { createClient } = require('@supabase/supabase-js');
+// Captura qualquer erro já na hora de carregar a biblioteca do Supabase —
+// se isso falhar silenciosamente, a função crasha sem log nenhum. Isolando
+// aqui, garantimos uma resposta com a mensagem real do erro.
+let createClient;
+let erroAoCarregar = null;
+try {
+  ({ createClient } = require('@supabase/supabase-js'));
+} catch (err) {
+  erroAoCarregar = err;
+}
 
 // Todas as tabelas do sistema Rosa Julieta
 const TABELAS = [
@@ -29,31 +38,36 @@ const TABELAS = [
 const RETENCAO_DIAS = 30; // apaga backups com mais de 30 dias pra não estourar o limite de storage
 
 module.exports = async (req, res) => {
-  // Só aceita a chamada se vier com o CRON_SECRET certo
-  // (a Vercel envia isso sozinha quando dispara o cron job)
-  const auth = req.headers['authorization'];
-  if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
-    return res.status(401).json({ error: 'Não autorizado' });
+  if (erroAoCarregar) {
+    return res.status(500).json({
+      status: 'erro',
+      etapa: 'carregar biblioteca @supabase/supabase-js',
+      mensagem: erroAoCarregar.message,
+      stack: erroAoCarregar.stack,
+    });
   }
-
-  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    return res.status(500).json({ error: 'Variáveis de ambiente do Supabase não configuradas' });
-  }
-
-  const supabase = createClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_ROLE_KEY
-  );
 
   try {
+    const auth = req.headers['authorization'];
+    if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
+      return res.status(401).json({ error: 'Não autorizado' });
+    }
+
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      return res.status(500).json({ error: 'Variáveis de ambiente do Supabase não configuradas' });
+    }
+
+    const supabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY
+    );
+
     const dump = { gerado_em: new Date().toISOString(), tabelas: {} };
     const tabelasComErro = [];
 
     for (const tabela of TABELAS) {
       const { data, error } = await supabase.from(tabela).select('*');
       if (error) {
-        // não derruba o backup inteiro se UMA tabela nova ainda não existir no banco —
-        // só registra o aviso e segue salvando o resto
         tabelasComErro.push(`${tabela}: ${error.message}`);
         continue;
       }
@@ -73,7 +87,6 @@ module.exports = async (req, res) => {
 
     if (uploadError) throw new Error(`Erro ao salvar backup no Storage: ${uploadError.message}`);
 
-    // Limpeza: remove backups mais antigos que RETENCAO_DIAS
     const { data: arquivos, error: listError } = await supabase.storage.from('backups').list();
     let removidos = 0;
 
@@ -99,6 +112,6 @@ module.exports = async (req, res) => {
       backups_antigos_removidos: removidos
     });
   } catch (err) {
-    return res.status(500).json({ status: 'erro', mensagem: err.message });
+    return res.status(500).json({ status: 'erro', etapa: 'execução', mensagem: err.message, stack: err.stack });
   }
 };
