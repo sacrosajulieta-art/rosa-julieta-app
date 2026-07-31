@@ -3401,7 +3401,7 @@ function renderTxRow(t) {
     <div style="flex:1">
       <div class="tx-categoria">${esc(t.categoria)}${(t.recorrente || t.recorrenteOrigemId) ? ' 🔁' : ''}</div>
       ${t.descricao ? `<div class="tx-desc">${esc(t.descricao)}</div>` : ''}
-      <div class="tx-date">${t.data}${t.pago === false ? ' · pendente' : ''}</div>
+      <div class="tx-date">${t.data}${t.tipo === 'saida' ? (t.pago === false ? ' · pendente' : ' · <span style="color:var(--teal)">pago</span>') : ''}</div>
     </div>
     <div class="tx-valor" style="color:${t.tipo === 'entrada' ? 'var(--teal)' : 'var(--pink)'}">${t.tipo === 'entrada' ? '+' : '-'}${fmt(t.valor)}</div>
     ${!state.selectMode ? `
