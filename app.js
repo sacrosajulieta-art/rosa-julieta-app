@@ -423,7 +423,7 @@ async function loadData() {
   state.materiaPrima = (materiaPrima || []).map((m) => ({ id: m.id, cor: m.cor, rolosDisponiveis: m.rolos_disponiveis, custoMedioRolo: Number(m.custo_medio_rolo || 0) }));
   state.ordensCorte = (ordensCorte || []).map((o) => ({ id: o.id, cor: o.cor, quantidadeRolos: o.quantidade_rolos, valorTecido: Number(o.valor_tecido), dataEnvio: o.data_envio, status: o.status, dataConclusao: o.data_conclusao, tipo: o.tipo || 'principal', valorCorte: Number(o.valor_corte || 0), transacaoCorteId: o.transacao_corte_id || null }));
   state.ordensCorteItens = (ordensCorteItens || []).map((i) => ({ id: i.id, ordemId: i.ordem_id, produtoId: i.produto_id, quantidade: i.quantidade, varianteId: i.variante_id || null }));
-  state.insumos = (insumos || []).map((i) => ({ id: i.id, nome: i.nome, unidade: i.unidade, quantidadeDisponivel: Number(i.quantidade_disponivel), custoMedioUnitario: Number(i.custo_medio_unitario), usadoNoEnvio: !!i.usado_no_envio }));
+  state.insumos = (insumos || []).map((i) => ({ id: i.id, nome: i.nome, unidade: i.unidade, quantidadeDisponivel: Number(i.quantidade_disponivel), custoMedioUnitario: Number(i.custo_medio_unitario), usadoNoEnvio: !!i.usado_no_envio, qtdVendaManual: Number(i.qtd_venda_manual ?? 1) }));
   state.distribuicoes = (distribuicoes || []).map((d) => ({ id: d.id, ordemItemId: d.ordem_item_id, produtoId: d.produto_id, varianteId: d.variante_id || null, costureiraId: d.costureira_id, quantidadeDistribuida: d.quantidade_distribuida, quantidadeDevolvida: d.quantidade_devolvida, data: d.data }));
   state.fichaTecnicaItens = (fichaTecnicaItens || []).map((f) => ({ id: f.id, produtoId: f.produto_id, tipoItem: f.tipo_item, insumoId: f.insumo_id || null, componenteProdutoId: f.componente_produto_id || null, quantidade: Number(f.quantidade), momento: f.momento || 'venda' }));
   state.insumoPlataformaQtd = (insumoPlataformaQtd || []).map((q) => ({ id: q.id, insumoId: q.insumo_id, plataformaId: q.plataforma_id, quantidade: Number(q.quantidade) }));
@@ -768,6 +768,12 @@ async function salvarQtdPorPlataforma(insumoId, valoresPorPlataforma) {
   const { error: errIns } = await sb.from('insumo_plataforma_qtd').insert(linhas);
   if (errIns) alert('Erro ao salvar configuração: ' + errIns.message);
 }
+// quantidade desse insumo usada por venda manual (atacado, feira etc) — separado das
+// plataformas de marketplace, guardado direto no próprio insumo
+async function salvarQtdVendaManual(insumoId, qtd) {
+  const { error } = await sb.from('insumos').update({ qtd_venda_manual: qtd || 1 }).eq('id', insumoId);
+  if (error) alert('Erro ao salvar configuração: ' + error.message);
+}
 async function removeInsumo(id) {
   const { error } = await sb.from('insumos').delete().eq('id', id);
   if (error) alert('Erro ao remover insumo: ' + error.message);
@@ -1075,6 +1081,12 @@ async function lancarVendaManual({ produtoId, quantidade, valor, frete, canal, d
   }
   await atualizarPrecoVendaMedio(produtoId, valor, qtdTotal);
   await baixarEstoquePorFichaTecnica(produtoId, qtdTotal, data);
+  // insumos usados por pedido (envelope, etiqueta de rastreio) — cada venda manual lançada
+  // conta como 1 pedido enviado, respeitando a quantidade configurada pra "Venda manual"
+  const insumosEnvio = state.insumos.filter((i) => i.usadoNoEnvio);
+  for (const insumo of insumosEnvio) {
+    await baixarInsumo(insumo.id, insumo.qtdVendaManual);
+  }
   await addVendasDetalheBatch([{
     produtoId, plataformaId: null, plataformaNome: canalLabel,
     sku: (produto.sku || '').split(',')[0]?.trim() || null, quantidade: qtdTotal, valor, data,
@@ -2725,6 +2737,10 @@ function renderMateriais(c) {
                   <input type="text" id="qtdEnvio-${i.id}-${plat.id}" value="${qtdInsumoPorPedido(i.id, plat.id)}" inputmode="numeric" style="flex:0 0 70px" />
                 </div>
               `).join('')}
+              <div class="form-row" style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px">
+                <div style="flex:1;display:flex;align-items:center;font-size:13px">🧾 Venda manual <span style="color:var(--text-muted);margin-left:6px">(atacado, feira etc)</span></div>
+                <input type="text" id="qtdEnvioManual-${i.id}" value="${i.qtdVendaManual}" inputmode="numeric" style="flex:0 0 70px" />
+              </div>
               <div class="form-row">
                 <button class="confirm-btn" data-salvar-qtd-envio="${i.id}">Salvar</button>
                 <button class="toggle-btn" data-cancelar-qtd-envio="1">Cancelar</button>
@@ -6155,7 +6171,9 @@ function attachTecidoHandlers(c) {
         const val = Number(document.getElementById(`qtdEnvio-${insumoId}-${plat.id}`)?.value) || 1;
         valores[plat.id] = val;
       });
+      const qtdManual = Number(document.getElementById(`qtdEnvioManual-${insumoId}`)?.value) || 1;
       await salvarQtdPorPlataforma(insumoId, valores);
+      await salvarQtdVendaManual(insumoId, qtdManual);
       state.configEnvioInsumoId = null;
       await loadData();
     });
