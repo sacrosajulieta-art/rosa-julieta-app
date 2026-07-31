@@ -457,7 +457,18 @@ async function addTx(tx) {
   return data;
 }
 async function marcarTxComoPago(id) {
-  const { error } = await sb.from('transacoes').update({ pago: true }).eq('id', id);
+  const tx = state.tx.find((t) => t.id === id);
+  const hoje = todayStr();
+  const payload = { pago: true };
+  // se a conta ainda não venceu (ex: fatura do cartão) e ela já foi paga adiantada,
+  // traz a data pra hoje — senão o saldo só desconta na data de vencimento original,
+  // mesmo o dinheiro já tendo saído da conta
+  if (tx && tx.tipo === 'saida' && tx.data > hoje) {
+    const dataVenc = new Date(tx.data + 'T00:00:00').toLocaleDateString('pt-BR');
+    const antecipar = confirm(`Essa conta vence em ${dataVenc}. Você já pagou hoje, antes do vencimento?\n\nSe sim, vou atualizar a data pra hoje pra já descontar do saldo agora.`);
+    if (antecipar) payload.data = hoje;
+  }
+  const { error } = await sb.from('transacoes').update(payload).eq('id', id);
   if (error) alert('Erro ao confirmar pagamento: ' + error.message);
 }
 async function addTxBatch(rows) {
