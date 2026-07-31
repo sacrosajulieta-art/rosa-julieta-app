@@ -4222,14 +4222,18 @@ function renderFuncionariaDetalhe(funcionariaId) {
 
     <div class="section-title-wrap"><div><div class="section-title">Lançar batida manual</div></div></div>
     <div class="form-card">
-      <div class="form-row">
-        <input type="date" id="ptManualData" value="${todayStr()}" />
-        <select id="ptManualTipo">
-          ${ORDEM_PONTOS.map((t) => `<option value="${t}">${LABEL_PONTO[t]}</option>`).join('')}
-        </select>
-      </div>
-      <input type="time" id="ptManualHora" value="08:00" />
-      <button class="confirm-btn" data-lancar-ponto-manual="${funcionariaId}">Lançar</button>
+      <input type="date" id="ptManualData" value="${todayStr()}" />
+      <div class="form-hint" style="margin-top:8px;margin-bottom:2px">Preenche os horários do dia — deixa em branco o que não bateu (ex: só trabalhou meio período)</div>
+      ${ORDEM_PONTOS.map((t) => {
+        const padrao = f ? { entrada: f.jornadaEntrada, saida_almoco: f.jornadaSaidaAlmoco, volta_almoco: f.jornadaVoltaAlmoco, saida: f.jornadaSaida }[t] : '';
+        return `
+          <div class="form-row" style="align-items:center;margin-top:6px">
+            <div style="flex:1;font-size:13px">${LABEL_PONTO[t]}</div>
+            <input type="time" id="ptManual-${t}" value="${padrao || ''}" style="max-width:140px" />
+          </div>
+        `;
+      }).join('')}
+      <button class="confirm-btn" style="margin-top:10px" data-lancar-ponto-manual="${funcionariaId}">Lançar</button>
     </div>
 
     <div class="section-title-wrap"><div><div class="section-title">Dias no período</div></div></div>
@@ -4384,13 +4388,24 @@ function attachRHHandlers(c) {
     if (lancarManual) lancarManual.addEventListener('click', async () => {
       const funcionariaId = lancarManual.dataset.lancarPontoManual;
       const data = document.getElementById('ptManualData').value;
-      const tipo = document.getElementById('ptManualTipo').value;
-      const hora = document.getElementById('ptManualHora').value;
-      if (!data || !hora) { alert('Preencha a data e o horário.'); return; }
-      const horarioISO = new Date(`${data}T${hora}:00`).toISOString();
-      const { error } = await sb.from('pontos').insert({ funcionaria_id: funcionariaId, data, tipo, horario: horarioISO });
+      if (!data) { alert('Preencha a data.'); return; }
+      const linhas = ORDEM_PONTOS
+        .map((t) => ({ tipo: t, hora: document.getElementById(`ptManual-${t}`)?.value }))
+        .filter((l) => l.hora);
+      if (linhas.length === 0) { alert('Preencha pelo menos um horário.'); return; }
+      const rows = linhas.map((l) => ({
+        funcionaria_id: funcionariaId, data, tipo: l.tipo, horario: new Date(`${data}T${l.hora}:00`).toISOString(),
+      }));
+      const { error } = await sb.from('pontos').insert(rows);
       if (error) { alert('Erro ao lançar ponto: ' + error.message); return; }
+      // se a data lançada cair fora do período visível na tela, expande o filtro pra
+      // incluir ela — senão a batida salva certinho mas some da lista, parecendo que falhou
+      const inicioAtual = state.rhFiltroInicio || inicioDaSemana(todayStr());
+      const fimAtual = state.rhFiltroFim || todayStr();
+      if (data < inicioAtual) state.rhFiltroInicio = data;
+      if (data > fimAtual) state.rhFiltroFim = data;
       await loadData();
+      alert(`${linhas.length} batida(s) lançada(s) em ${new Date(data + 'T00:00:00').toLocaleDateString('pt-BR')}: ${linhas.map((l) => LABEL_PONTO[l.tipo]).join(', ')}.`);
     });
 
     document.querySelectorAll('[data-editar-ponto]').forEach((btn) => {
