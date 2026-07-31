@@ -302,6 +302,7 @@ const state = {
   showResumoFinanceiro: false,
   showContasAVencer: false,
   showProdutosParados: false,
+  showSkusPendentes: false,
   variantes: [],
   showVarianteForm: {},
   materiaPrima: [],
@@ -356,11 +357,12 @@ const state = {
   editingEmprestimoValorId: null,
   showCompraCartaoId: null,
   showLancamentosCartaoId: null,
+  vendasSkuPendentes: [],
 };
 
 // ==================== DATA LAYER ====================
 async function loadData() {
-  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }, { data: feriasTiradas, error: e16 }, { data: solicitacoesPonto, error: e17 }, { data: horasExtrasLiquidadas, error: e18 }, { data: bancoHorasLancamentos, error: e19 }, { data: emprestimos, error: e20 }, { data: emprestimoParcelas, error: e21 }, { data: cartoesCredito, error: e22 }] = await Promise.all([
+  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }, { data: feriasTiradas, error: e16 }, { data: solicitacoesPonto, error: e17 }, { data: horasExtrasLiquidadas, error: e18 }, { data: bancoHorasLancamentos, error: e19 }, { data: emprestimos, error: e20 }, { data: emprestimoParcelas, error: e21 }, { data: cartoesCredito, error: e22 }, { data: vendasSkuPendentes, error: e23 }] = await Promise.all([
     sb.from('transacoes').select('*').order('data', { ascending: false }),
     sb.from('produtos').select('*').order('created_at', { ascending: false }),
     sb.from('plataformas').select('*').order('nome', { ascending: true }),
@@ -383,6 +385,7 @@ async function loadData() {
     sb.from('emprestimos').select('*').order('data_recebimento', { ascending: false }),
     sb.from('emprestimo_parcelas').select('*').order('numero', { ascending: true }),
     sb.from('cartoes_credito').select('*').order('nome', { ascending: true }),
+    sb.from('vendas_sku_pendentes').select('*').order('created_at', { ascending: false }),
   ]);
   if (e1) console.error(e1);
   if (e2) console.error(e2);
@@ -406,6 +409,7 @@ async function loadData() {
   if (e20) console.error(e20);
   if (e21) console.error(e21);
   if (e22) console.error(e22);
+  if (e23) console.error(e23);
   state.tx = (tx || []).map(mapTxFromDb);
   state.produtos = (produtos || []).map(mapProdutoFromDb);
   state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0) }));
@@ -428,6 +432,7 @@ async function loadData() {
   state.emprestimos = (emprestimos || []).map((e) => ({ id: e.id, descricao: e.descricao, instituicao: e.instituicao || '', valorRecebido: Number(e.valor_recebido), numeroParcelas: e.numero_parcelas, valorParcela: Number(e.valor_parcela), dataRecebimento: e.data_recebimento, dataPrimeiraParcela: e.data_primeira_parcela, transacaoRecebimentoId: e.transacao_recebimento_id || null }));
   state.emprestimoParcelas = (emprestimoParcelas || []).map((p) => ({ id: p.id, emprestimoId: p.emprestimo_id, numero: p.numero, valor: Number(p.valor), dataVencimento: p.data_vencimento, transacaoId: p.transacao_id || null }));
   state.cartoesCredito = (cartoesCredito || []).map((c) => ({ id: c.id, nome: c.nome, limite: Number(c.limite || 0), diaFechamento: c.dia_fechamento, diaVencimento: c.dia_vencimento, ativo: c.ativo !== false }));
+  state.vendasSkuPendentes = (vendasSkuPendentes || []).map((v) => ({ id: v.id, sku: v.sku, quantidade: Number(v.quantidade), faturamento: Number(v.faturamento), ultimaData: v.ultima_data, plataformaNome: v.plataforma_nome || null }));
   state.loading = false;
   render();
 }
@@ -960,6 +965,49 @@ async function removeProduto(id) {
   const { error } = await sb.from('produtos').delete().eq('id', id);
   if (error) alert('Erro ao remover produto: ' + error.message);
 }
+// grava (ou soma, se já existir) um SKU que não bateu com nenhum produto no import —
+// fica pendente até a Daniela vincular manualmente ao produto certo, em Estoque
+async function registrarSkusPendentes(pendentesMap) {
+  for (const [sku, info] of pendentesMap.entries()) {
+    const existente = state.vendasSkuPendentes.find((v) => v.sku.trim().toLowerCase() === sku.trim().toLowerCase());
+    if (existente) {
+      const { error } = await sb.from('vendas_sku_pendentes').update({
+        quantidade: existente.quantidade + info.qtd,
+        faturamento: existente.faturamento + info.faturamento,
+        ultima_data: info.ultimaData > existente.ultimaData ? info.ultimaData : existente.ultimaData,
+      }).eq('id', existente.id);
+      if (error) console.error(error);
+    } else {
+      const { error } = await sb.from('vendas_sku_pendentes').insert({
+        sku, quantidade: info.qtd, faturamento: info.faturamento, ultima_data: info.ultimaData, plataforma_nome: info.plataformaNome || null,
+      });
+      if (error) console.error(error);
+    }
+  }
+}
+// vincula um SKU pendente a um produto: salva o SKU como apelido do produto (pra próximos
+// imports já entrarem automático) e aplica a baixa de estoque retroativa acumulada
+async function vincularSkuPendente(pendenteId, produtoId) {
+  const pendente = state.vendasSkuPendentes.find((v) => v.id === pendenteId);
+  const produto = state.produtos.find((p) => p.id === produtoId);
+  if (!pendente || !produto) return;
+  const skusAtuais = (produto.sku || '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (!skusAtuais.some((s) => s.toLowerCase() === pendente.sku.trim().toLowerCase())) {
+    skusAtuais.push(pendente.sku.trim());
+    await updateProduto(produtoId, { ...produto, sku: skusAtuais.join(', ') });
+  }
+  const novoEstoque = Math.max(0, produto.estoqueAtual - pendente.quantidade);
+  const novoTotalVendido = (produto.totalVendido || 0) + pendente.quantidade;
+  await registrarVendaProduto(produtoId, novoEstoque, novoTotalVendido, pendente.ultimaData);
+  await atualizarPrecoVendaMedio(produtoId, pendente.faturamento, pendente.quantidade);
+  await baixarEstoquePorFichaTecnica(produtoId, pendente.quantidade, pendente.ultimaData);
+  const { error } = await sb.from('vendas_sku_pendentes').delete().eq('id', pendenteId);
+  if (error) alert('Erro ao remover SKU pendente: ' + error.message);
+}
+async function removerSkuPendente(id) {
+  const { error } = await sb.from('vendas_sku_pendentes').delete().eq('id', id);
+  if (error) alert('Erro ao remover SKU pendente: ' + error.message);
+}
 async function updateProduto(id, p) {
   const { error } = await sb.from('produtos').update({
     nome: p.nome, sku: p.sku || null, estoque_atual: p.estoqueAtual, estoque_minimo: p.estoqueMinimo, custo_unitario: p.custoUnitario, valor_mao_obra: p.valorMaoObra || 0, tipo: p.tipo || 'unitario',
@@ -1421,6 +1469,7 @@ function setupRealtime() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'ordens_corte_itens' }, loadData)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'insumos' }, loadData)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'distribuicoes' }, loadData)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'vendas_sku_pendentes' }, loadData)
     .subscribe();
 }
 
@@ -4414,6 +4463,7 @@ function renderEstoque(c) {
         ${renderControleColunas('estoque')}
         <button class="icon-btn-ghost" id="toggleForaDeLinha" style="${state.estoqueMostrarForaLinha ? 'background:rgba(154,156,168,0.2);color:var(--text)' : ''}">🚫 Fora de linha${foraDeLinhaCount > 0 ? ` (${foraDeLinhaCount})` : ''}</button>
         <button class="icon-btn-ghost" id="toggleProdutosParados">⏸️ Parados${c.produtosParados.length > 0 ? ` (${c.produtosParados.length})` : ''}</button>
+        <button class="icon-btn-ghost" id="toggleSkusPendentes" style="${state.vendasSkuPendentes.length > 0 ? 'background:rgba(255,182,39,0.15);border:1.5px solid var(--amber);color:var(--amber);font-weight:700' : ''}">🔗 SKUs pendentes${state.vendasSkuPendentes.length > 0 ? ` (${state.vendasSkuPendentes.length})` : ''}</button>
         <button class="icon-btn" id="toggleProdutoForm">＋ Produto</button>
       </div>
     </div>
@@ -4426,6 +4476,36 @@ function renderEstoque(c) {
         <option value="mais-vendidos" ${state.estoqueOrdenar === 'mais-vendidos' ? 'selected' : ''}>Mais vendidos</option>
       </select>
     </div>
+
+    ${state.showSkusPendentes ? `
+      <div class="form-card">
+        <div class="section-title" style="margin-bottom:2px">SKUs pendentes de vincular</div>
+        <div class="section-subtitle" style="margin-bottom:12px">Vieram em algum import de vendas mas não bateram com nenhum produto cadastrado. Vincule ao produto certo pra aplicar a baixa de estoque e já ficar automático nos próximos imports.</div>
+        ${state.vendasSkuPendentes.length === 0 ? `<div class="empty-state">Nenhum SKU pendente no momento 🎉</div>` : `
+          <div style="display:flex;flex-direction:column;gap:10px">
+            ${state.vendasSkuPendentes.map((v) => `
+              <div class="alert-card" style="border-color:var(--amber)55">
+                <div class="alert-card-row">
+                  <div class="alert-dot" style="background:var(--amber)"></div>
+                  <div style="flex:1">
+                    <div class="alert-name">${esc(v.sku)}</div>
+                    <div class="alert-meta">${v.quantidade} peça(s) vendida(s) · ${fmt(v.faturamento)}${v.plataformaNome ? ` · ${esc(v.plataformaNome)}` : ''} · última venda ${v.ultimaData ? new Date(v.ultimaData + 'T00:00:00').toLocaleDateString('pt-BR') : '—'}</div>
+                  </div>
+                </div>
+                <div class="form-row" style="margin-top:8px">
+                  <select id="vincularSkuProduto-${v.id}" style="flex:1">
+                    <option value="">Selecione o produto...</option>
+                    ${state.produtos.map((p) => `<option value="${p.id}">${esc(p.nome)}${p.sku ? ' — ' + esc(p.sku) : ''}</option>`).join('')}
+                  </select>
+                  <button class="confirm-btn" data-vincular-sku="${v.id}">Vincular</button>
+                  <button class="trash-btn" data-remover-sku-pendente="${v.id}" title="Ignorar esse SKU">🗑</button>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        `}
+      </div>
+    ` : ''}
 
     ${state.showProdutosParados ? `
       <div class="form-card">
@@ -5117,7 +5197,7 @@ function attachFinanceiroHandlers(c) {
 
     const novos = [];
     const deducoes = new Map(); // produtoId -> { qtd, ultimaData }
-    const skusNaoEncontrados = new Set();
+    const skusNaoEncontrados = new Map(); // sku -> { qtd, faturamento, ultimaData, plataformaNome }
     const pedidosPorPlataforma = new Map(); // plataformaId (ou '_sem_plataforma') -> Set de pedidos
     const linhasSemPedidoPorPlataforma = new Map(); // fallback quando a linha não tem ID do pedido
     let temSku = false;
@@ -5185,7 +5265,11 @@ function attachFinanceiroHandlers(c) {
           if (dataLinha > atual.ultimaData) atual.ultimaData = dataLinha;
           deducoes.set(produto.id, atual);
         } else {
-          skusNaoEncontrados.add(sku);
+          const atual = skusNaoEncontrados.get(sku) || { qtd: 0, faturamento: 0, ultimaData: dataLinha, plataformaNome: plataformaLinha ? plataformaLinha.nome : null };
+          atual.qtd += qtd;
+          atual.faturamento += valor;
+          if (dataLinha > atual.ultimaData) atual.ultimaData = dataLinha;
+          skusNaoEncontrados.set(sku, atual);
         }
       }
     });
@@ -5198,6 +5282,7 @@ function attachFinanceiroHandlers(c) {
     }
 
     await addTxBatch(novos);
+    if (skusNaoEncontrados.size) await registrarSkusPendentes(skusNaoEncontrados);
 
     // aplica baixa de estoque + soma no total vendido + atualiza preço médio de venda
     for (const [produtoId, info] of deducoes.entries()) {
@@ -5251,7 +5336,7 @@ function attachFinanceiroHandlers(c) {
     if (temSku) {
       resumo += `\n${deducoes.size} produto(s) com estoque baixado automaticamente.`;
       if (skusNaoEncontrados.size) {
-        resumo += `\n\nSKUs não encontrados no cadastro (${skusNaoEncontrados.size}), estoque não foi baixado pra eles:\n` + [...skusNaoEncontrados].slice(0, 15).join(', ');
+        resumo += `\n\nSKUs não encontrados no cadastro (${skusNaoEncontrados.size}) ficaram pendentes de vinculação — vá em Estoque > SKUs pendentes de vincular pra associar ao produto certo (a baixa de estoque é aplicada assim que você vincular).`;
       }
     } else {
       resumo += `\n(Nenhuma coluna de SKU foi encontrada, então o estoque não foi ajustado.)`;
@@ -5994,6 +6079,23 @@ function attachEstoqueHandlers(c) {
 
   const toggleParados = document.getElementById('toggleProdutosParados');
   if (toggleParados) toggleParados.addEventListener('click', () => { state.showProdutosParados = !state.showProdutosParados; render(); });
+  const toggleSkusPendentes = document.getElementById('toggleSkusPendentes');
+  if (toggleSkusPendentes) toggleSkusPendentes.addEventListener('click', () => { state.showSkusPendentes = !state.showSkusPendentes; render(); });
+  document.querySelectorAll('[data-vincular-sku]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const pendenteId = btn.dataset.vincularSku;
+      const produtoId = document.getElementById(`vincularSkuProduto-${pendenteId}`).value;
+      if (!produtoId) { alert('Selecione o produto antes de vincular.'); return; }
+      await vincularSkuPendente(pendenteId, produtoId);
+    });
+  });
+  document.querySelectorAll('[data-remover-sku-pendente]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (confirm('Ignorar esse SKU? Ele some da lista de pendentes sem aplicar baixa de estoque nenhuma. Você pode vincular manualmente depois cadastrando o SKU direto no produto, se precisar.')) {
+        await removerSkuPendente(btn.dataset.removerSkuPendente);
+      }
+    });
+  });
 
   function capturarCoresDigitadas() {
     const valores = [];
