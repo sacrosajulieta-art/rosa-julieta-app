@@ -4310,7 +4310,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
       <button class="confirm-btn" style="margin-top:10px" data-lancar-ponto-manual="${funcionariaId}">Lançar</button>
     </div>
 
-    <div class="section-title-wrap"><div><div class="section-title">Abonar um dia (ou período)</div><div class="section-subtitle">Atestado, folga ou abono — qualquer data, inclusive de meses passados</div></div></div>
+    <div class="section-title-wrap"><div><div class="section-title">Abonar um dia (ou período)</div><div class="section-subtitle">Atestado, folga, ou liberou mais cedo e não quer descontar — qualquer data, inclusive de meses passados</div></div></div>
     <div class="form-card">
       <div class="form-row">
         <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">De</div><input type="date" id="abonarLivreData" value="${todayStr()}" /></div>
@@ -4331,14 +4331,18 @@ function renderFuncionariaDetalhe(funcionariaId) {
         ${diasOrdenados.map((dia) => {
           const pontosDoDia = porDia[dia].sort((a, b) => new Date(a.horario) - new Date(b.horario));
           const calc = f ? calcularHorasDia(pontosDoDia, f, dia) : null;
-          if (calc && calc.completo) {
+          const abonoDoDia = state.abonosPonto.find((a) => a.funcionariaId === funcionariaId && a.data === dia);
+          const faltaAbonada = !!(abonoDoDia && calc && calc.completo && calc.diferenca < 0);
+          if (calc && calc.completo && !faltaAbonada) {
             if (calc.diferenca >= 0) totalExtra += calc.diferenca; else totalFalta += Math.abs(calc.diferenca);
           }
           return `
             <div class="produto-card">
               <div class="produto-header">
                 <div><div class="produto-nome">${dia}</div></div>
-                ${calc && calc.completo ? `
+                ${faltaAbonada ? `
+                  <span style="font-size:11px;color:var(--teal)">✅ Abonado (${formatarHorasMin(calc.diferenca)} não descontado)</span>
+                ` : calc && calc.completo ? `
                   <div class="dre-td-num ${calc.diferenca >= 0 ? 'dre-positivo' : 'dre-negativo'}" style="font-size:13px">${calc.diferenca >= 0 ? '+' : '-'}${formatarHorasMin(calc.diferenca)}</div>
                 ` : `<span style="font-size:11px;color:var(--amber)">⚠️ incompleto</span>`}
               </div>
