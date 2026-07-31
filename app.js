@@ -354,6 +354,7 @@ const state = {
   editingCartaoId: null,
   editingEmprestimoValorId: null,
   showCompraCartaoId: null,
+  showLancamentosCartaoId: null,
 };
 
 // ==================== DATA LAYER ====================
@@ -3091,6 +3092,12 @@ function renderCartoes(c) {
                   ${faturasFuturas.map(([data, valor]) => `<div class="prod-breakdown-item"><span>${new Date(data + 'T00:00:00').toLocaleDateString('pt-BR')}</span><span>${fmt(valor)}</span></div>`).join('')}
                 </div>
               ` : ''}
+              <button class="icon-btn-ghost" style="margin-top:10px" data-toggle-lancamentos-cartao="${cart.id}">${state.showLancamentosCartaoId === cart.id ? '▲ Fechar lançamentos' : `🧾 Ver/editar lançamentos${txCartao.length > 0 ? ` (${txCartao.length})` : ''}`}</button>
+              ${state.showLancamentosCartaoId === cart.id ? `
+                <div class="tx-list" style="margin-top:8px">
+                  ${txCartao.length === 0 ? `<div class="empty-state">Nenhum lançamento nesse cartão ainda.</div>` : [...txCartao].sort((a, b) => b.data.localeCompare(a.data)).map((t) => renderTxRow(t)).join('')}
+                </div>
+              ` : ''}
               ${state.showCompraCartaoId === cart.id ? `
                 <div class="entrada-box">
                   <input type="text" id="compCartDescricao-${cart.id}" placeholder="Descrição (ex: Máquina de costura nova)" />
@@ -3361,6 +3368,49 @@ function categoriaOptionsHtml(selected) {
   `).join('') + `<option value="Outro" ${selected === 'Outro' ? 'selected' : ''}>Outro</option>`;
 }
 
+// linha de um lançamento (com edição inline) — usada na lista geral do Financeiro
+// e também na lista de lançamentos de um cartão específico
+function renderTxRow(t) {
+  if (state.editingTxId === t.id) {
+    const editTipo = window.__editTxTipo || t.tipo;
+    return `
+      <div class="form-card">
+        <div class="form-row">
+          <button class="toggle-btn ${editTipo === 'entrada' ? 'active-teal' : ''}" data-edit-tipo="entrada">Entrada</button>
+          <button class="toggle-btn ${editTipo === 'saida' ? 'active-pink' : ''}" data-edit-tipo="saida">Saída</button>
+        </div>
+        <input type="text" id="editTxValor-${t.id}" placeholder="Valor" value="${t.valor.toFixed(2).replace('.', ',')}" />
+        ${editTipo === 'saida'
+          ? `<select id="editTxCategoria-${t.id}"><option value="">Selecione a categoria</option>${categoriaOptionsHtml(t.categoria)}</select>`
+          : `<input type="text" id="editTxCategoria-${t.id}" placeholder="Categoria" value="${esc(t.categoria)}" />`}
+        <input type="text" id="editTxDescricao-${t.id}" placeholder="Descrição (opcional)" value="${esc(t.descricao || '')}" />
+        <input type="date" id="editTxData-${t.id}" value="${t.data}" />
+        <label class="checkbox-label"><input type="checkbox" id="editTxRecorrente-${t.id}" ${t.recorrente ? 'checked' : ''} /> 🔁 Repetir todos os meses</label>
+        <div class="form-row">
+          <button class="confirm-btn" data-salvar-edit-tx="${t.id}">Salvar</button>
+          <button class="toggle-btn" data-cancelar-edit-tx="${t.id}">Cancelar</button>
+        </div>
+      </div>
+    `;
+  }
+  const checked = state.selectedTxIds.has(t.id);
+  return `
+  <div class="tx-row">
+    ${state.selectMode ? `<input type="checkbox" class="tx-checkbox" data-select-tx="${t.id}" ${checked ? 'checked' : ''} />` : `<div class="tx-dot" style="background:${t.tipo === 'entrada' ? 'var(--teal)' : 'var(--pink)'}"></div>`}
+    <div style="flex:1">
+      <div class="tx-categoria">${esc(t.categoria)}${(t.recorrente || t.recorrenteOrigemId) ? ' 🔁' : ''}</div>
+      ${t.descricao ? `<div class="tx-desc">${esc(t.descricao)}</div>` : ''}
+      <div class="tx-date">${t.data}${t.pago === false ? ' · pendente' : ''}</div>
+    </div>
+    <div class="tx-valor" style="color:${t.tipo === 'entrada' ? 'var(--teal)' : 'var(--pink)'}">${t.tipo === 'entrada' ? '+' : '-'}${fmt(t.valor)}</div>
+    ${!state.selectMode ? `
+      <button class="trash-btn" data-edit-tx="${t.id}">✏️</button>
+      <button class="trash-btn" data-remove-tx="${t.id}">🗑</button>
+    ` : ''}
+  </div>
+`;
+}
+
 function renderFinanceiro(c) {
   const tipo = window.__txFormTipo || 'saida';
   const txFiltrado = state.filtroTipo === 'todos' ? c.txMes : c.txMes.filter((t) => t.tipo === state.filtroTipo);
@@ -3485,46 +3535,7 @@ function renderFinanceiro(c) {
 
     ${txFiltrado.length === 0 ? `<div class="empty-state">Nenhum lançamento ${state.filtroTipo === 'entrada' ? 'de entrada' : state.filtroTipo === 'saida' ? 'de saída' : ''} neste mês ainda.</div>` : `
       <div class="tx-list">
-        ${txFiltrado.map((t) => {
-          if (state.editingTxId === t.id) {
-            const editTipo = window.__editTxTipo || t.tipo;
-            return `
-              <div class="form-card">
-                <div class="form-row">
-                  <button class="toggle-btn ${editTipo === 'entrada' ? 'active-teal' : ''}" data-edit-tipo="entrada">Entrada</button>
-                  <button class="toggle-btn ${editTipo === 'saida' ? 'active-pink' : ''}" data-edit-tipo="saida">Saída</button>
-                </div>
-                <input type="text" id="editTxValor-${t.id}" placeholder="Valor" value="${t.valor.toFixed(2).replace('.', ',')}" />
-                ${editTipo === 'saida'
-                  ? `<select id="editTxCategoria-${t.id}"><option value="">Selecione a categoria</option>${categoriaOptionsHtml(t.categoria)}</select>`
-                  : `<input type="text" id="editTxCategoria-${t.id}" placeholder="Categoria" value="${esc(t.categoria)}" />`}
-                <input type="text" id="editTxDescricao-${t.id}" placeholder="Descrição (opcional)" value="${esc(t.descricao || '')}" />
-                <input type="date" id="editTxData-${t.id}" value="${t.data}" />
-                <label class="checkbox-label"><input type="checkbox" id="editTxRecorrente-${t.id}" ${t.recorrente ? 'checked' : ''} /> 🔁 Repetir todos os meses</label>
-                <div class="form-row">
-                  <button class="confirm-btn" data-salvar-edit-tx="${t.id}">Salvar</button>
-                  <button class="toggle-btn" data-cancelar-edit-tx="${t.id}">Cancelar</button>
-                </div>
-              </div>
-            `;
-          }
-          const checked = state.selectedTxIds.has(t.id);
-          return `
-          <div class="tx-row">
-            ${state.selectMode ? `<input type="checkbox" class="tx-checkbox" data-select-tx="${t.id}" ${checked ? 'checked' : ''} />` : `<div class="tx-dot" style="background:${t.tipo === 'entrada' ? 'var(--teal)' : 'var(--pink)'}"></div>`}
-            <div style="flex:1">
-              <div class="tx-categoria">${esc(t.categoria)}${(t.recorrente || t.recorrenteOrigemId) ? ' 🔁' : ''}</div>
-              ${t.descricao ? `<div class="tx-desc">${esc(t.descricao)}</div>` : ''}
-              <div class="tx-date">${t.data}</div>
-            </div>
-            <div class="tx-valor" style="color:${t.tipo === 'entrada' ? 'var(--teal)' : 'var(--pink)'}">${t.tipo === 'entrada' ? '+' : '-'}${fmt(t.valor)}</div>
-            ${!state.selectMode ? `
-              <button class="trash-btn" data-edit-tx="${t.id}">✏️</button>
-              <button class="trash-btn" data-remove-tx="${t.id}">🗑</button>
-            ` : ''}
-          </div>
-        `;
-        }).join('')}
+        ${txFiltrado.map((t) => renderTxRow(t)).join('')}
       </div>
     `}
   `;
@@ -4899,6 +4910,13 @@ function attachFinanceiroHandlers(c) {
     });
   });
 
+  document.querySelectorAll('[data-toggle-lancamentos-cartao]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.toggleLancamentosCartao;
+      state.showLancamentosCartaoId = state.showLancamentosCartaoId === id ? null : id;
+      render();
+    });
+  });
   document.querySelectorAll('[data-abrir-compra-cartao]').forEach((btn) => {
     btn.addEventListener('click', () => { state.showCompraCartaoId = btn.dataset.abrirCompraCartao; render(); });
   });
