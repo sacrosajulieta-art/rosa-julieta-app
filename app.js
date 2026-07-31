@@ -5358,9 +5358,9 @@ function renderVendas(c) {
             return `
               <div class="form-hint" style="margin-top:2px">Esse produto tem cor cadastrada — informe quantas peças venderam de cada uma, pra baixar do estoque certo</div>
               ${vs.map((v) => `
-                <div class="form-row" style="justify-content:flex-start;gap:12px;align-items:center">
-                  <div style="font-size:13.5px;white-space:nowrap">${esc(v.nome)} <span style="color:var(--text-muted);margin-left:6px">(estoque: ${v.estoqueAtual})</span></div>
-                  <input type="text" id="vendaManualCorQtd-${v.id}" placeholder="Qtd" inputmode="numeric" style="max-width:70px;flex:none" />
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+                  <div style="flex:none;font-size:13.5px;white-space:nowrap">${esc(v.nome)} <span style="color:var(--text-muted);margin-left:6px">(estoque: ${v.estoqueAtual})</span></div>
+                  <input type="text" id="vendaManualCorQtd-${v.id}" placeholder="Qtd" inputmode="numeric" style="flex:none;width:70px;max-width:70px" />
                 </div>
               `).join('')}
             `;
