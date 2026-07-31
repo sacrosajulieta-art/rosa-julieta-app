@@ -5314,13 +5314,17 @@ function renderVendas(c) {
   detalheMes.forEach((v) => {
     const produto = state.produtos.find((p) => p.id === v.produtoId);
     const nome = produto ? produto.nome : '(produto removido)';
-    const atual = porProduto.get(v.produtoId) || { nome, quantidade: 0, valor: 0 };
+    const custoUnit = produto ? calcularCustoTotalProduto(produto.id) : 0;
+    const atual = porProduto.get(v.produtoId) || { nome, quantidade: 0, valor: 0, custo: 0 };
     atual.quantidade += v.quantidade;
     atual.valor += v.valor;
+    atual.custo += custoUnit * v.quantidade;
     porProduto.set(v.produtoId, atual);
   });
-  const rankingProdutos = [...porProduto.values()].sort((a, b) => b.quantidade - a.quantidade).slice(0, 15);
+  const rankingProdutos = [...porProduto.values()].map((p) => ({ ...p, lucro: p.valor - p.custo })).sort((a, b) => b.quantidade - a.quantidade).slice(0, 15);
   const maiorQtdRanking = Math.max(1, ...rankingProdutos.map((p) => p.quantidade));
+  const lucroMes = [...porProduto.values()].reduce((a, p) => a + (p.valor - p.custo), 0);
+  const temDadosDeLucro = detalheMes.length > 0;
 
   // evolução de faturamento nos últimos 6 meses (independe do mês selecionado no filtro)
   const mesesEvolucao = [5, 4, 3, 2, 1, 0].map((i) => addMonths(mesAtual, -i));
@@ -5441,7 +5445,13 @@ function renderVendas(c) {
         <div class="stat-label">Ticket médio</div>
         <div class="stat-value">${fmt(ticketMedio)}</div>
       </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:rgba(0,212,160,0.1)">📈</div>
+        <div class="stat-label">Lucro do mês${!temDadosDeLucro ? ' *' : ''}</div>
+        <div class="stat-value" style="color:${lucroMes >= 0 ? 'var(--teal)' : 'var(--red)'}">${fmt(lucroMes)}</div>
+      </div>
     </div>
+    ${!temDadosDeLucro ? `<div class="section-subtitle" style="margin-top:-8px;margin-bottom:8px">* Lucro calculado só a partir dos SKUs vinculados — vendas sem produto identificado não entram nessa conta ainda.</div>` : ''}
 
     <div class="section-title-wrap" style="margin-top:24px">
       <div><div class="section-title">Evolução — últimos 6 meses</div><div class="section-subtitle">Faturamento total de vendas por mês</div></div>
@@ -5491,7 +5501,7 @@ function renderVendas(c) {
               <div class="alert-dot" style="background:var(--pink)">${i + 1}</div>
               <div style="flex:1">
                 <div class="alert-name">${esc(p.nome)}</div>
-                <div class="alert-meta">${p.quantidade} peça(s) · ${fmt(p.valor)}</div>
+                <div class="alert-meta">${p.quantidade} peça(s) · ${fmt(p.valor)} · lucro <span style="color:${p.lucro >= 0 ? 'var(--teal)' : 'var(--red)'}">${fmt(p.lucro)}</span></div>
                 <div style="margin-top:6px;background:rgba(255,255,255,0.06);border-radius:6px;overflow:hidden;height:8px">
                   <div style="height:100%;width:${(p.quantidade / maiorQtdRanking) * 100}%;background:var(--pink);border-radius:6px"></div>
                 </div>
@@ -5549,13 +5559,18 @@ function attachVendasHandlers(c) {
       if (!quantidade || quantidade <= 0) { alert('Informe a quantidade.'); return; }
     }
     if (!valor || valor <= 0) { alert('Informe o valor da venda.'); return; }
+    const custoUnit = calcularCustoTotalProduto(produtoId);
+    const custoTotal = custoUnit * quantidade;
+    const lucro = valor - custoTotal;
     await lancarVendaManual({ produtoId, quantidade, valor, frete, canal, data, coresQtd });
     state.showVendaManualForm = false;
     window.__vendaManualProdutoId = null;
     await loadData();
+    let msg = `Lançado! ${quantidade} peça(s) por ${fmt(valor)} (${fmt(valor / quantidade)}/un).\n\nCusto: ${fmt(custoTotal)} (${fmt(custoUnit)}/un) · Lucro: ${fmt(lucro)} (${valor > 0 ? ((lucro / valor) * 100).toFixed(0) : 0}% de margem)`;
     if (frete > 0) {
-      alert(`Lançado! Venda: ${fmt(valor)} + Frete: ${fmt(frete)} = Total recebido: ${fmt(valor + frete)}.\n\nSó a venda entra no faturamento — o frete só passa pelo caixa.`);
+      msg += `\n\n+ Frete reembolsado: ${fmt(frete)} (não entra no faturamento nem no lucro de venda, só passa pelo caixa).`;
     }
+    alert(msg);
   });
 
   const toggleSkusPendentes = document.getElementById('toggleSkusPendentes');
