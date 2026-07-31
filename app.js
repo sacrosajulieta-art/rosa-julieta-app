@@ -45,6 +45,7 @@ const CATEGORIAS_SAIDA = {
     'Tecido', 'Aviamento', 'Corte e costura (terceirizado)', 'Embalagem',
     'Frete/Logística', 'Taxas de marketplace', 'Ads/Marketing',
     'Impostos sobre venda', 'Etiquetas/Tags', 'Reposição de estoque', 'Mão de obra — produção',
+    'Cartão de crédito',
   ],
 };
 const NATUREZA_POR_CATEGORIA = (() => {
