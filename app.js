@@ -3837,12 +3837,26 @@ function renderFichaTecnica(c) {
               </div>
               <div class="produto-meta">Custo base (tecido/corte + mão de obra): <strong style="color:var(--text)">${fmt(custoBase)}</strong></div>
               <div class="produto-meta" style="margin-top:4px">Custo total (com insumos): <strong style="color:var(--teal)">${fmt(custoTotal)}</strong></div>
-              ${p.precoVendaMedio > 0 ? `
-                <div class="produto-meta" style="margin-top:4px">Preço médio de venda: <strong style="color:var(--text)">${fmt(p.precoVendaMedio)}</strong> <span style="color:var(--text-muted);font-size:10px">(aprendido automaticamente do import de vendas)</span></div>
-                <div class="produto-meta" style="margin-top:4px">Lucro estimado por peça: <strong style="color:${(p.precoVendaMedio - custoTotal) >= 0 ? 'var(--teal)' : 'var(--red)'}">${fmt(p.precoVendaMedio - custoTotal)}</strong> <span style="color:var(--text-muted);font-size:10px">(${(((p.precoVendaMedio - custoTotal) / p.precoVendaMedio) * 100).toFixed(1)}% de margem)</span></div>
-              ` : `
-                <div class="form-hint" style="margin-top:6px">Preço de venda ainda não disponível — aparece sozinho depois do primeiro import de vendas desse SKU.</div>
-              `}
+              ${(() => {
+                const detalheProduto = state.vendasDetalhe.filter((v) => v.produtoId === p.id);
+                const detalheMkt = detalheProduto.filter((v) => v.plataformaId);
+                const detalheManual = detalheProduto.filter((v) => !v.plataformaId);
+                const qtdMkt = detalheMkt.reduce((a, v) => a + v.quantidade, 0);
+                const precoMkt = qtdMkt > 0 ? detalheMkt.reduce((a, v) => a + v.valor, 0) / qtdMkt : 0;
+                const qtdManual = detalheManual.reduce((a, v) => a + v.quantidade, 0);
+                const precoManual = qtdManual > 0 ? detalheManual.reduce((a, v) => a + v.valor, 0) / qtdManual : 0;
+                if (qtdMkt === 0 && qtdManual === 0) {
+                  return p.precoVendaMedio > 0 ? `
+                    <div class="produto-meta" style="margin-top:4px">Preço médio de venda: <strong style="color:var(--text)">${fmt(p.precoVendaMedio)}</strong> <span style="color:var(--text-muted);font-size:10px">(histórico antigo, antes da separação por canal)</span></div>
+                    <div class="produto-meta" style="margin-top:4px">Lucro estimado por peça: <strong style="color:${(p.precoVendaMedio - custoTotal) >= 0 ? 'var(--teal)' : 'var(--red)'}">${fmt(p.precoVendaMedio - custoTotal)}</strong> <span style="color:var(--text-muted);font-size:10px">(${(((p.precoVendaMedio - custoTotal) / p.precoVendaMedio) * 100).toFixed(1)}% de margem)</span></div>
+                  ` : `<div class="form-hint" style="margin-top:6px">Preço de venda ainda não disponível — aparece sozinho depois da primeira venda com esse SKU vinculado.</div>`;
+                }
+                return `
+                  <div class="form-hint" style="margin-top:6px;margin-bottom:2px">Preço e margem, separados por canal (marketplace tem taxa e frete embutidos no preço, atacado geralmente não):</div>
+                  ${qtdMkt > 0 ? `<div class="produto-meta">🛒 Marketplace: <strong style="color:var(--text)">${fmt(precoMkt)}</strong>/un (${qtdMkt} peças) · lucro <strong style="color:${(precoMkt - custoTotal) >= 0 ? 'var(--teal)' : 'var(--red)'}">${fmt(precoMkt - custoTotal)}</strong> (${(((precoMkt - custoTotal) / precoMkt) * 100).toFixed(0)}%)</div>` : ''}
+                  ${qtdManual > 0 ? `<div class="produto-meta" style="margin-top:2px">🧾 Atacado/manual: <strong style="color:var(--text)">${fmt(precoManual)}</strong>/un (${qtdManual} peças) · lucro <strong style="color:${(precoManual - custoTotal) >= 0 ? 'var(--teal)' : 'var(--red)'}">${fmt(precoManual - custoTotal)}</strong> (${(((precoManual - custoTotal) / precoManual) * 100).toFixed(0)}%)</div>` : ''}
+                `;
+              })()}
               ${itens.length > 0 ? `
                 <div class="prod-breakdown" style="margin-top:8px">
                   ${itens.map((item) => {
