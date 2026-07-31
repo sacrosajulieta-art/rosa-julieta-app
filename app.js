@@ -599,6 +599,22 @@ async function marcarTxConciliada(id, conciliado) {
 function variantesDoProduto(produtoId) {
   return state.variantes.filter((v) => v.produtoId === produtoId);
 }
+// último corte conhecido desse produto (mesmo antigo) — pra dar de referência de custo de
+// tecido sem precisar esperar um corte novo, útil pra quem já tem bastante estoque pronto
+function ultimoCorteDoProduto(produtoId) {
+  const itensDoProduto = state.ordensCorteItens.filter((i) => i.produtoId === produtoId);
+  if (itensDoProduto.length === 0) return null;
+  let melhorOrdem = null;
+  itensDoProduto.forEach((item) => {
+    const ordem = state.ordensCorte.find((o) => o.id === item.ordemId);
+    if (ordem && (!melhorOrdem || ordem.dataEnvio > melhorOrdem.dataEnvio)) melhorOrdem = ordem;
+  });
+  if (!melhorOrdem) return null;
+  const itensDaOrdem = state.ordensCorteItens.filter((i) => i.ordemId === melhorOrdem.id);
+  const totalPecas = itensDaOrdem.reduce((a, i) => a + i.quantidade, 0);
+  const custoTotal = melhorOrdem.valorTecido + melhorOrdem.valorCorte;
+  return { custoPorPeca: totalPecas > 0 ? custoTotal / totalPecas : 0, data: melhorOrdem.dataEnvio, cor: melhorOrdem.cor };
+}
 function estoqueEfetivo(produto) {
   const vs = variantesDoProduto(produto.id);
   return vs.length ? vs.reduce((a, v) => a + v.estoqueAtual, 0) : produto.estoqueAtual;
@@ -4681,6 +4697,18 @@ function renderEstoque(c) {
                 </div>
               `}
 
+              ${(() => {
+                if (p.custoUnitario >= 0.01) return '';
+                const ultimo = ultimoCorteDoProduto(p.id);
+                if (!ultimo) {
+                  return `<div class="form-hint" style="color:var(--amber);margin-top:6px">⚠️ Sem custo de tecido/corte cadastrado, e nenhum corte encontrado pra esse produto. O lucro dele vai sair errado até você preencher "Custo por unidade" na edição.</div>`;
+                }
+                return `
+                  <div class="form-hint" style="color:var(--amber);margin-top:6px">⚠️ Custo de tecido/corte zerado. Último corte encontrado: ${fmt(ultimo.custoPorPeca)}/peça (${esc(ultimo.cor)}, ${new Date(ultimo.data + 'T00:00:00').toLocaleDateString('pt-BR')}).</div>
+                  <button class="icon-btn-ghost" style="margin-top:4px" data-aplicar-ultimo-corte="${p.id}" data-valor="${ultimo.custoPorPeca.toFixed(2)}">💲 Aplicar ${fmt(ultimo.custoPorPeca)}/peça sem cortar de novo</button>
+                `;
+              })()}
+
               ${showVarForm ? `
                 <div class="entrada-box">
                   <div class="form-row">
@@ -6488,6 +6516,16 @@ function attachEstoqueHandlers(c) {
 
   const toggleForaDeLinha = document.getElementById('toggleForaDeLinha');
   if (toggleForaDeLinha) toggleForaDeLinha.addEventListener('click', () => { state.estoqueMostrarForaLinha = !state.estoqueMostrarForaLinha; render(); });
+
+  document.querySelectorAll('[data-aplicar-ultimo-corte]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const produto = state.produtos.find((p) => p.id === btn.dataset.aplicarUltimoCorte);
+      if (!produto) return;
+      const novoCusto = Number(btn.dataset.valor);
+      await updateProduto(produto.id, { nome: produto.nome, sku: produto.sku, estoqueAtual: produto.estoqueAtual, estoqueMinimo: produto.estoqueMinimo, custoUnitario: novoCusto, valorMaoObra: produto.valorMaoObra });
+      await loadData();
+    });
+  });
 
   document.querySelectorAll('[data-toggle-ativo]').forEach((btn) => {
     btn.addEventListener('click', async () => {
