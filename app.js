@@ -1379,6 +1379,16 @@ function coletarJornadaSemanal(prefixo) {
 
 // pega a jornada esperada pra um dia específico (0=domingo...6=sábado), olhando primeiro
 // a configuração por dia da semana; se não tiver, cai no padrão antigo (seg-sex fixo, sem sáb/dom)
+// formata uma diferença de horas decimal em texto tipo "13min", "1h20min" — mais legível
+// que hora fracionada (0.2h) pra diferenças de ponto
+function formatarHorasMin(horasDecimais) {
+  const totalMin = Math.round(Math.abs(horasDecimais) * 60);
+  const h = Math.floor(totalMin / 60);
+  const min = totalMin % 60;
+  if (h === 0) return `${min}min`;
+  if (min === 0) return `${h}h`;
+  return `${h}h${String(min).padStart(2, '0')}min`;
+}
 function jornadaEsperadaDoDia(funcionaria, dataStr) {
   const diaSemana = new Date(dataStr + 'T00:00:00').getDay();
   const config = (funcionaria.jornadaSemanal || {})[diaSemana];
@@ -4250,7 +4260,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
               <div class="produto-header">
                 <div><div class="produto-nome">${dia}</div></div>
                 ${calc && calc.completo ? `
-                  <div class="dre-td-num ${calc.diferenca >= 0 ? 'dre-positivo' : 'dre-negativo'}" style="font-size:13px">${calc.diferenca >= 0 ? '+' : ''}${calc.diferenca.toFixed(1)}h</div>
+                  <div class="dre-td-num ${calc.diferenca >= 0 ? 'dre-positivo' : 'dre-negativo'}" style="font-size:13px">${calc.diferenca >= 0 ? '+' : '-'}${formatarHorasMin(calc.diferenca)}</div>
                 ` : `<span style="font-size:11px;color:var(--amber)">⚠️ incompleto</span>`}
               </div>
               <div class="prod-breakdown">
@@ -4292,12 +4302,12 @@ function renderFuncionariaDetalhe(funcionariaId) {
         <div class="stat-card">
           <div class="stat-icon" style="background:rgba(0,212,160,0.1)">⏱️</div>
           <div class="stat-label">Horas extras no período</div>
-          <div class="stat-value" style="color:var(--teal)">+${totalExtra.toFixed(1)}h</div>
+          <div class="stat-value" style="color:var(--teal)">+${formatarHorasMin(totalExtra)}</div>
         </div>
         <div class="stat-card">
           <div class="stat-icon" style="background:rgba(255,71,87,0.1)">⏱️</div>
           <div class="stat-label">Horas faltantes no período</div>
-          <div class="stat-value" style="color:var(--red)">-${totalFalta.toFixed(1)}h</div>
+          <div class="stat-value" style="color:var(--red)">-${formatarHorasMin(totalFalta)}</div>
         </div>
       </div>
     ` : ''}
