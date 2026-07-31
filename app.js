@@ -612,6 +612,10 @@ async function updateVarianteEstoque(id, novoEstoque) {
   const { error } = await sb.from('variantes').update({ estoque_atual: Math.max(0, novoEstoque) }).eq('id', id);
   if (error) alert('Erro ao atualizar estoque da cor: ' + error.message);
 }
+async function updateVarianteSku(id, sku) {
+  const { error } = await sb.from('variantes').update({ sku_variante: sku || null }).eq('id', id);
+  if (error) alert('Erro ao atualizar SKU da cor: ' + error.message);
+}
 async function removeVariante(id) {
   const { error } = await sb.from('variantes').delete().eq('id', id);
   if (error) alert('Erro ao remover cor: ' + error.message);
@@ -999,18 +1003,32 @@ async function registrarSkusPendentes(pendentesMap) {
     }
   }
 }
-// vincula um SKU pendente a um produto: salva o SKU como apelido do produto (pra próximos
-// imports já entrarem automático) e aplica a baixa de estoque retroativa acumulada
-async function vincularSkuPendente(pendenteId, produtoId) {
+// vincula um SKU pendente a um produto (e, opcionalmente, a uma cor específica): salva o
+// SKU como apelido do produto ou da cor (pra próximos imports já entrarem automático) e
+// aplica a baixa de estoque retroativa acumulada no lugar certo
+async function vincularSkuPendente(pendenteId, produtoId, varianteId) {
   const pendente = state.vendasSkuPendentes.find((v) => v.id === pendenteId);
   const produto = state.produtos.find((p) => p.id === produtoId);
   if (!pendente || !produto) return;
-  const skusAtuais = (produto.sku || '').split(',').map((s) => s.trim()).filter(Boolean);
-  if (!skusAtuais.some((s) => s.toLowerCase() === pendente.sku.trim().toLowerCase())) {
-    skusAtuais.push(pendente.sku.trim());
-    await updateProduto(produtoId, { ...produto, sku: skusAtuais.join(', ') });
+  if (varianteId) {
+    const variante = state.variantes.find((v) => v.id === varianteId);
+    if (variante) {
+      const skusAtuaisCor = (variante.skuVariante || '').split(',').map((s) => s.trim()).filter(Boolean);
+      if (!skusAtuaisCor.some((s) => s.toLowerCase() === pendente.sku.trim().toLowerCase())) {
+        skusAtuaisCor.push(pendente.sku.trim());
+        await updateVarianteSku(varianteId, skusAtuaisCor.join(', '));
+      }
+      await updateVarianteEstoque(varianteId, variante.estoqueAtual - pendente.quantidade);
+    }
+  } else {
+    const skusAtuais = (produto.sku || '').split(',').map((s) => s.trim()).filter(Boolean);
+    if (!skusAtuais.some((s) => s.toLowerCase() === pendente.sku.trim().toLowerCase())) {
+      skusAtuais.push(pendente.sku.trim());
+      await updateProduto(produtoId, { ...produto, sku: skusAtuais.join(', ') });
+    }
   }
-  const novoEstoque = Math.max(0, produto.estoqueAtual - pendente.quantidade);
+  // estoque geral do produto só é mexido quando não tem cor envolvida (produto sem variante)
+  const novoEstoque = varianteId ? produto.estoqueAtual : Math.max(0, produto.estoqueAtual - pendente.quantidade);
   const novoTotalVendido = (produto.totalVendido || 0) + pendente.quantidade;
   await registrarVendaProduto(produtoId, novoEstoque, novoTotalVendido, pendente.ultimaData);
   await atualizarPrecoVendaMedio(produtoId, pendente.faturamento, pendente.quantidade);
@@ -1023,23 +1041,35 @@ async function removerSkuPendente(id) {
   if (error) alert('Erro ao remover SKU pendente: ' + error.message);
 }
 // venda manual (atacado, feira, venda direta etc) — mesma lógica de baixa de estoque
-// do import, só que lançada na mão em vez de vir de uma planilha
-async function lancarVendaManual({ produtoId, quantidade, valor, canal, data }) {
+// do import, só que lançada na mão em vez de vir de uma planilha. Se o produto tem cor
+// cadastrada, baixa do estoque de cada cor (coresQtd), senão baixa do estoque geral do produto
+async function lancarVendaManual({ produtoId, quantidade, valor, canal, data, coresQtd }) {
   const produto = state.produtos.find((p) => p.id === produtoId);
   if (!produto) return;
   const canalLabel = (canal || '').trim() || 'Venda direta';
+  const vs = variantesDoProduto(produtoId);
+  const qtdTotal = vs.length > 0 ? Object.values(coresQtd || {}).reduce((a, n) => a + n, 0) : quantidade;
   await addTx({
     tipo: 'entrada', valor, categoria: `Venda ${canalLabel}`,
-    descricao: `${produto.nome} x${quantidade}`, data,
+    descricao: `${produto.nome} x${qtdTotal}`, data,
   });
-  const novoEstoque = Math.max(0, produto.estoqueAtual - quantidade);
-  const novoTotalVendido = (produto.totalVendido || 0) + quantidade;
-  await registrarVendaProduto(produtoId, novoEstoque, novoTotalVendido, data);
-  await atualizarPrecoVendaMedio(produtoId, valor, quantidade);
-  await baixarEstoquePorFichaTecnica(produtoId, quantidade, data);
+  if (vs.length > 0) {
+    for (const v of vs) {
+      const qtdCor = coresQtd?.[v.id] || 0;
+      if (qtdCor > 0) await updateVarianteEstoque(v.id, v.estoqueAtual - qtdCor);
+    }
+    const novoTotalVendido = (produto.totalVendido || 0) + qtdTotal;
+    await registrarVendaProduto(produtoId, produto.estoqueAtual, novoTotalVendido, data);
+  } else {
+    const novoEstoque = Math.max(0, produto.estoqueAtual - qtdTotal);
+    const novoTotalVendido = (produto.totalVendido || 0) + qtdTotal;
+    await registrarVendaProduto(produtoId, novoEstoque, novoTotalVendido, data);
+  }
+  await atualizarPrecoVendaMedio(produtoId, valor, qtdTotal);
+  await baixarEstoquePorFichaTecnica(produtoId, qtdTotal, data);
   await addVendasDetalheBatch([{
     produtoId, plataformaId: null, plataformaNome: canalLabel,
-    sku: (produto.sku || '').split(',')[0]?.trim() || null, quantidade, valor, data,
+    sku: (produto.sku || '').split(',')[0]?.trim() || null, quantidade: qtdTotal, valor, data,
   }]);
 }
 async function updateProduto(id, p) {
@@ -4609,6 +4639,7 @@ function renderEstoque(c) {
                   ${vs.map((v) => `
                     <div class="variante-row">
                       <span class="variante-nome">${esc(v.nome)}</span>
+                      <input type="text" class="variante-sku-input" value="${esc(v.skuVariante || '')}" data-var-sku-editar="${v.id}" placeholder="SKU da cor" style="width:110px;font-size:12px" />
                       <button class="step-btn" data-var-step="-1" data-variante="${v.id}" data-atual="${v.estoqueAtual}">-</button>
                       <input type="text" class="variante-qtd-input" inputmode="numeric" value="${v.estoqueAtual}" data-var-editar="${v.id}" data-atual="${v.estoqueAtual}" placeholder="ex: +63" style="width:52px;text-align:center;padding:6px 4px" />
                       <button class="step-btn" data-var-step="1" data-variante="${v.id}" data-atual="${v.estoqueAtual}">+</button>
@@ -5310,9 +5341,23 @@ function renderVendas(c) {
         <div class="form-hint">Pra vendas fora de marketplace (atacado, feira, venda direta etc). Lança a entrada no Financeiro, baixa o estoque do produto e entra no ranking/comparação dessa aba.</div>
         <select id="vendaManualProduto">
           <option value="">Selecione o produto...</option>
-          ${state.produtos.filter((p) => p.ativo !== false).map((p) => `<option value="${p.id}">${esc(p.nome)}${p.sku ? ' — ' + esc(p.sku) : ''}</option>`).join('')}
+          ${state.produtos.filter((p) => p.ativo !== false).map((p) => `<option value="${p.id}" ${window.__vendaManualProdutoId === p.id ? 'selected' : ''}>${esc(p.nome)}${p.sku ? ' — ' + esc(p.sku) : ''}</option>`).join('')}
         </select>
-        <input type="text" id="vendaManualQtd" placeholder="Quantidade" inputmode="numeric" />
+        ${(() => {
+          const vs = window.__vendaManualProdutoId ? variantesDoProduto(window.__vendaManualProdutoId) : [];
+          if (vs.length > 0) {
+            return `
+              <div class="form-hint" style="margin-top:2px">Esse produto tem cor cadastrada — informe quantas peças venderam de cada uma, pra baixar do estoque certo</div>
+              ${vs.map((v) => `
+                <div class="form-row">
+                  <div style="flex:1;display:flex;align-items:center;font-size:13.5px">${esc(v.nome)} <span style="color:var(--text-muted);margin-left:6px">(estoque: ${v.estoqueAtual})</span></div>
+                  <input type="text" id="vendaManualCorQtd-${v.id}" placeholder="Qtd" inputmode="numeric" style="max-width:90px" />
+                </div>
+              `).join('')}
+            `;
+          }
+          return `<input type="text" id="vendaManualQtd" placeholder="Quantidade" inputmode="numeric" />`;
+        })()}
         <input type="text" id="vendaManualValor" placeholder="Valor total da venda (R$)" />
         <input type="text" id="vendaManualCanal" placeholder="Canal (ex: Atacado, Feira, Venda direta)" />
         <input type="date" id="vendaManualData" value="${todayStr()}" />
@@ -5351,8 +5396,14 @@ function renderVendas(c) {
                 </div>
                 <div class="form-row" style="margin-top:8px">
                   <select id="vincularSkuProduto-${v.id}" style="flex:1">
-                    <option value="">Selecione o produto...</option>
-                    ${state.produtos.map((p) => `<option value="${p.id}">${esc(p.nome)}${p.sku ? ' — ' + esc(p.sku) : ''}</option>`).join('')}
+                    <option value="">Selecione o produto (e a cor, se tiver)...</option>
+                    ${state.produtos.map((p) => {
+                      const vs = variantesDoProduto(p.id);
+                      if (vs.length > 0) {
+                        return vs.map((variante) => `<option value="${p.id}|${variante.id}">${esc(p.nome)} — ${esc(variante.nome)}</option>`).join('');
+                      }
+                      return `<option value="${p.id}">${esc(p.nome)}${p.sku ? ' — ' + esc(p.sku) : ''}</option>`;
+                    }).join('')}
                   </select>
                   <button class="confirm-btn" data-vincular-sku="${v.id}">Vincular</button>
                   <button class="trash-btn" data-remover-sku-pendente="${v.id}" title="Ignorar esse SKU">🗑</button>
@@ -5462,19 +5513,34 @@ function attachVendasHandlers(c) {
   const toggleVendaManual = document.getElementById('toggleVendaManual');
   if (toggleVendaManual) toggleVendaManual.addEventListener('click', () => { state.showVendaManualForm = !state.showVendaManualForm; render(); });
   const cancelarVendaManual = document.getElementById('cancelarVendaManual');
-  if (cancelarVendaManual) cancelarVendaManual.addEventListener('click', () => { state.showVendaManualForm = false; render(); });
+  if (cancelarVendaManual) cancelarVendaManual.addEventListener('click', () => { state.showVendaManualForm = false; window.__vendaManualProdutoId = null; render(); });
+  const vendaManualProdutoSelect = document.getElementById('vendaManualProduto');
+  if (vendaManualProdutoSelect) vendaManualProdutoSelect.addEventListener('change', (e) => { window.__vendaManualProdutoId = e.target.value; render(); });
   const salvarVendaManual = document.getElementById('salvarVendaManual');
   if (salvarVendaManual) salvarVendaManual.addEventListener('click', async () => {
     const produtoId = document.getElementById('vendaManualProduto').value;
-    const quantidade = Number(document.getElementById('vendaManualQtd').value);
     const valor = parseBRNumber(document.getElementById('vendaManualValor').value);
     const canal = document.getElementById('vendaManualCanal').value;
     const data = document.getElementById('vendaManualData').value || todayStr();
     if (!produtoId) { alert('Selecione o produto.'); return; }
-    if (!quantidade || quantidade <= 0) { alert('Informe a quantidade.'); return; }
+    const vs = variantesDoProduto(produtoId);
+    let quantidade = 0;
+    let coresQtd = {};
+    if (vs.length > 0) {
+      vs.forEach((v) => {
+        const qtdCor = Number(document.getElementById(`vendaManualCorQtd-${v.id}`)?.value) || 0;
+        coresQtd[v.id] = qtdCor;
+        quantidade += qtdCor;
+      });
+      if (quantidade <= 0) { alert('Informe a quantidade vendida de pelo menos uma cor.'); return; }
+    } else {
+      quantidade = Number(document.getElementById('vendaManualQtd').value);
+      if (!quantidade || quantidade <= 0) { alert('Informe a quantidade.'); return; }
+    }
     if (!valor || valor <= 0) { alert('Informe o valor total da venda.'); return; }
-    await lancarVendaManual({ produtoId, quantidade, valor, canal, data });
+    await lancarVendaManual({ produtoId, quantidade, valor, canal, data, coresQtd });
     state.showVendaManualForm = false;
+    window.__vendaManualProdutoId = null;
     await loadData();
   });
 
@@ -5483,9 +5549,10 @@ function attachVendasHandlers(c) {
   document.querySelectorAll('[data-vincular-sku]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const pendenteId = btn.dataset.vincularSku;
-      const produtoId = document.getElementById(`vincularSkuProduto-${pendenteId}`).value;
-      if (!produtoId) { alert('Selecione o produto antes de vincular.'); return; }
-      await vincularSkuPendente(pendenteId, produtoId);
+      const valorSelecionado = document.getElementById(`vincularSkuProduto-${pendenteId}`).value;
+      if (!valorSelecionado) { alert('Selecione o produto antes de vincular.'); return; }
+      const [produtoId, varianteId] = valorSelecionado.split('|');
+      await vincularSkuPendente(pendenteId, produtoId, varianteId || null);
     });
   });
   document.querySelectorAll('[data-remover-sku-pendente]').forEach((btn) => {
@@ -5513,14 +5580,25 @@ function attachVendasHandlers(c) {
     const plataforma = state.plataformas.find((p) => p.id === plataformaId);
     const dataArquivo = guessDataFromFilename(file.name);
 
-    // mapa de SKU (minúsculo, sem espaço nas pontas) -> produto
-    // cada produto pode ter vários SKUs separados por vírgula (ex: "TOP-JACK, TOP-JACKK")
+    // mapa de SKU (minúsculo, sem espaço nas pontas) -> { produto, variante }
+    // cada produto pode ter vários SKUs separados por vírgula (ex: "TOP-JACK, TOP-JACKK"),
+    // e cada cor também pode ter os seus próprios SKUs — quando bate com o SKU de uma cor
+    // específica, a baixa vai pro estoque daquela cor em vez do estoque geral do produto
     const skuMap = new Map();
     state.produtos.forEach((p) => {
       if (!p.sku) return;
       p.sku.split(',').forEach((s) => {
         const key = s.trim().toLowerCase();
-        if (key) skuMap.set(key, p);
+        if (key) skuMap.set(key, { produto: p, variante: null });
+      });
+    });
+    state.variantes.forEach((v) => {
+      if (!v.skuVariante) return;
+      const produto = state.produtos.find((p) => p.id === v.produtoId);
+      if (!produto) return;
+      v.skuVariante.split(',').forEach((s) => {
+        const key = s.trim().toLowerCase();
+        if (key) skuMap.set(key, { produto, variante: v });
       });
     });
 
@@ -5586,13 +5664,19 @@ function attachVendasHandlers(c) {
       const sku = guessSkuField(row);
       if (sku) {
         temSku = true;
-        const produto = skuMap.get(sku.trim().toLowerCase());
+        const match = skuMap.get(sku.trim().toLowerCase());
         const qtd = guessQuantidadeField(row);
-        if (produto) {
-          const atual = deducoes.get(produto.id) || { qtd: 0, ultimaData: dataLinha, faturamento: 0 };
+        if (match) {
+          const { produto, variante } = match;
+          const atual = deducoes.get(produto.id) || { qtd: 0, ultimaData: dataLinha, faturamento: 0, porVariante: new Map(), semVariante: 0 };
           atual.qtd += qtd;
           atual.faturamento += valor;
           if (dataLinha > atual.ultimaData) atual.ultimaData = dataLinha;
+          if (variante) {
+            atual.porVariante.set(variante.id, (atual.porVariante.get(variante.id) || 0) + qtd);
+          } else {
+            atual.semVariante += qtd;
+          }
           deducoes.set(produto.id, atual);
 
           const chaveDetalhe = `${produto.id}|${plataformaLinha ? plataformaLinha.id : ''}|${dataLinha}`;
@@ -5625,16 +5709,32 @@ function attachVendasHandlers(c) {
     if (skusNaoEncontrados.size) await registrarSkusPendentes(skusNaoEncontrados);
 
     // aplica baixa de estoque + soma no total vendido + atualiza preço médio de venda
+    let unidadesCorAmbigua = 0;
     for (const [produtoId, info] of deducoes.entries()) {
       const produto = state.produtos.find((p) => p.id === produtoId);
-      if (produto) {
-        const novoEstoque = Math.max(0, produto.estoqueAtual - info.qtd);
-        const novoTotalVendido = (produto.totalVendido || 0) + info.qtd;
-        await registrarVendaProduto(produtoId, novoEstoque, novoTotalVendido, info.ultimaData);
-        await atualizarPrecoVendaMedio(produtoId, info.faturamento, info.qtd);
-        // se o SKU vendido tem ficha técnica (ex: um kit), desconta insumos e produtos componentes também
-        await baixarEstoquePorFichaTecnica(produtoId, info.qtd, info.ultimaData);
+      if (!produto) continue;
+      const vs = variantesDoProduto(produtoId);
+      // baixa de cada cor identificada pelo SKU
+      for (const [varianteId, qtdCor] of info.porVariante.entries()) {
+        const variante = state.variantes.find((v) => v.id === varianteId);
+        if (variante) await updateVarianteEstoque(varianteId, variante.estoqueAtual - qtdCor);
       }
+      // parte que bateu só no SKU genérico do produto (não numa cor específica)
+      let novoEstoque = produto.estoqueAtual;
+      if (info.semVariante > 0) {
+        if (vs.length === 0) {
+          novoEstoque = Math.max(0, produto.estoqueAtual - info.semVariante);
+        } else {
+          // produto tem cor cadastrada mas o SKU que bateu foi o genérico — não dá pra saber
+          // de qual cor descontar, então não mexe no estoque de nenhuma cor pra não errar
+          unidadesCorAmbigua += info.semVariante;
+        }
+      }
+      const novoTotalVendido = (produto.totalVendido || 0) + info.qtd;
+      await registrarVendaProduto(produtoId, novoEstoque, novoTotalVendido, info.ultimaData);
+      await atualizarPrecoVendaMedio(produtoId, info.faturamento, info.qtd);
+      // se o SKU vendido tem ficha técnica (ex: um kit), desconta insumos e produtos componentes também
+      await baixarEstoquePorFichaTecnica(produtoId, info.qtd, info.ultimaData);
     }
 
     // conta pedidos por plataforma (pedidos únicos onde tem ID; fallback pra contagem de
@@ -5675,6 +5775,9 @@ function attachVendasHandlers(c) {
     }
     if (temSku) {
       resumo += `\n${deducoes.size} produto(s) com estoque baixado automaticamente.`;
+      if (unidadesCorAmbigua > 0) {
+        resumo += `\n\n⚠️ ${unidadesCorAmbigua} peça(s) venderam com um SKU que identifica o produto mas não a cor específica — o estoque geral não foi mexido pra não descontar da cor errada. Cadastre o SKU de cada cor (em Estoque, no produto) pra isso parar de acontecer.`;
+      }
       if (skusNaoEncontrados.size) {
         resumo += `\n\nSKUs não encontrados no cadastro (${skusNaoEncontrados.size}) ficaram pendentes de vinculação — vá em Vendas > SKUs pendentes de vincular pra associar ao produto certo (a baixa de estoque é aplicada assim que você vincular).`;
       }
@@ -6442,6 +6545,13 @@ function attachEstoqueHandlers(c) {
       await loadData();
     };
     input.addEventListener('change', salvar);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') input.blur(); });
+  });
+  document.querySelectorAll('[data-var-sku-editar]').forEach((input) => {
+    input.addEventListener('change', async () => {
+      await updateVarianteSku(input.dataset.varSkuEditar, input.value.trim());
+      await loadData();
+    });
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') input.blur(); });
   });
   document.querySelectorAll('[data-remover-variante]').forEach((btn) => {
