@@ -429,7 +429,7 @@ async function loadData() {
   state.insumoPlataformaQtd = (insumoPlataformaQtd || []).map((q) => ({ id: q.id, insumoId: q.insumo_id, plataformaId: q.plataforma_id, quantidade: Number(q.quantidade) }));
   state.funcionarias = (funcionarias || []).map((f) => ({ id: f.id, nome: f.nome, pin: f.pin, ativa: f.ativa, jornadaEntrada: (f.jornada_entrada || '08:00').slice(0, 5), jornadaSaidaAlmoco: (f.jornada_saida_almoco || '12:00').slice(0, 5), jornadaVoltaAlmoco: (f.jornada_volta_almoco || '13:00').slice(0, 5), jornadaSaida: (f.jornada_saida || '17:00').slice(0, 5), valorHora: Number(f.valor_hora || 0), dataAdmissao: f.data_admissao || null, jornadaSemanal: f.jornada_semanal || {}, percentualHoraExtra: Number(f.percentual_hora_extra != null ? f.percentual_hora_extra : 50), modoCompensacaoPadrao: f.modo_compensacao_padrao || 'dinheiro' }));
   state.feriasTiradas = (feriasTiradas || []).map((v) => ({ id: v.id, funcionariaId: v.funcionaria_id, dataInicio: v.data_inicio, dataFim: v.data_fim }));
-  state.pontos = (pontos || []).map((p) => ({ id: p.id, funcionariaId: p.funcionaria_id, data: p.data, tipo: p.tipo, horario: p.horario }));
+  state.pontos = (pontos || []).map((p) => ({ id: p.id, funcionariaId: p.funcionaria_id, data: p.data, tipo: p.tipo, horario: p.horario, origem: p.origem || 'propria' }));
   state.solicitacoesPonto = (solicitacoesPonto || []).map((s) => ({ id: s.id, funcionariaId: s.funcionaria_id, data: s.data, tipo: s.tipo, horarioSolicitado: s.horario_solicitado, motivo: s.motivo || '', status: s.status, createdAt: s.created_at }));
   state.horasExtrasLiquidadas = (horasExtrasLiquidadas || []).map((h) => ({ id: h.id, funcionariaId: h.funcionaria_id, data: h.data, horas: Number(h.horas), modo: h.modo, valorPago: h.valor_pago != null ? Number(h.valor_pago) : null }));
   state.bancoHorasLancamentos = (bancoHorasLancamentos || []).map((b) => ({ id: b.id, funcionariaId: b.funcionaria_id, data: b.data, tipo: b.tipo, horas: Number(b.horas), descricao: b.descricao || '' }));
@@ -1236,12 +1236,12 @@ async function removeFuncionaria(id) {
 async function registrarPonto(funcionariaId, tipo) {
   const agora = new Date();
   const { error } = await sb.from('pontos').insert({
-    funcionaria_id: funcionariaId, data: todayStr(), tipo, horario: agora.toISOString(),
+    funcionaria_id: funcionariaId, data: todayStr(), tipo, horario: agora.toISOString(), origem: 'propria',
   });
   if (error) alert('Erro ao bater ponto: ' + error.message);
 }
 async function updatePonto(id, horarioISO) {
-  const { error } = await sb.from('pontos').update({ horario: horarioISO }).eq('id', id);
+  const { error } = await sb.from('pontos').update({ horario: horarioISO, origem: 'manual' }).eq('id', id);
   if (error) alert('Erro ao corrigir ponto: ' + error.message);
 }
 async function removePonto(id) {
@@ -1460,7 +1460,7 @@ async function addSolicitacaoPonto(funcionariaId, data, tipo, horarioISO, motivo
 }
 async function aprovarSolicitacaoPonto(solicitacao) {
   const { error: errPonto } = await sb.from('pontos').insert({
-    funcionaria_id: solicitacao.funcionariaId, data: solicitacao.data, tipo: solicitacao.tipo, horario: solicitacao.horarioSolicitado,
+    funcionaria_id: solicitacao.funcionariaId, data: solicitacao.data, tipo: solicitacao.tipo, horario: solicitacao.horarioSolicitado, origem: 'solicitacao',
   });
   if (errPonto) { alert('Erro ao criar a batida: ' + errPonto.message); return; }
   const { error } = await sb.from('solicitacoes_ponto').update({ status: 'aprovado', respondido_em: new Date().toISOString() }).eq('id', solicitacao.id);
@@ -4254,16 +4254,23 @@ function renderFuncionariaDetalhe(funcionariaId) {
                 ` : `<span style="font-size:11px;color:var(--amber)">⚠️ incompleto</span>`}
               </div>
               <div class="prod-breakdown">
-                ${pontosDoDia.map((p) => `
+                ${pontosDoDia.map((p) => {
+                  const origemBadge = {
+                    manual: '<span style="color:var(--amber);font-size:10px;font-weight:700;margin-left:6px">🔧 MANUAL</span>',
+                    solicitacao: '<span style="color:var(--teal);font-size:10px;font-weight:700;margin-left:6px">📝 SOLICITAÇÃO</span>',
+                    propria: '<span style="color:var(--text-muted);font-size:10px;margin-left:6px">📱 ela mesma</span>',
+                  }[p.origem || 'propria'];
+                  return `
                   <div class="prod-breakdown-item">
-                    <span>${LABEL_PONTO[p.tipo] || p.tipo}</span>
+                    <span>${LABEL_PONTO[p.tipo] || p.tipo}${origemBadge}</span>
                     <span>
                       ${new Date(p.horario).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                       <button class="trash-btn" style="padding:2px" data-editar-ponto="${p.id}" data-horario="${p.horario}">✏️</button>
                       <button class="trash-btn" style="padding:2px" data-remover-ponto="${p.id}">🗑</button>
                     </span>
                   </div>
-                `).join('')}
+                `;
+                }).join('')}
               </div>
               ${state.editingPontoId && pontosDoDia.some((p) => p.id === state.editingPontoId) ? `
                 <div class="entrada-box">
@@ -4394,7 +4401,7 @@ function attachRHHandlers(c) {
         .filter((l) => l.hora);
       if (linhas.length === 0) { alert('Preencha pelo menos um horário.'); return; }
       const rows = linhas.map((l) => ({
-        funcionaria_id: funcionariaId, data, tipo: l.tipo, horario: new Date(`${data}T${l.hora}:00`).toISOString(),
+        funcionaria_id: funcionariaId, data, tipo: l.tipo, horario: new Date(`${data}T${l.hora}:00`).toISOString(), origem: 'manual',
       }));
       const { error } = await sb.from('pontos').insert(rows);
       if (error) { alert('Erro ao lançar ponto: ' + error.message); return; }
