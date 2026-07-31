@@ -599,17 +599,22 @@ async function marcarTxConciliada(id, conciliado) {
 function variantesDoProduto(produtoId) {
   return state.variantes.filter((v) => v.produtoId === produtoId);
 }
-// último corte conhecido desse produto (mesmo antigo) — pra dar de referência de custo de
-// tecido sem precisar esperar um corte novo, útil pra quem já tem bastante estoque pronto
+// último corte PRINCIPAL conhecido desse produto (mesmo antigo) — pra dar de referência de
+// custo de tecido sem precisar esperar um corte novo, útil pra quem já tem bastante estoque
+// pronto. Cortes de retalho ficam de fora de propósito: o tecido deles já foi pago no corte
+// principal, então o custo por peça sai artificialmente baixo e não representa o custo real
 function ultimoCorteDoProduto(produtoId) {
   const itensDoProduto = state.ordensCorteItens.filter((i) => i.produtoId === produtoId);
   if (itensDoProduto.length === 0) return null;
   let melhorOrdem = null;
+  let existeApenasRetalho = false;
   itensDoProduto.forEach((item) => {
     const ordem = state.ordensCorte.find((o) => o.id === item.ordemId);
-    if (ordem && (!melhorOrdem || ordem.dataEnvio > melhorOrdem.dataEnvio)) melhorOrdem = ordem;
+    if (!ordem) return;
+    if (ordem.tipo === 'retalho') { existeApenasRetalho = true; return; }
+    if (!melhorOrdem || ordem.dataEnvio > melhorOrdem.dataEnvio) melhorOrdem = ordem;
   });
-  if (!melhorOrdem) return null;
+  if (!melhorOrdem) return existeApenasRetalho ? { apenasRetalho: true } : null;
   const itensDaOrdem = state.ordensCorteItens.filter((i) => i.ordemId === melhorOrdem.id);
   const totalPecas = itensDaOrdem.reduce((a, i) => a + i.quantidade, 0);
   const custoTotal = melhorOrdem.valorTecido + melhorOrdem.valorCorte;
@@ -4726,6 +4731,9 @@ function renderEstoque(c) {
                 const ultimo = ultimoCorteDoProduto(p.id);
                 if (!ultimo) {
                   return `<div class="form-hint" style="color:var(--amber);margin-top:6px">⚠️ Sem custo de tecido/corte cadastrado, e nenhum corte encontrado pra esse produto. O lucro dele vai sair errado até você preencher "Custo por unidade" na edição.</div>`;
+                }
+                if (ultimo.apenasRetalho) {
+                  return `<div class="form-hint" style="color:var(--amber);margin-top:6px">⚠️ Custo de tecido/corte zerado. Só encontrei corte de retalho pra esse produto — o custo dele não serve de referência (o tecido já tinha sido pago no corte principal). Preencha "Custo por unidade" manualmente na edição.</div>`;
                 }
                 return `
                   <div class="form-hint" style="color:var(--amber);margin-top:6px">⚠️ Custo de tecido/corte zerado. Último corte encontrado: ${fmt(ultimo.custoPorPeca)}/peça (${esc(ultimo.cor)}, ${new Date(ultimo.data + 'T00:00:00').toLocaleDateString('pt-BR')}).</div>
