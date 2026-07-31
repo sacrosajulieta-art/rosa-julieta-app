@@ -358,11 +358,12 @@ const state = {
   showCompraCartaoId: null,
   showLancamentosCartaoId: null,
   vendasSkuPendentes: [],
+  vendasDetalhe: [],
 };
 
 // ==================== DATA LAYER ====================
 async function loadData() {
-  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }, { data: feriasTiradas, error: e16 }, { data: solicitacoesPonto, error: e17 }, { data: horasExtrasLiquidadas, error: e18 }, { data: bancoHorasLancamentos, error: e19 }, { data: emprestimos, error: e20 }, { data: emprestimoParcelas, error: e21 }, { data: cartoesCredito, error: e22 }, { data: vendasSkuPendentes, error: e23 }] = await Promise.all([
+  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }, { data: feriasTiradas, error: e16 }, { data: solicitacoesPonto, error: e17 }, { data: horasExtrasLiquidadas, error: e18 }, { data: bancoHorasLancamentos, error: e19 }, { data: emprestimos, error: e20 }, { data: emprestimoParcelas, error: e21 }, { data: cartoesCredito, error: e22 }, { data: vendasSkuPendentes, error: e23 }, { data: vendasDetalhe, error: e24 }] = await Promise.all([
     sb.from('transacoes').select('*').order('data', { ascending: false }),
     sb.from('produtos').select('*').order('created_at', { ascending: false }),
     sb.from('plataformas').select('*').order('nome', { ascending: true }),
@@ -386,6 +387,7 @@ async function loadData() {
     sb.from('emprestimo_parcelas').select('*').order('numero', { ascending: true }),
     sb.from('cartoes_credito').select('*').order('nome', { ascending: true }),
     sb.from('vendas_sku_pendentes').select('*').order('created_at', { ascending: false }),
+    sb.from('vendas_detalhe').select('*').order('data', { ascending: false }).limit(8000),
   ]);
   if (e1) console.error(e1);
   if (e2) console.error(e2);
@@ -410,6 +412,7 @@ async function loadData() {
   if (e21) console.error(e21);
   if (e22) console.error(e22);
   if (e23) console.error(e23);
+  if (e24) console.error(e24);
   state.tx = (tx || []).map(mapTxFromDb);
   state.produtos = (produtos || []).map(mapProdutoFromDb);
   state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0) }));
@@ -433,6 +436,7 @@ async function loadData() {
   state.emprestimoParcelas = (emprestimoParcelas || []).map((p) => ({ id: p.id, emprestimoId: p.emprestimo_id, numero: p.numero, valor: Number(p.valor), dataVencimento: p.data_vencimento, transacaoId: p.transacao_id || null }));
   state.cartoesCredito = (cartoesCredito || []).map((c) => ({ id: c.id, nome: c.nome, limite: Number(c.limite || 0), diaFechamento: c.dia_fechamento, diaVencimento: c.dia_vencimento, ativo: c.ativo !== false }));
   state.vendasSkuPendentes = (vendasSkuPendentes || []).map((v) => ({ id: v.id, sku: v.sku, quantidade: Number(v.quantidade), faturamento: Number(v.faturamento), ultimaData: v.ultima_data, plataformaNome: v.plataforma_nome || null }));
+  state.vendasDetalhe = (vendasDetalhe || []).map((v) => ({ id: v.id, produtoId: v.produto_id, plataformaId: v.plataforma_id, plataformaNome: v.plataforma_nome || null, sku: v.sku || null, quantidade: Number(v.quantidade), valor: Number(v.valor), data: v.data }));
   state.loading = false;
   render();
 }
@@ -483,6 +487,15 @@ async function addTxBatch(rows) {
     tipo: tx.tipo, valor: tx.valor, categoria: tx.categoria, natureza: tx.natureza || null, descricao: tx.descricao || null, data: tx.data, id_pedido: tx.idPedido || null,
   })));
   if (error) alert('Erro ao importar: ' + error.message);
+}
+// grava o detalhe de vendas por produto+plataforma+data de cada import — usado pra
+// alimentar o ranking de produtos e a comparação entre plataformas na aba Vendas
+async function addVendasDetalheBatch(rows) {
+  if (!rows.length) return;
+  const { error } = await sb.from('vendas_detalhe').insert(rows.map((v) => ({
+    produto_id: v.produtoId, plataforma_id: v.plataformaId || null, plataforma_nome: v.plataformaNome || null, sku: v.sku || null, quantidade: v.quantidade, valor: v.valor, data: v.data,
+  })));
+  if (error) console.error('Erro ao gravar detalhe de vendas: ' + error.message);
 }
 // cria N saídas parceladas (ex: compra no cartão em 3x) — cada parcela é uma "conta a
 // vencer" normal, na data certa; a última parcela absorve a diferença de arredondamento
@@ -1470,6 +1483,7 @@ function setupRealtime() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'insumos' }, loadData)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'distribuicoes' }, loadData)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'vendas_sku_pendentes' }, loadData)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'vendas_detalhe' }, loadData)
     .subscribe();
 }
 
@@ -3322,6 +3336,7 @@ function render() {
   const contentEl = document.getElementById('tabContent');
   if (state.tab === 'dashboard') contentEl.innerHTML = renderDashboard(c);
   else if (state.tab === 'financeiro') contentEl.innerHTML = renderFinanceiro(c);
+  else if (state.tab === 'vendas') contentEl.innerHTML = renderVendas(c);
   else if (state.tab === 'estoque') contentEl.innerHTML = renderEstoque(c);
   else if (state.tab === 'tecido') contentEl.innerHTML = renderMateriais(c);
   else if (state.tab === 'corte') contentEl.innerHTML = renderCorte(c);
@@ -3353,6 +3368,7 @@ function tabBtn(id, label, badge) {
 const TABS = {
   dashboard: { label: 'Dashboard' },
   financeiro: { label: 'Financeiro' },
+  vendas: { label: 'Vendas' },
   estoque: { label: 'Estoque' },
   tecido: { label: 'Materiais' },
   corte: { label: 'Corte' },
@@ -3361,7 +3377,7 @@ const TABS = {
   rh: { label: 'RH' },
   dre: { label: 'DRE' },
 };
-const TAB_ORDER_PADRAO = ['dashboard', 'financeiro', 'estoque', 'tecido', 'corte', 'producao', 'ficha', 'rh', 'dre'];
+const TAB_ORDER_PADRAO = ['dashboard', 'financeiro', 'vendas', 'estoque', 'tecido', 'corte', 'producao', 'ficha', 'rh', 'dre'];
 
 function getTabOrder() {
   let saved = [];
@@ -3477,7 +3493,6 @@ function renderFinanceiro(c) {
         <button class="icon-btn-ghost" id="toggleCartoes">💳 Cartões</button>
         <button class="icon-btn-ghost" id="toggleSelect">${state.selectMode ? '✕ Cancelar' : '☑️ Selecionar'}</button>
         <button class="icon-btn-ghost" id="exportCsv">💾 Exportar</button>
-        <button class="icon-btn-ghost" id="toggleUpload">📤 CSV</button>
         <button class="icon-btn" id="toggleTxForm">＋ Lançar</button>
       </div>
     </div>
@@ -3536,17 +3551,6 @@ function renderFinanceiro(c) {
     ${state.showCartoes ? renderCartoes(c) : ''}
 
     ${state.showResumoFinanceiro ? renderResumoFinanceiro(c) : ''}
-
-    ${state.showUpload ? `
-      <div class="form-card">
-        <div class="form-hint">Suba o relatório de vendas exportado (CSV ou Excel) do Shopee, Mercado Livre, Amazon ou TikTok Shop. Se o arquivo já identificar a plataforma por linha (ex: relatórios do Upseller), o sistema detecta sozinho. Senão, usa a opção selecionada abaixo pra tudo.</div>
-        <select id="uploadPlataforma">
-          <option value="">Nenhuma taxa (importar valor bruto)</option>
-          ${state.plataformas.map((p) => `<option value="${p.id}">${esc(p.nome)}${p.taxaPercentual > 0 || p.taxaFixa > 0 ? ` (${p.taxaPercentual}% + ${fmt(p.taxaFixa)})` : ''}</option>`).join('')}
-        </select>
-        <label class="file-label">📤 Escolher arquivo CSV ou Excel<input type="file" accept=".csv,.xlsx,.xls" id="csvInput" style="display:none" /></label>
-      </div>
-    ` : ''}
 
     ${state.showTxForm ? `
       <div class="form-card">
@@ -4463,7 +4467,6 @@ function renderEstoque(c) {
         ${renderControleColunas('estoque')}
         <button class="icon-btn-ghost" id="toggleForaDeLinha" style="${state.estoqueMostrarForaLinha ? 'background:rgba(154,156,168,0.2);color:var(--text)' : ''}">🚫 Fora de linha${foraDeLinhaCount > 0 ? ` (${foraDeLinhaCount})` : ''}</button>
         <button class="icon-btn-ghost" id="toggleProdutosParados">⏸️ Parados${c.produtosParados.length > 0 ? ` (${c.produtosParados.length})` : ''}</button>
-        <button class="icon-btn-ghost" id="toggleSkusPendentes" style="${state.vendasSkuPendentes.length > 0 ? 'background:rgba(255,182,39,0.15);border:1.5px solid var(--amber);color:var(--amber);font-weight:700' : ''}">🔗 SKUs pendentes${state.vendasSkuPendentes.length > 0 ? ` (${state.vendasSkuPendentes.length})` : ''}</button>
         <button class="icon-btn" id="toggleProdutoForm">＋ Produto</button>
       </div>
     </div>
@@ -4476,36 +4479,6 @@ function renderEstoque(c) {
         <option value="mais-vendidos" ${state.estoqueOrdenar === 'mais-vendidos' ? 'selected' : ''}>Mais vendidos</option>
       </select>
     </div>
-
-    ${state.showSkusPendentes ? `
-      <div class="form-card">
-        <div class="section-title" style="margin-bottom:2px">SKUs pendentes de vincular</div>
-        <div class="section-subtitle" style="margin-bottom:12px">Vieram em algum import de vendas mas não bateram com nenhum produto cadastrado. Vincule ao produto certo pra aplicar a baixa de estoque e já ficar automático nos próximos imports.</div>
-        ${state.vendasSkuPendentes.length === 0 ? `<div class="empty-state">Nenhum SKU pendente no momento 🎉</div>` : `
-          <div style="display:flex;flex-direction:column;gap:10px">
-            ${state.vendasSkuPendentes.map((v) => `
-              <div class="alert-card" style="border-color:var(--amber)55">
-                <div class="alert-card-row">
-                  <div class="alert-dot" style="background:var(--amber)"></div>
-                  <div style="flex:1">
-                    <div class="alert-name">${esc(v.sku)}</div>
-                    <div class="alert-meta">${v.quantidade} peça(s) vendida(s) · ${fmt(v.faturamento)}${v.plataformaNome ? ` · ${esc(v.plataformaNome)}` : ''} · última venda ${v.ultimaData ? new Date(v.ultimaData + 'T00:00:00').toLocaleDateString('pt-BR') : '—'}</div>
-                  </div>
-                </div>
-                <div class="form-row" style="margin-top:8px">
-                  <select id="vincularSkuProduto-${v.id}" style="flex:1">
-                    <option value="">Selecione o produto...</option>
-                    ${state.produtos.map((p) => `<option value="${p.id}">${esc(p.nome)}${p.sku ? ' — ' + esc(p.sku) : ''}</option>`).join('')}
-                  </select>
-                  <button class="confirm-btn" data-vincular-sku="${v.id}">Vincular</button>
-                  <button class="trash-btn" data-remover-sku-pendente="${v.id}" title="Ignorar esse SKU">🗑</button>
-                </div>
-              </div>
-            `).join('')}
-          </div>
-        `}
-      </div>
-    ` : ''}
 
     ${state.showProdutosParados ? `
       <div class="form-card">
@@ -4878,6 +4851,7 @@ function attachHandlers(c) {
     }));
   }
   if (state.tab === 'financeiro') attachFinanceiroHandlers(c);
+  if (state.tab === 'vendas') attachVendasHandlers(c);
   if (state.tab === 'estoque') attachEstoqueHandlers(c);
   if (state.tab === 'tecido' || state.tab === 'corte') attachTecidoHandlers(c);
   if (state.tab === 'producao') attachProducaoHandlers(c);
@@ -5052,13 +5026,6 @@ function attachFinanceiroHandlers(c) {
   const toggleContasAVencer = document.getElementById('toggleContasAVencer');
   if (toggleContasAVencer) toggleContasAVencer.addEventListener('click', () => { state.showContasAVencer = !state.showContasAVencer; render(); });
 
-  document.querySelectorAll('[data-marcar-pago]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      await marcarTxComoPago(btn.dataset.marcarPago);
-      await loadData();
-    });
-  });
-
   document.querySelectorAll('[data-conciliar-tx]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       await marcarTxConciliada(btn.dataset.conciliarTx, true);
@@ -5157,14 +5124,317 @@ function attachFinanceiroHandlers(c) {
     await loadData();
   });
 
-  const toggleUpload = document.getElementById('toggleUpload');
-  if (toggleUpload) toggleUpload.addEventListener('click', () => { state.showUpload = !state.showUpload; render(); });
-
   const toggleTxForm = document.getElementById('toggleTxForm');
   if (toggleTxForm) toggleTxForm.addEventListener('click', () => { state.showTxForm = !state.showTxForm; render(); });
 
   document.querySelectorAll('[data-tipo]').forEach((btn) => {
     btn.addEventListener('click', () => { window.__txFormTipo = btn.dataset.tipo; render(); });
+  });
+
+  const salvarTx = document.getElementById('salvarTx');
+  if (salvarTx) salvarTx.addEventListener('click', async () => {
+    const tipo = window.__txFormTipo || 'saida';
+    const valor = parseBRNumber(document.getElementById('txValor').value);
+    const categoria = document.getElementById('txCategoria').value;
+    const descricao = document.getElementById('txDescricao').value;
+    const data = document.getElementById('txData').value || todayStr();
+    const recorrente = document.getElementById('txRecorrente')?.checked || false;
+    const formaPagamento = tipo === 'saida' ? document.getElementById('txCartaoSelect')?.value : '';
+    const cartao = (formaPagamento && formaPagamento !== '__parcelado_sem_cartao__') ? state.cartoesCredito.find((cc) => cc.id === formaPagamento) : null;
+    const parceladoSemCartao = formaPagamento === '__parcelado_sem_cartao__';
+    const numParcelas = (cartao || parceladoSemCartao) ? (Number(document.getElementById('txNumParcelas').value) || 1) : 1;
+    if (!valor || !categoria) { alert('Preencha valor e categoria.'); return; }
+    if (parceladoSemCartao && (!numParcelas || numParcelas <= 1)) { alert('Informe um número de parcelas maior que 1, ou escolha "Outro".'); return; }
+    const natureza = tipo === 'saida' ? (NATUREZA_POR_CATEGORIA[categoria] || 'variavel') : null;
+    if (cartao) {
+      await criarSaidasCartao({ cartao, categoria, natureza, descricaoBase: descricao || categoria, valorTotal: valor, numParcelas, dataCompra: data });
+    } else if (parceladoSemCartao) {
+      await criarSaidasParceladas({ categoria, natureza, descricaoBase: descricao || categoria, valorTotal: valor, numParcelas, dataPrimeiraParcela: data });
+    } else {
+      await addTx({ tipo, valor, categoria, natureza, descricao, data, recorrente });
+    }
+    await loadData();
+    if (recorrente) { await garantirRecorrentes(); await loadData(); }
+    state.showTxForm = false;
+    window.__txFormTipo = 'saida';
+    render();
+  });
+
+  attachTxRowHandlers();
+}
+
+// listeners de uma linha de lançamento (marcar pago, editar, cancelar, salvar edição,
+// remover) — compartilhado entre a lista do Financeiro e a lista da aba Vendas, já que
+// as duas usam renderTxRow pros mesmos tipos de botão
+function attachTxRowHandlers() {
+  document.querySelectorAll('[data-marcar-pago]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      await marcarTxComoPago(btn.dataset.marcarPago);
+      await loadData();
+    });
+  });
+
+  document.querySelectorAll('[data-remove-tx]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      await removeTx(btn.dataset.removeTx);
+      await loadData();
+    });
+  });
+
+  document.querySelectorAll('[data-edit-tx]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.editingTxId = btn.dataset.editTx;
+      window.__editTxTipo = null;
+      render();
+    });
+  });
+  document.querySelectorAll('[data-cancelar-edit-tx]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.editingTxId = null; render(); });
+  });
+  document.querySelectorAll('[data-edit-tipo]').forEach((btn) => {
+    btn.addEventListener('click', () => { window.__editTxTipo = btn.dataset.editTipo; render(); });
+  });
+  document.querySelectorAll('[data-salvar-edit-tx]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.salvarEditTx;
+      const original = state.tx.find((t) => t.id === id);
+      const tipo = window.__editTxTipo || original.tipo;
+      const valor = parseBRNumber(document.getElementById(`editTxValor-${id}`).value);
+      const categoria = document.getElementById(`editTxCategoria-${id}`).value;
+      const descricao = document.getElementById(`editTxDescricao-${id}`).value;
+      const data = document.getElementById(`editTxData-${id}`).value || todayStr();
+      const recorrente = document.getElementById(`editTxRecorrente-${id}`)?.checked || false;
+      if (!valor || !categoria) { alert('Preencha valor e categoria.'); return; }
+      const natureza = tipo === 'saida' ? (NATUREZA_POR_CATEGORIA[categoria] || 'variavel') : null;
+      await updateTx(id, { tipo, valor, categoria, natureza, descricao, data, recorrente });
+      await loadData();
+      if (recorrente) { await garantirRecorrentes(); await loadData(); }
+      state.editingTxId = null;
+      window.__editTxTipo = null;
+      render();
+    });
+  });
+}
+
+// ---- Vendas ----
+const mesLabel = (mk) => {
+  const label = new Date(mk + '-01T00:00:00').toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' });
+  return label.replace('.', '').replace(/^\w/, (c) => c.toUpperCase());
+};
+function renderVendas(c) {
+  const mesAtual = state.selectedMonth;
+  const vendasMes = c.txMes.filter((t) => t.tipo === 'entrada' && t.categoria.startsWith('Venda'));
+  const faturamentoMes = vendasMes.reduce((a, t) => a + t.valor, 0);
+  const pedidosUnicosMes = new Set(vendasMes.filter((t) => t.idPedido).map((t) => t.idPedido.trim().toLowerCase()));
+  const qtdPedidosMes = pedidosUnicosMes.size > 0 ? pedidosUnicosMes.size : vendasMes.length;
+  const ticketMedio = qtdPedidosMes > 0 ? faturamentoMes / qtdPedidosMes : 0;
+
+  // comparação entre plataformas, no mês selecionado
+  const porPlataforma = new Map();
+  vendasMes.forEach((t) => {
+    const nome = t.categoria.replace(/^Venda\s*/, '').trim() || 'Sem plataforma';
+    const atual = porPlataforma.get(nome) || { faturamento: 0, pedidos: new Set(), linhas: 0 };
+    atual.faturamento += t.valor;
+    atual.linhas += 1;
+    if (t.idPedido) atual.pedidos.add(t.idPedido.trim().toLowerCase());
+    porPlataforma.set(nome, atual);
+  });
+  const comparacaoPlataformas = [...porPlataforma.entries()]
+    .map(([nome, info]) => {
+      const pedidos = info.pedidos.size > 0 ? info.pedidos.size : info.linhas;
+      return { nome, faturamento: info.faturamento, pedidos, ticketMedio: pedidos > 0 ? info.faturamento / pedidos : 0 };
+    })
+    .sort((a, b) => b.faturamento - a.faturamento);
+  const maiorFaturamentoPlataforma = Math.max(1, ...comparacaoPlataformas.map((p) => p.faturamento));
+
+  // ranking de produtos mais vendidos, no mês selecionado (usa vendas_detalhe, disponível a
+  // partir do momento em que essa função entrou no ar — imports antigos não têm esse detalhe)
+  const detalheMes = state.vendasDetalhe.filter((v) => v.data && monthKey(v.data) === mesAtual);
+  const porProduto = new Map();
+  detalheMes.forEach((v) => {
+    const produto = state.produtos.find((p) => p.id === v.produtoId);
+    const nome = produto ? produto.nome : '(produto removido)';
+    const atual = porProduto.get(v.produtoId) || { nome, quantidade: 0, valor: 0 };
+    atual.quantidade += v.quantidade;
+    atual.valor += v.valor;
+    porProduto.set(v.produtoId, atual);
+  });
+  const rankingProdutos = [...porProduto.values()].sort((a, b) => b.quantidade - a.quantidade).slice(0, 15);
+  const maiorQtdRanking = Math.max(1, ...rankingProdutos.map((p) => p.quantidade));
+
+  // evolução de faturamento nos últimos 6 meses (independe do mês selecionado no filtro)
+  const mesesEvolucao = [5, 4, 3, 2, 1, 0].map((i) => addMonths(mesAtual, -i));
+  const faturamentoPorMes = mesesEvolucao.map((mk) => ({
+    mes: mk,
+    total: state.tx.filter((t) => t.tipo === 'entrada' && t.categoria.startsWith('Venda') && monthKey(t.data) === mk).reduce((a, t) => a + t.valor, 0),
+  }));
+  const maiorFaturamentoMes = Math.max(1, ...faturamentoPorMes.map((m) => m.total));
+
+  const historicoOrdenado = [...vendasMes].sort((a, b) => b.data.localeCompare(a.data));
+
+  return `
+    <div class="section-title-wrap">
+      <div><div class="section-title">Vendas</div><div class="section-subtitle">Ranking, plataformas e histórico de pedidos</div></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="icon-btn-ghost" id="toggleSkusPendentes" style="${state.vendasSkuPendentes.length > 0 ? 'background:rgba(255,182,39,0.15);border:1.5px solid var(--amber);color:var(--amber);font-weight:700' : ''}">🔗 SKUs pendentes${state.vendasSkuPendentes.length > 0 ? ` (${state.vendasSkuPendentes.length})` : ''}</button>
+        <button class="icon-btn" id="toggleUpload">📤 Importar vendas</button>
+      </div>
+    </div>
+
+    <input type="month" class="month-input" id="vendasMonthSelect" value="${state.selectedMonth}" />
+
+    ${state.showUpload ? `
+      <div class="form-card">
+        <div class="form-hint">Suba o relatório de vendas exportado (CSV ou Excel) do Shopee, Mercado Livre, Amazon ou TikTok Shop. Se o arquivo já identificar a plataforma por linha (ex: relatórios do Upseller), o sistema detecta sozinho. Senão, usa a opção selecionada abaixo pra tudo.</div>
+        <select id="uploadPlataforma">
+          <option value="">Nenhuma taxa (importar valor bruto)</option>
+          ${state.plataformas.map((p) => `<option value="${p.id}">${esc(p.nome)}${p.taxaPercentual > 0 || p.taxaFixa > 0 ? ` (${p.taxaPercentual}% + ${fmt(p.taxaFixa)})` : ''}</option>`).join('')}
+        </select>
+        <label class="file-label">📤 Escolher arquivo CSV ou Excel<input type="file" accept=".csv,.xlsx,.xls" id="csvInput" style="display:none" /></label>
+      </div>
+    ` : ''}
+
+    ${state.showSkusPendentes ? `
+      <div class="form-card">
+        <div class="section-title" style="margin-bottom:2px">SKUs pendentes de vincular</div>
+        <div class="section-subtitle" style="margin-bottom:12px">Vieram em algum import de vendas mas não bateram com nenhum produto cadastrado. Vincule ao produto certo pra aplicar a baixa de estoque e já ficar automático nos próximos imports.</div>
+        ${state.vendasSkuPendentes.length === 0 ? `<div class="empty-state">Nenhum SKU pendente no momento 🎉</div>` : `
+          <div style="display:flex;flex-direction:column;gap:10px">
+            ${state.vendasSkuPendentes.map((v) => `
+              <div class="alert-card" style="border-color:var(--amber)55">
+                <div class="alert-card-row">
+                  <div class="alert-dot" style="background:var(--amber)"></div>
+                  <div style="flex:1">
+                    <div class="alert-name">${esc(v.sku)}</div>
+                    <div class="alert-meta">${v.quantidade} peça(s) vendida(s) · ${fmt(v.faturamento)}${v.plataformaNome ? ` · ${esc(v.plataformaNome)}` : ''} · última venda ${v.ultimaData ? new Date(v.ultimaData + 'T00:00:00').toLocaleDateString('pt-BR') : '—'}</div>
+                  </div>
+                </div>
+                <div class="form-row" style="margin-top:8px">
+                  <select id="vincularSkuProduto-${v.id}" style="flex:1">
+                    <option value="">Selecione o produto...</option>
+                    ${state.produtos.map((p) => `<option value="${p.id}">${esc(p.nome)}${p.sku ? ' — ' + esc(p.sku) : ''}</option>`).join('')}
+                  </select>
+                  <button class="confirm-btn" data-vincular-sku="${v.id}">Vincular</button>
+                  <button class="trash-btn" data-remover-sku-pendente="${v.id}" title="Ignorar esse SKU">🗑</button>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        `}
+      </div>
+    ` : ''}
+
+    <div class="stats-grid" style="margin-top:14px">
+      <div class="stat-card">
+        <div class="stat-icon" style="background:rgba(0,212,160,0.1)">💰</div>
+        <div class="stat-label">Faturamento do mês</div>
+        <div class="stat-value">${fmt(faturamentoMes)}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:rgba(255,182,39,0.1)">🧾</div>
+        <div class="stat-label">Pedidos</div>
+        <div class="stat-value">${qtdPedidosMes}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:rgba(255,46,126,0.1)">🎯</div>
+        <div class="stat-label">Ticket médio</div>
+        <div class="stat-value">${fmt(ticketMedio)}</div>
+      </div>
+    </div>
+
+    <div class="section-title-wrap" style="margin-top:24px">
+      <div><div class="section-title">Evolução — últimos 6 meses</div><div class="section-subtitle">Faturamento total de vendas por mês</div></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:24px">
+      ${faturamentoPorMes.map((m) => `
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:48px;font-size:12.5px;color:var(--text-muted)">${mesLabel(m.mes)}</div>
+          <div style="flex:1;background:rgba(255,255,255,0.06);border-radius:6px;overflow:hidden;height:22px">
+            <div style="height:100%;width:${(m.total / maiorFaturamentoMes) * 100}%;background:${m.mes === mesAtual ? 'var(--pink)' : 'var(--teal)'};border-radius:6px"></div>
+          </div>
+          <div style="width:110px;text-align:right;font-size:13px;font-weight:600">${fmt(m.total)}</div>
+        </div>
+      `).join('')}
+    </div>
+
+    <div class="section-title-wrap">
+      <div><div class="section-title">Comparação entre plataformas</div><div class="section-subtitle">No mês selecionado</div></div>
+    </div>
+    ${comparacaoPlataformas.length === 0 ? `<div class="empty-state">Nenhuma venda nesse mês ainda.</div>` : `
+      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:24px">
+        ${comparacaoPlataformas.map((p) => `
+          <div class="alert-card" style="border-color:var(--border)">
+            <div class="alert-card-row">
+              <div style="flex:1">
+                <div class="alert-name">${esc(p.nome)}</div>
+                <div class="alert-meta">${p.pedidos} pedido(s) · ticket médio ${fmt(p.ticketMedio)}</div>
+                <div style="margin-top:6px;background:rgba(255,255,255,0.06);border-radius:6px;overflow:hidden;height:8px">
+                  <div style="height:100%;width:${(p.faturamento / maiorFaturamentoPlataforma) * 100}%;background:var(--teal);border-radius:6px"></div>
+                </div>
+              </div>
+              <div class="tx-valor" style="color:var(--teal);margin-left:12px">${fmt(p.faturamento)}</div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `}
+
+    <div class="section-title-wrap">
+      <div><div class="section-title">Ranking de produtos mais vendidos</div><div class="section-subtitle">No mês selecionado</div></div>
+    </div>
+    ${rankingProdutos.length === 0 ? `<div class="empty-state">Nenhum SKU vinculado vendeu nesse mês ainda (ou é um mês anterior a esse recurso — o ranking por período só existe a partir de agora).</div>` : `
+      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:24px">
+        ${rankingProdutos.map((p, i) => `
+          <div class="alert-card" style="border-color:var(--border)">
+            <div class="alert-card-row">
+              <div class="alert-dot" style="background:var(--pink)">${i + 1}</div>
+              <div style="flex:1">
+                <div class="alert-name">${esc(p.nome)}</div>
+                <div class="alert-meta">${p.quantidade} peça(s) · ${fmt(p.valor)}</div>
+                <div style="margin-top:6px;background:rgba(255,255,255,0.06);border-radius:6px;overflow:hidden;height:8px">
+                  <div style="height:100%;width:${(p.quantidade / maiorQtdRanking) * 100}%;background:var(--pink);border-radius:6px"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `}
+
+    <div class="section-title-wrap">
+      <div><div class="section-title">Histórico de pedidos</div><div class="section-subtitle">Vendas importadas no mês selecionado</div></div>
+    </div>
+    ${historicoOrdenado.length === 0 ? `<div class="empty-state">Nenhuma venda nesse mês ainda.</div>` : `
+      <div class="tx-list">
+        ${historicoOrdenado.map((t) => renderTxRow(t)).join('')}
+      </div>
+    `}
+  `;
+}
+
+function attachVendasHandlers(c) {
+  const vendasMonthSelect = document.getElementById('vendasMonthSelect');
+  if (vendasMonthSelect) vendasMonthSelect.addEventListener('change', (e) => { state.selectedMonth = e.target.value; render(); });
+
+  const toggleUpload = document.getElementById('toggleUpload');
+  if (toggleUpload) toggleUpload.addEventListener('click', () => { state.showUpload = !state.showUpload; render(); });
+
+  const toggleSkusPendentes = document.getElementById('toggleSkusPendentes');
+  if (toggleSkusPendentes) toggleSkusPendentes.addEventListener('click', () => { state.showSkusPendentes = !state.showSkusPendentes; render(); });
+  document.querySelectorAll('[data-vincular-sku]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const pendenteId = btn.dataset.vincularSku;
+      const produtoId = document.getElementById(`vincularSkuProduto-${pendenteId}`).value;
+      if (!produtoId) { alert('Selecione o produto antes de vincular.'); return; }
+      await vincularSkuPendente(pendenteId, produtoId);
+    });
+  });
+  document.querySelectorAll('[data-remover-sku-pendente]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (confirm('Ignorar esse SKU? Ele some da lista de pendentes sem aplicar baixa de estoque nenhuma. Você pode vincular manualmente depois cadastrando o SKU direto no produto, se precisar.')) {
+        await removerSkuPendente(btn.dataset.removerSkuPendente);
+      }
+    });
   });
 
   const csvInput = document.getElementById('csvInput');
@@ -5196,7 +5466,8 @@ function attachFinanceiroHandlers(c) {
     });
 
     const novos = [];
-    const deducoes = new Map(); // produtoId -> { qtd, ultimaData }
+    const deducoes = new Map(); // produtoId -> { qtd, ultimaData, faturamento } (total do import, usado pra baixar estoque)
+    const detalhesVendas = new Map(); // produtoId|plataformaId|data -> { produtoId, plataformaId, plataformaNome, sku, quantidade, valor, data } (granular, pra ranking/comparação por período)
     const skusNaoEncontrados = new Map(); // sku -> { qtd, faturamento, ultimaData, plataformaNome }
     const pedidosPorPlataforma = new Map(); // plataformaId (ou '_sem_plataforma') -> Set de pedidos
     const linhasSemPedidoPorPlataforma = new Map(); // fallback quando a linha não tem ID do pedido
@@ -5264,6 +5535,15 @@ function attachFinanceiroHandlers(c) {
           atual.faturamento += valor;
           if (dataLinha > atual.ultimaData) atual.ultimaData = dataLinha;
           deducoes.set(produto.id, atual);
+
+          const chaveDetalhe = `${produto.id}|${plataformaLinha ? plataformaLinha.id : ''}|${dataLinha}`;
+          const atualDetalhe = detalhesVendas.get(chaveDetalhe) || {
+            produtoId: produto.id, plataformaId: plataformaLinha ? plataformaLinha.id : null,
+            plataformaNome: plataformaLinha ? plataformaLinha.nome : null, sku: sku.trim(), quantidade: 0, valor: 0, data: dataLinha,
+          };
+          atualDetalhe.quantidade += qtd;
+          atualDetalhe.valor += valor;
+          detalhesVendas.set(chaveDetalhe, atualDetalhe);
         } else {
           const atual = skusNaoEncontrados.get(sku) || { qtd: 0, faturamento: 0, ultimaData: dataLinha, plataformaNome: plataformaLinha ? plataformaLinha.nome : null };
           atual.qtd += qtd;
@@ -5282,6 +5562,7 @@ function attachFinanceiroHandlers(c) {
     }
 
     await addTxBatch(novos);
+    if (detalhesVendas.size) await addVendasDetalheBatch([...detalhesVendas.values()]);
     if (skusNaoEncontrados.size) await registrarSkusPendentes(skusNaoEncontrados);
 
     // aplica baixa de estoque + soma no total vendido + atualiza preço médio de venda
@@ -5336,7 +5617,7 @@ function attachFinanceiroHandlers(c) {
     if (temSku) {
       resumo += `\n${deducoes.size} produto(s) com estoque baixado automaticamente.`;
       if (skusNaoEncontrados.size) {
-        resumo += `\n\nSKUs não encontrados no cadastro (${skusNaoEncontrados.size}) ficaram pendentes de vinculação — vá em Estoque > SKUs pendentes de vincular pra associar ao produto certo (a baixa de estoque é aplicada assim que você vincular).`;
+        resumo += `\n\nSKUs não encontrados no cadastro (${skusNaoEncontrados.size}) ficaram pendentes de vinculação — vá em Vendas > SKUs pendentes de vincular pra associar ao produto certo (a baixa de estoque é aplicada assim que você vincular).`;
       }
     } else {
       resumo += `\n(Nenhuma coluna de SKU foi encontrada, então o estoque não foi ajustado.)`;
@@ -5347,75 +5628,7 @@ function attachFinanceiroHandlers(c) {
     alert(resumo);
   });
 
-  const salvarTx = document.getElementById('salvarTx');
-  if (salvarTx) salvarTx.addEventListener('click', async () => {
-    const tipo = window.__txFormTipo || 'saida';
-    const valor = parseBRNumber(document.getElementById('txValor').value);
-    const categoria = document.getElementById('txCategoria').value;
-    const descricao = document.getElementById('txDescricao').value;
-    const data = document.getElementById('txData').value || todayStr();
-    const recorrente = document.getElementById('txRecorrente')?.checked || false;
-    const formaPagamento = tipo === 'saida' ? document.getElementById('txCartaoSelect')?.value : '';
-    const cartao = (formaPagamento && formaPagamento !== '__parcelado_sem_cartao__') ? state.cartoesCredito.find((cc) => cc.id === formaPagamento) : null;
-    const parceladoSemCartao = formaPagamento === '__parcelado_sem_cartao__';
-    const numParcelas = (cartao || parceladoSemCartao) ? (Number(document.getElementById('txNumParcelas').value) || 1) : 1;
-    if (!valor || !categoria) { alert('Preencha valor e categoria.'); return; }
-    if (parceladoSemCartao && (!numParcelas || numParcelas <= 1)) { alert('Informe um número de parcelas maior que 1, ou escolha "Outro".'); return; }
-    const natureza = tipo === 'saida' ? (NATUREZA_POR_CATEGORIA[categoria] || 'variavel') : null;
-    if (cartao) {
-      await criarSaidasCartao({ cartao, categoria, natureza, descricaoBase: descricao || categoria, valorTotal: valor, numParcelas, dataCompra: data });
-    } else if (parceladoSemCartao) {
-      await criarSaidasParceladas({ categoria, natureza, descricaoBase: descricao || categoria, valorTotal: valor, numParcelas, dataPrimeiraParcela: data });
-    } else {
-      await addTx({ tipo, valor, categoria, natureza, descricao, data, recorrente });
-    }
-    await loadData();
-    if (recorrente) { await garantirRecorrentes(); await loadData(); }
-    state.showTxForm = false;
-    window.__txFormTipo = 'saida';
-    render();
-  });
-
-  document.querySelectorAll('[data-remove-tx]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      await removeTx(btn.dataset.removeTx);
-      await loadData();
-    });
-  });
-
-  document.querySelectorAll('[data-edit-tx]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      state.editingTxId = btn.dataset.editTx;
-      window.__editTxTipo = null;
-      render();
-    });
-  });
-  document.querySelectorAll('[data-cancelar-edit-tx]').forEach((btn) => {
-    btn.addEventListener('click', () => { state.editingTxId = null; render(); });
-  });
-  document.querySelectorAll('[data-edit-tipo]').forEach((btn) => {
-    btn.addEventListener('click', () => { window.__editTxTipo = btn.dataset.editTipo; render(); });
-  });
-  document.querySelectorAll('[data-salvar-edit-tx]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const id = btn.dataset.salvarEditTx;
-      const original = state.tx.find((t) => t.id === id);
-      const tipo = window.__editTxTipo || original.tipo;
-      const valor = parseBRNumber(document.getElementById(`editTxValor-${id}`).value);
-      const categoria = document.getElementById(`editTxCategoria-${id}`).value;
-      const descricao = document.getElementById(`editTxDescricao-${id}`).value;
-      const data = document.getElementById(`editTxData-${id}`).value || todayStr();
-      const recorrente = document.getElementById(`editTxRecorrente-${id}`)?.checked || false;
-      if (!valor || !categoria) { alert('Preencha valor e categoria.'); return; }
-      const natureza = tipo === 'saida' ? (NATUREZA_POR_CATEGORIA[categoria] || 'variavel') : null;
-      await updateTx(id, { tipo, valor, categoria, natureza, descricao, data, recorrente });
-      await loadData();
-      if (recorrente) { await garantirRecorrentes(); await loadData(); }
-      state.editingTxId = null;
-      window.__editTxTipo = null;
-      render();
-    });
-  });
+  attachTxRowHandlers();
 }
 
 function attachTecidoHandlers(c) {
@@ -6079,23 +6292,6 @@ function attachEstoqueHandlers(c) {
 
   const toggleParados = document.getElementById('toggleProdutosParados');
   if (toggleParados) toggleParados.addEventListener('click', () => { state.showProdutosParados = !state.showProdutosParados; render(); });
-  const toggleSkusPendentes = document.getElementById('toggleSkusPendentes');
-  if (toggleSkusPendentes) toggleSkusPendentes.addEventListener('click', () => { state.showSkusPendentes = !state.showSkusPendentes; render(); });
-  document.querySelectorAll('[data-vincular-sku]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const pendenteId = btn.dataset.vincularSku;
-      const produtoId = document.getElementById(`vincularSkuProduto-${pendenteId}`).value;
-      if (!produtoId) { alert('Selecione o produto antes de vincular.'); return; }
-      await vincularSkuPendente(pendenteId, produtoId);
-    });
-  });
-  document.querySelectorAll('[data-remover-sku-pendente]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      if (confirm('Ignorar esse SKU? Ele some da lista de pendentes sem aplicar baixa de estoque nenhuma. Você pode vincular manualmente depois cadastrando o SKU direto no produto, se precisar.')) {
-        await removerSkuPendente(btn.dataset.removerSkuPendente);
-      }
-    });
-  });
 
   function capturarCoresDigitadas() {
     const valores = [];
