@@ -58,7 +58,7 @@ const NATUREZA_POR_CATEGORIA = (() => {
 })();
 // entradas que não são venda (empréstimo, aporte...) — não contam como Receita Bruta no DRE,
 // mas continuam contando no saldo de caixa normalmente
-const CATEGORIAS_ENTRADA_NAO_OPERACIONAL = ['Empréstimo recebido'];
+const CATEGORIAS_ENTRADA_NAO_OPERACIONAL = ['Empréstimo recebido', 'Reembolso de frete'];
 
 // ==================== HELPERS ====================
 const fmt = (n) => (n ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -1043,7 +1043,7 @@ async function removerSkuPendente(id) {
 // venda manual (atacado, feira, venda direta etc) — mesma lógica de baixa de estoque
 // do import, só que lançada na mão em vez de vir de uma planilha. Se o produto tem cor
 // cadastrada, baixa do estoque de cada cor (coresQtd), senão baixa do estoque geral do produto
-async function lancarVendaManual({ produtoId, quantidade, valor, canal, data, coresQtd }) {
+async function lancarVendaManual({ produtoId, quantidade, valor, frete, canal, data, coresQtd }) {
   const produto = state.produtos.find((p) => p.id === produtoId);
   if (!produto) return;
   const canalLabel = (canal || '').trim() || 'Venda direta';
@@ -1053,6 +1053,14 @@ async function lancarVendaManual({ produtoId, quantidade, valor, canal, data, co
     tipo: 'entrada', valor, categoria: `Venda ${canalLabel}`,
     descricao: `${produto.nome} x${qtdTotal}`, data,
   });
+  // frete reembolsado pelo cliente entra separado — passa pelo caixa mas não conta como
+  // faturamento de venda (fica de fora do ranking, da comparação e da receita bruta da DRE)
+  if (frete > 0) {
+    await addTx({
+      tipo: 'entrada', valor: frete, categoria: 'Reembolso de frete',
+      descricao: `Frete — ${produto.nome} x${qtdTotal}`, data,
+    });
+  }
   if (vs.length > 0) {
     for (const v of vs) {
       const qtdCor = coresQtd?.[v.id] || 0;
@@ -5338,7 +5346,8 @@ function renderVendas(c) {
 
     ${state.showVendaManualForm ? `
       <div class="form-card">
-        <div class="form-hint">Pra vendas fora de marketplace (atacado, feira, venda direta etc). Lança a entrada no Financeiro, baixa o estoque do produto e entra no ranking/comparação dessa aba.</div>
+        <div class="form-hint">Pra vendas fora de marketplace (atacado, feira, venda direta etc). Lança a entrada no Financeiro, baixa o estoque do produto e entra no ranking/comparação dessa aba. Se o cliente te reembolsou o frete junto com o pagamento, preencha o campo de frete separado — ele entra no caixa mas não conta como faturamento de venda.</div>
+        <div class="form-hint" style="color:#ffb627">💡 Etiqueta de envio comprada por você é uma <strong>saída</strong> separada (categoria Frete/Logística), lançada normalmente quando você paga — não é aqui.</div>
         <select id="vendaManualProduto">
           <option value="">Selecione o produto...</option>
           ${state.produtos.filter((p) => p.ativo !== false).map((p) => `<option value="${p.id}" ${window.__vendaManualProdutoId === p.id ? 'selected' : ''}>${esc(p.nome)}${p.sku ? ' — ' + esc(p.sku) : ''}</option>`).join('')}
@@ -5358,7 +5367,8 @@ function renderVendas(c) {
           }
           return `<input type="text" id="vendaManualQtd" placeholder="Quantidade" inputmode="numeric" />`;
         })()}
-        <input type="text" id="vendaManualValor" placeholder="Valor total da venda (R$)" />
+        <input type="text" id="vendaManualValor" placeholder="Valor da venda — sem frete (R$)" />
+        <input type="text" id="vendaManualFrete" placeholder="Valor do frete reembolsado pelo cliente (opcional, R$)" />
         <input type="text" id="vendaManualCanal" placeholder="Canal (ex: Atacado, Feira, Venda direta)" />
         <input type="date" id="vendaManualData" value="${todayStr()}" />
         <div class="form-row">
@@ -5520,6 +5530,7 @@ function attachVendasHandlers(c) {
   if (salvarVendaManual) salvarVendaManual.addEventListener('click', async () => {
     const produtoId = document.getElementById('vendaManualProduto').value;
     const valor = parseBRNumber(document.getElementById('vendaManualValor').value);
+    const frete = parseBRNumber(document.getElementById('vendaManualFrete').value) || 0;
     const canal = document.getElementById('vendaManualCanal').value;
     const data = document.getElementById('vendaManualData').value || todayStr();
     if (!produtoId) { alert('Selecione o produto.'); return; }
@@ -5537,11 +5548,14 @@ function attachVendasHandlers(c) {
       quantidade = Number(document.getElementById('vendaManualQtd').value);
       if (!quantidade || quantidade <= 0) { alert('Informe a quantidade.'); return; }
     }
-    if (!valor || valor <= 0) { alert('Informe o valor total da venda.'); return; }
-    await lancarVendaManual({ produtoId, quantidade, valor, canal, data, coresQtd });
+    if (!valor || valor <= 0) { alert('Informe o valor da venda.'); return; }
+    await lancarVendaManual({ produtoId, quantidade, valor, frete, canal, data, coresQtd });
     state.showVendaManualForm = false;
     window.__vendaManualProdutoId = null;
     await loadData();
+    if (frete > 0) {
+      alert(`Lançado! Venda: ${fmt(valor)} + Frete: ${fmt(frete)} = Total recebido: ${fmt(valor + frete)}.\n\nSó a venda entra no faturamento — o frete só passa pelo caixa.`);
+    }
   });
 
   const toggleSkusPendentes = document.getElementById('toggleSkusPendentes');
