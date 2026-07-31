@@ -303,6 +303,7 @@ const state = {
   showContasAVencer: false,
   showProdutosParados: false,
   showSkusPendentes: false,
+  showVendaManualForm: false,
   variantes: [],
   showVarianteForm: {},
   materiaPrima: [],
@@ -1020,6 +1021,26 @@ async function vincularSkuPendente(pendenteId, produtoId) {
 async function removerSkuPendente(id) {
   const { error } = await sb.from('vendas_sku_pendentes').delete().eq('id', id);
   if (error) alert('Erro ao remover SKU pendente: ' + error.message);
+}
+// venda manual (atacado, feira, venda direta etc) — mesma lógica de baixa de estoque
+// do import, só que lançada na mão em vez de vir de uma planilha
+async function lancarVendaManual({ produtoId, quantidade, valor, canal, data }) {
+  const produto = state.produtos.find((p) => p.id === produtoId);
+  if (!produto) return;
+  const canalLabel = (canal || '').trim() || 'Venda direta';
+  await addTx({
+    tipo: 'entrada', valor, categoria: `Venda ${canalLabel}`,
+    descricao: `${produto.nome} x${quantidade}`, data,
+  });
+  const novoEstoque = Math.max(0, produto.estoqueAtual - quantidade);
+  const novoTotalVendido = (produto.totalVendido || 0) + quantidade;
+  await registrarVendaProduto(produtoId, novoEstoque, novoTotalVendido, data);
+  await atualizarPrecoVendaMedio(produtoId, valor, quantidade);
+  await baixarEstoquePorFichaTecnica(produtoId, quantidade, data);
+  await addVendasDetalheBatch([{
+    produtoId, plataformaId: null, plataformaNome: canalLabel,
+    sku: (produto.sku || '').split(',')[0]?.trim() || null, quantidade, valor, data,
+  }]);
 }
 async function updateProduto(id, p) {
   const { error } = await sb.from('produtos').update({
@@ -5277,11 +5298,30 @@ function renderVendas(c) {
       <div><div class="section-title">Vendas</div><div class="section-subtitle">Ranking, plataformas e histórico de pedidos</div></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="icon-btn-ghost" id="toggleSkusPendentes" style="${state.vendasSkuPendentes.length > 0 ? 'background:rgba(255,182,39,0.15);border:1.5px solid var(--amber);color:var(--amber);font-weight:700' : ''}">🔗 SKUs pendentes${state.vendasSkuPendentes.length > 0 ? ` (${state.vendasSkuPendentes.length})` : ''}</button>
-        <button class="icon-btn" id="toggleUpload">📤 Importar vendas</button>
+        <button class="icon-btn-ghost" id="toggleUpload">📤 Importar vendas</button>
+        <button class="icon-btn" id="toggleVendaManual">＋ Venda manual</button>
       </div>
     </div>
 
     <input type="month" class="month-input" id="vendasMonthSelect" value="${state.selectedMonth}" />
+
+    ${state.showVendaManualForm ? `
+      <div class="form-card">
+        <div class="form-hint">Pra vendas fora de marketplace (atacado, feira, venda direta etc). Lança a entrada no Financeiro, baixa o estoque do produto e entra no ranking/comparação dessa aba.</div>
+        <select id="vendaManualProduto">
+          <option value="">Selecione o produto...</option>
+          ${state.produtos.filter((p) => p.ativo !== false).map((p) => `<option value="${p.id}">${esc(p.nome)}${p.sku ? ' — ' + esc(p.sku) : ''}</option>`).join('')}
+        </select>
+        <input type="text" id="vendaManualQtd" placeholder="Quantidade" inputmode="numeric" />
+        <input type="text" id="vendaManualValor" placeholder="Valor total da venda (R$)" />
+        <input type="text" id="vendaManualCanal" placeholder="Canal (ex: Atacado, Feira, Venda direta)" />
+        <input type="date" id="vendaManualData" value="${todayStr()}" />
+        <div class="form-row">
+          <button class="confirm-btn" id="salvarVendaManual">Lançar venda</button>
+          <button class="toggle-btn" id="cancelarVendaManual">Cancelar</button>
+        </div>
+      </div>
+    ` : ''}
 
     ${state.showUpload ? `
       <div class="form-card">
@@ -5418,6 +5458,25 @@ function attachVendasHandlers(c) {
 
   const toggleUpload = document.getElementById('toggleUpload');
   if (toggleUpload) toggleUpload.addEventListener('click', () => { state.showUpload = !state.showUpload; render(); });
+
+  const toggleVendaManual = document.getElementById('toggleVendaManual');
+  if (toggleVendaManual) toggleVendaManual.addEventListener('click', () => { state.showVendaManualForm = !state.showVendaManualForm; render(); });
+  const cancelarVendaManual = document.getElementById('cancelarVendaManual');
+  if (cancelarVendaManual) cancelarVendaManual.addEventListener('click', () => { state.showVendaManualForm = false; render(); });
+  const salvarVendaManual = document.getElementById('salvarVendaManual');
+  if (salvarVendaManual) salvarVendaManual.addEventListener('click', async () => {
+    const produtoId = document.getElementById('vendaManualProduto').value;
+    const quantidade = Number(document.getElementById('vendaManualQtd').value);
+    const valor = parseBRNumber(document.getElementById('vendaManualValor').value);
+    const canal = document.getElementById('vendaManualCanal').value;
+    const data = document.getElementById('vendaManualData').value || todayStr();
+    if (!produtoId) { alert('Selecione o produto.'); return; }
+    if (!quantidade || quantidade <= 0) { alert('Informe a quantidade.'); return; }
+    if (!valor || valor <= 0) { alert('Informe o valor total da venda.'); return; }
+    await lancarVendaManual({ produtoId, quantidade, valor, canal, data });
+    state.showVendaManualForm = false;
+    await loadData();
+  });
 
   const toggleSkusPendentes = document.getElementById('toggleSkusPendentes');
   if (toggleSkusPendentes) toggleSkusPendentes.addEventListener('click', () => { state.showSkusPendentes = !state.showSkusPendentes; render(); });
