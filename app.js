@@ -360,11 +360,13 @@ const state = {
   showLancamentosCartaoId: null,
   vendasSkuPendentes: [],
   vendasDetalhe: [],
+  abonosPonto: [],
+  showAbonarId: null,
 };
 
 // ==================== DATA LAYER ====================
 async function loadData() {
-  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }, { data: feriasTiradas, error: e16 }, { data: solicitacoesPonto, error: e17 }, { data: horasExtrasLiquidadas, error: e18 }, { data: bancoHorasLancamentos, error: e19 }, { data: emprestimos, error: e20 }, { data: emprestimoParcelas, error: e21 }, { data: cartoesCredito, error: e22 }, { data: vendasSkuPendentes, error: e23 }, { data: vendasDetalhe, error: e24 }] = await Promise.all([
+  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }, { data: feriasTiradas, error: e16 }, { data: solicitacoesPonto, error: e17 }, { data: horasExtrasLiquidadas, error: e18 }, { data: bancoHorasLancamentos, error: e19 }, { data: emprestimos, error: e20 }, { data: emprestimoParcelas, error: e21 }, { data: cartoesCredito, error: e22 }, { data: vendasSkuPendentes, error: e23 }, { data: vendasDetalhe, error: e24 }, { data: abonosPonto, error: e25 }] = await Promise.all([
     sb.from('transacoes').select('*').order('data', { ascending: false }),
     sb.from('produtos').select('*').order('created_at', { ascending: false }),
     sb.from('plataformas').select('*').order('nome', { ascending: true }),
@@ -389,6 +391,7 @@ async function loadData() {
     sb.from('cartoes_credito').select('*').order('nome', { ascending: true }),
     sb.from('vendas_sku_pendentes').select('*').order('created_at', { ascending: false }),
     sb.from('vendas_detalhe').select('*').order('data', { ascending: false }).limit(8000),
+    sb.from('abonos_ponto').select('*').order('data', { ascending: false }),
   ]);
   if (e1) console.error(e1);
   if (e2) console.error(e2);
@@ -414,6 +417,7 @@ async function loadData() {
   if (e22) console.error(e22);
   if (e23) console.error(e23);
   if (e24) console.error(e24);
+  if (e25) console.error(e25);
   state.tx = (tx || []).map(mapTxFromDb);
   state.produtos = (produtos || []).map(mapProdutoFromDb);
   state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0) }));
@@ -438,6 +442,7 @@ async function loadData() {
   state.cartoesCredito = (cartoesCredito || []).map((c) => ({ id: c.id, nome: c.nome, limite: Number(c.limite || 0), diaFechamento: c.dia_fechamento, diaVencimento: c.dia_vencimento, ativo: c.ativo !== false }));
   state.vendasSkuPendentes = (vendasSkuPendentes || []).map((v) => ({ id: v.id, sku: v.sku, quantidade: Number(v.quantidade), faturamento: Number(v.faturamento), ultimaData: v.ultima_data, plataformaNome: v.plataforma_nome || null }));
   state.vendasDetalhe = (vendasDetalhe || []).map((v) => ({ id: v.id, produtoId: v.produto_id, plataformaId: v.plataforma_id, plataformaNome: v.plataforma_nome || null, sku: v.sku || null, quantidade: Number(v.quantidade), valor: Number(v.valor), data: v.data }));
+  state.abonosPonto = (abonosPonto || []).map((a) => ({ id: a.id, funcionariaId: a.funcionaria_id, data: a.data, tipo: a.tipo, motivo: a.motivo || '' }));
   state.loading = false;
   render();
 }
@@ -1248,6 +1253,19 @@ async function removePonto(id) {
   const { error } = await sb.from('pontos').delete().eq('id', id);
   if (error) alert('Erro ao remover ponto: ' + error.message);
 }
+// abona um dia inteiro (atestado médico, folga, ou abono simples) — o dia deixa de contar
+// como falta no cálculo de horas, mesmo sem batida de ponto naquele dia
+async function salvarAbono(funcionariaId, data, tipo, motivo) {
+  const { error } = await sb.from('abonos_ponto').upsert(
+    { funcionaria_id: funcionariaId, data, tipo, motivo: motivo || null },
+    { onConflict: 'funcionaria_id,data' }
+  );
+  if (error) alert('Erro ao salvar abono: ' + error.message);
+}
+async function removeAbono(id) {
+  const { error } = await sb.from('abonos_ponto').delete().eq('id', id);
+  if (error) alert('Erro ao remover abono: ' + error.message);
+}
 async function addFeriasTirada(funcionariaId, dataInicio, dataFim) {
   const { error } = await sb.from('ferias_tiradas').insert({ funcionaria_id: funcionariaId, data_inicio: dataInicio, data_fim: dataFim });
   if (error) alert('Erro ao registrar férias: ' + error.message);
@@ -1461,6 +1479,7 @@ function verificarPontosEsquecidos(funcionaria, diasParaTras) {
     const tiposBatidos = new Set(pontosDoDia.map((p) => p.tipo));
     const tiposFaltandoTotal = ORDEM_PONTOS.filter((t) => !tiposBatidos.has(t));
     if (tiposFaltandoTotal.length === 0) continue;
+    if (state.abonosPonto.some((a) => a.funcionariaId === funcionaria.id && a.data === dataStr)) continue;
     const tiposPendentesAprovacao = tiposFaltandoTotal.filter((t) =>
       state.solicitacoesPonto.some((s) => s.funcionariaId === funcionaria.id && s.data === dataStr && s.tipo === t && s.status === 'pendente')
     );
@@ -1593,6 +1612,7 @@ function setupRealtime() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'distribuicoes' }, loadData)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'vendas_sku_pendentes' }, loadData)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'vendas_detalhe' }, loadData)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'abonos_ponto' }, loadData)
     .subscribe();
 }
 
@@ -4160,13 +4180,50 @@ function renderFuncionariaDetalhe(funcionariaId) {
         <div class="section-subtitle" style="margin-bottom:10px">Dias esperados sem batida completa</div>
         ${diasPendentes.map((e) => `
           <div style="border-top:1px solid var(--border);padding-top:6px;margin-top:6px">
-            <div style="font-size:12.5px;font-weight:600">${dataFmt(e.data)}</div>
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+              <div style="font-size:12.5px;font-weight:600">${dataFmt(e.data)}</div>
+              <button class="icon-btn-ghost" style="padding:2px 8px;font-size:11px" data-abrir-abonar="${e.data}">📋 Abonar/Atestado</button>
+            </div>
             ${e.tiposPendentesAprovacao.map((t) => `<div style="font-size:11.5px;color:var(--amber);padding:2px 0">⏳ ${LABEL_PONTO[t]} — aguardando sua aprovação</div>`).join('')}
             ${e.tiposSemSolicitacao.map((t) => `<div style="font-size:11.5px;color:var(--red);padding:2px 0">🔴 ${LABEL_PONTO[t]} — sem solicitação ainda</div>`).join('')}
+            ${state.showAbonarId === e.data ? `
+              <div class="entrada-box">
+                <select id="abonarTipo-${e.data}">
+                  <option value="atestado">🩺 Atestado médico</option>
+                  <option value="folga">🏖️ Folga</option>
+                  <option value="abono">✅ Abono simples</option>
+                </select>
+                <input type="text" id="abonarMotivo-${e.data}" placeholder="Motivo/observação (opcional)" />
+                <div class="form-row">
+                  <button class="confirm-btn" data-salvar-abono="${funcionariaId}" data-data="${e.data}">Salvar</button>
+                  <button class="toggle-btn" data-cancelar-abonar="1">Cancelar</button>
+                </div>
+              </div>
+            ` : ''}
           </div>
         `).join('')}
       </div>
     ` : ''}
+
+    ${(() => {
+      const abonosDela = state.abonosPonto.filter((a) => a.funcionariaId === funcionariaId).sort((a, b) => b.data.localeCompare(a.data));
+      if (abonosDela.length === 0) return '';
+      const iconeTipo = { atestado: '🩺', folga: '🏖️', abono: '✅' };
+      return `
+        <div class="section-title-wrap"><div><div class="section-title">Dias abonados</div></div></div>
+        <div class="tx-list" style="margin-bottom:24px">
+          ${abonosDela.map((a) => `
+            <div class="tx-row">
+              <div class="tx-dot" style="background:var(--teal)"></div>
+              <div style="flex:1">
+                <div class="tx-categoria">${iconeTipo[a.tipo] || '✅'} ${dataFmt(a.data)}${a.motivo ? ` — ${esc(a.motivo)}` : ''}</div>
+              </div>
+              <button class="trash-btn" data-remover-abono="${a.id}">🗑</button>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    })()}
 
     ${(() => {
       const solicitacoesDela = state.solicitacoesPonto.filter((s) => s.funcionariaId === funcionariaId && s.status === 'pendente');
@@ -4372,7 +4429,33 @@ function attachRHHandlers(c) {
 
   if (state.rhFuncionariaDetalheId) {
     const voltar = document.getElementById('voltarFuncionarias');
-    if (voltar) voltar.addEventListener('click', () => { state.rhFuncionariaDetalheId = null; state.editingPontoId = null; state.showFeriasForm = false; render(); });
+    if (voltar) voltar.addEventListener('click', () => { state.rhFuncionariaDetalheId = null; state.editingPontoId = null; state.showFeriasForm = false; state.showAbonarId = null; render(); });
+
+    document.querySelectorAll('[data-abrir-abonar]').forEach((btn) => {
+      btn.addEventListener('click', () => { state.showAbonarId = btn.dataset.abrirAbonar; render(); });
+    });
+    document.querySelectorAll('[data-cancelar-abonar]').forEach((btn) => {
+      btn.addEventListener('click', () => { state.showAbonarId = null; render(); });
+    });
+    document.querySelectorAll('[data-salvar-abono]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const funcionariaId = btn.dataset.salvarAbono;
+        const data = btn.dataset.data;
+        const tipo = document.getElementById(`abonarTipo-${data}`).value;
+        const motivo = document.getElementById(`abonarMotivo-${data}`).value.trim();
+        await salvarAbono(funcionariaId, data, tipo, motivo);
+        state.showAbonarId = null;
+        await loadData();
+      });
+    });
+    document.querySelectorAll('[data-remover-abono]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        if (confirm('Remover esse abono? O dia volta a contar como pendente se não tiver batida.')) {
+          await removeAbono(btn.dataset.removerAbono);
+          await loadData();
+        }
+      });
+    });
 
     const toggleFeriasForm = document.getElementById('toggleFeriasForm');
     if (toggleFeriasForm) toggleFeriasForm.addEventListener('click', () => { state.showFeriasForm = !state.showFeriasForm; render(); });
@@ -5012,6 +5095,7 @@ function attachHandlers(c) {
       state.rhFuncionariaDetalheId = null;
       state.editingPontoId = null;
       state.showFeriasForm = false;
+      state.showAbonarId = null;
       render();
     });
   });
