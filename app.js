@@ -4310,6 +4310,21 @@ function renderFuncionariaDetalhe(funcionariaId) {
       <button class="confirm-btn" style="margin-top:10px" data-lancar-ponto-manual="${funcionariaId}">Lançar</button>
     </div>
 
+    <div class="section-title-wrap"><div><div class="section-title">Abonar um dia (ou período)</div><div class="section-subtitle">Atestado, folga ou abono — qualquer data, inclusive de meses passados</div></div></div>
+    <div class="form-card">
+      <div class="form-row">
+        <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">De</div><input type="date" id="abonarLivreData" value="${todayStr()}" /></div>
+        <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Até (opcional, pra período)</div><input type="date" id="abonarLivreDataFim" /></div>
+      </div>
+      <select id="abonarLivreTipo" style="margin-top:8px">
+        <option value="atestado">🩺 Atestado médico</option>
+        <option value="folga">🏖️ Folga</option>
+        <option value="abono">✅ Abono simples</option>
+      </select>
+      <input type="text" id="abonarLivreMotivo" placeholder="Motivo/observação (opcional)" style="margin-top:8px" />
+      <button class="confirm-btn" style="margin-top:10px" data-salvar-abono-livre="${funcionariaId}">Abonar</button>
+    </div>
+
     <div class="section-title-wrap"><div><div class="section-title">Dias no período</div></div></div>
     ${diasOrdenados.length === 0 ? `<div class="empty-state">Nenhuma batida no período selecionado.</div>` : `
       <div class="tx-list">
@@ -4455,6 +4470,24 @@ function attachRHHandlers(c) {
           await loadData();
         }
       });
+    });
+
+    const salvarAbonoLivre = document.querySelector('[data-salvar-abono-livre]');
+    if (salvarAbonoLivre) salvarAbonoLivre.addEventListener('click', async () => {
+      const funcionariaId = salvarAbonoLivre.dataset.salvarAbonoLivre;
+      const dataInicio = document.getElementById('abonarLivreData').value;
+      const dataFim = document.getElementById('abonarLivreDataFim').value || dataInicio;
+      const tipo = document.getElementById('abonarLivreTipo').value;
+      const motivo = document.getElementById('abonarLivreMotivo').value.trim();
+      if (!dataInicio) { alert('Preencha a data.'); return; }
+      if (dataFim < dataInicio) { alert('A data final precisa ser depois (ou igual) à data inicial.'); return; }
+      const datas = [];
+      for (let d = new Date(dataInicio + 'T00:00:00'); d <= new Date(dataFim + 'T00:00:00'); d.setDate(d.getDate() + 1)) {
+        datas.push(d.toISOString().slice(0, 10));
+      }
+      for (const data of datas) await salvarAbono(funcionariaId, data, tipo, motivo);
+      await loadData();
+      alert(`${datas.length} dia(s) abonado(s), de ${new Date(dataInicio + 'T00:00:00').toLocaleDateString('pt-BR')} até ${new Date(dataFim + 'T00:00:00').toLocaleDateString('pt-BR')}.`);
     });
 
     const toggleFeriasForm = document.getElementById('toggleFeriasForm');
