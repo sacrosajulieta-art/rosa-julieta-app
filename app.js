@@ -5326,6 +5326,11 @@ function renderVendas(c) {
   const lucroMes = [...porProduto.values()].reduce((a, p) => a + (p.valor - p.custo), 0);
   const temDadosDeLucro = detalheMes.length > 0;
 
+  // lucro líquido = lucro bruto menos os custos fixos do mês (aluguel, ferramentas, etc.),
+  // sem dividir por produto — dá o número "não tem erro" pra saber se fechou no azul de verdade
+  const custosFixosMes = c.txMes.filter((t) => t.tipo === 'saida' && t.natureza === 'fixo').reduce((a, t) => a + t.valor, 0);
+  const lucroLiquidoMes = lucroMes - custosFixosMes;
+
   // evolução de faturamento nos últimos 6 meses (independe do mês selecionado no filtro)
   const mesesEvolucao = [5, 4, 3, 2, 1, 0].map((i) => addMonths(mesAtual, -i));
   const faturamentoPorMes = mesesEvolucao.map((mk) => ({
@@ -5447,11 +5452,16 @@ function renderVendas(c) {
       </div>
       <div class="stat-card">
         <div class="stat-icon" style="background:rgba(0,212,160,0.1)">📈</div>
-        <div class="stat-label">Lucro do mês${!temDadosDeLucro ? ' *' : ''}</div>
+        <div class="stat-label">Lucro bruto${!temDadosDeLucro ? ' *' : ''}</div>
         <div class="stat-value" style="color:${lucroMes >= 0 ? 'var(--teal)' : 'var(--red)'}">${fmt(lucroMes)}</div>
       </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:rgba(255,46,126,0.1)">📉</div>
+        <div class="stat-label">Lucro líquido${!temDadosDeLucro ? ' *' : ''}</div>
+        <div class="stat-value" style="color:${lucroLiquidoMes >= 0 ? 'var(--teal)' : 'var(--red)'}">${fmt(lucroLiquidoMes)}</div>
+      </div>
     </div>
-    ${!temDadosDeLucro ? `<div class="section-subtitle" style="margin-top:-8px;margin-bottom:8px">* Lucro calculado só a partir dos SKUs vinculados — vendas sem produto identificado não entram nessa conta ainda.</div>` : ''}
+    <div class="section-subtitle" style="margin-top:-8px;margin-bottom:8px">Lucro bruto = venda − custo direto da peça (tecido, corte, mão de obra, insumos). Lucro líquido = lucro bruto − custos fixos do mês (${fmt(custosFixosMes)}, ex: aluguel, ferramentas).${!temDadosDeLucro ? ' * Só considera vendas com produto identificado.' : ''}</div>
 
     <div class="section-title-wrap" style="margin-top:24px">
       <div><div class="section-title">Evolução — últimos 6 meses</div><div class="section-subtitle">Faturamento total de vendas por mês</div></div>
