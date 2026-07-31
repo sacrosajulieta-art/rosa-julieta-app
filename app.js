@@ -2965,9 +2965,19 @@ function renderCorte(c) {
                           <select id="distVariante-${i.id}" data-dist-variante-select="${i.id}">
                             <option value="">Sem cor específica</option>
                             ${vs.map((v) => `<option value="${v.id}">${esc(v.nome)}</option>`).join('')}
-                            <option value="__nova__">➕ Nova cor (corte misturado)</option>
+                            <option value="__nova__">➕ Nova cor</option>
+                            ${vs.length > 1 ? `<option value="__misto__">🔀 Corte misturado (dividir entre cores já cadastradas)</option>` : ''}
                           </select>
                           <input type="text" id="distVarianteNova-${i.id}" placeholder="Nome da nova cor" style="display:none;margin-top:6px" />
+                          <div id="distMisto-${i.id}" style="display:none;margin-top:6px">
+                            <div class="form-hint" style="margin-bottom:6px">Quantas peças dessa distribuição são de cada cor:</div>
+                            ${vs.map((v) => `
+                              <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">
+                                <div style="flex:none;font-size:13px;white-space:nowrap;min-width:120px">${esc(v.nome)}</div>
+                                <input type="text" id="distMistoQtd-${i.id}-${v.id}" placeholder="Qtd" inputmode="numeric" style="flex:none;width:70px" />
+                              </div>
+                            `).join('')}
+                          </div>
                           <button class="entrada-btn" data-confirmar-distribuicao="${i.id}" data-produto="${i.produtoId}" data-restante="${restante}">＋ Adicionar distribuição</button>
                         ` : `
                           <div class="empty-state" style="margin-bottom:0;padding:12px 0">✅ Distribuição completa — nada mais pra distribuir desse modelo</div>
@@ -6264,8 +6274,11 @@ function attachTecidoHandlers(c) {
   });
   document.querySelectorAll('[data-dist-variante-select]').forEach((sel) => {
     sel.addEventListener('change', () => {
-      const input = document.getElementById(`distVarianteNova-${sel.dataset.distVarianteSelect}`);
-      if (input) input.style.display = sel.value === '__nova__' ? '' : 'none';
+      const itemId = sel.dataset.distVarianteSelect;
+      const inputNova = document.getElementById(`distVarianteNova-${itemId}`);
+      const divMisto = document.getElementById(`distMisto-${itemId}`);
+      if (inputNova) inputNova.style.display = sel.value === '__nova__' ? '' : 'none';
+      if (divMisto) divMisto.style.display = sel.value === '__misto__' ? '' : 'none';
     });
   });
 
@@ -6274,11 +6287,26 @@ function attachTecidoHandlers(c) {
       const itemId = btn.dataset.confirmarDistribuicao;
       const produtoId = btn.dataset.produto;
       const costureiraId = document.getElementById(`distCostureira-${itemId}`).value;
-      const quantidade = Number(document.getElementById(`distQtd-${itemId}`).value);
       const restante = Number(btn.dataset.restante);
       const varianteSelect = document.getElementById(`distVariante-${itemId}`);
       let varianteId = varianteSelect ? varianteSelect.value : '';
-      if (!costureiraId || !quantidade || quantidade <= 0) { alert('Selecione a costureira e informe a quantidade.'); return; }
+      if (!costureiraId) { alert('Selecione a costureira.'); return; }
+
+      if (varianteId === '__misto__') {
+        const vs = variantesDoProduto(produtoId);
+        const porCor = vs.map((v) => ({ varianteId: v.id, qtd: Number(document.getElementById(`distMistoQtd-${itemId}-${v.id}`)?.value) || 0 })).filter((x) => x.qtd > 0);
+        const total = porCor.reduce((a, x) => a + x.qtd, 0);
+        if (total <= 0) { alert('Informe a quantidade de pelo menos uma cor.'); return; }
+        if (total > restante) { alert(`Só restam ${restante} peça(s) desse modelo pra distribuir.`); return; }
+        for (const x of porCor) {
+          await distribuirPecas(itemId, produtoId, x.varianteId, costureiraId, x.qtd, todayStr());
+        }
+        await loadData();
+        return;
+      }
+
+      const quantidade = Number(document.getElementById(`distQtd-${itemId}`).value);
+      if (!quantidade || quantidade <= 0) { alert('Informe a quantidade.'); return; }
       if (quantidade > restante) { alert(`Só restam ${restante} peça(s) desse modelo pra distribuir.`); return; }
       if (varianteId === '__nova__') {
         const nomeCor = document.getElementById(`distVarianteNova-${itemId}`).value.trim();
