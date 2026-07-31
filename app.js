@@ -340,8 +340,8 @@ const state = {
   showFuncionariaForm: false,
   editingFuncionariaId: null,
   rhFuncionariaDetalheId: null,
-  rhFiltroInicio: null,
-  rhFiltroFim: null,
+  rhFiltroInicio: (() => { try { return localStorage.getItem('rj_rh_filtro_inicio') || null; } catch (e) { return null; } })(),
+  rhFiltroFim: (() => { try { return localStorage.getItem('rj_rh_filtro_fim') || null; } catch (e) { return null; } })(),
   editingPontoId: null,
   feriasTiradas: [],
   showFeriasForm: false,
@@ -1388,6 +1388,13 @@ function formatarHorasMin(horasDecimais) {
   if (h === 0) return `${min}min`;
   if (min === 0) return `${h}h`;
   return `${h}h${String(min).padStart(2, '0')}min`;
+}
+// persiste o filtro de datas do RH pra não resetar quando sai e volta do sistema
+function salvarRhFiltro(inicio, fim) {
+  try {
+    if (inicio) localStorage.setItem('rj_rh_filtro_inicio', inicio); else localStorage.removeItem('rj_rh_filtro_inicio');
+    if (fim) localStorage.setItem('rj_rh_filtro_fim', fim); else localStorage.removeItem('rj_rh_filtro_fim');
+  } catch (e) { /* ignora se localStorage não estiver disponível */ }
 }
 function jornadaEsperadaDoDia(funcionaria, dataStr) {
   const diaSemana = new Date(dataStr + 'T00:00:00').getDay();
@@ -4119,7 +4126,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
   const f = state.funcionarias.find((x) => x.id === funcionariaId);
   const pontos = state.pontos.filter((p) => p.funcionariaId === funcionariaId).sort((a, b) => new Date(b.horario) - new Date(a.horario));
 
-  const inicio = state.rhFiltroInicio || inicioDaSemana(todayStr());
+  const inicio = state.rhFiltroInicio || todayStr().slice(0, 8) + '01';
   const fim = state.rhFiltroFim || todayStr();
   const pontosFiltrados = pontos.filter((p) => p.data >= inicio && p.data <= fim);
 
@@ -4392,14 +4399,14 @@ function attachRHHandlers(c) {
     });
 
     const filtroInicio = document.getElementById('rhFiltroInicio');
-    if (filtroInicio) filtroInicio.addEventListener('change', (e) => { state.rhFiltroInicio = e.target.value || null; render(); });
+    if (filtroInicio) filtroInicio.addEventListener('change', (e) => { state.rhFiltroInicio = e.target.value || null; salvarRhFiltro(state.rhFiltroInicio, state.rhFiltroFim); render(); });
     const filtroFim = document.getElementById('rhFiltroFim');
-    if (filtroFim) filtroFim.addEventListener('change', (e) => { state.rhFiltroFim = e.target.value || null; render(); });
+    if (filtroFim) filtroFim.addEventListener('change', (e) => { state.rhFiltroFim = e.target.value || null; salvarRhFiltro(state.rhFiltroInicio, state.rhFiltroFim); render(); });
 
     const estaSemana = document.getElementById('rhEstaSemana');
-    if (estaSemana) estaSemana.addEventListener('click', () => { state.rhFiltroInicio = inicioDaSemana(todayStr()); state.rhFiltroFim = todayStr(); render(); });
+    if (estaSemana) estaSemana.addEventListener('click', () => { state.rhFiltroInicio = inicioDaSemana(todayStr()); state.rhFiltroFim = todayStr(); salvarRhFiltro(state.rhFiltroInicio, state.rhFiltroFim); render(); });
     const esteMes = document.getElementById('rhEsteMes');
-    if (esteMes) esteMes.addEventListener('click', () => { state.rhFiltroInicio = todayStr().slice(0, 8) + '01'; state.rhFiltroFim = todayStr(); render(); });
+    if (esteMes) esteMes.addEventListener('click', () => { state.rhFiltroInicio = todayStr().slice(0, 8) + '01'; state.rhFiltroFim = todayStr(); salvarRhFiltro(state.rhFiltroInicio, state.rhFiltroFim); render(); });
 
     const lancarManual = document.querySelector('[data-lancar-ponto-manual]');
     if (lancarManual) lancarManual.addEventListener('click', async () => {
@@ -4417,10 +4424,11 @@ function attachRHHandlers(c) {
       if (error) { alert('Erro ao lançar ponto: ' + error.message); return; }
       // se a data lançada cair fora do período visível na tela, expande o filtro pra
       // incluir ela — senão a batida salva certinho mas some da lista, parecendo que falhou
-      const inicioAtual = state.rhFiltroInicio || inicioDaSemana(todayStr());
+      const inicioAtual = state.rhFiltroInicio || todayStr().slice(0, 8) + '01';
       const fimAtual = state.rhFiltroFim || todayStr();
       if (data < inicioAtual) state.rhFiltroInicio = data;
       if (data > fimAtual) state.rhFiltroFim = data;
+      salvarRhFiltro(state.rhFiltroInicio, state.rhFiltroFim);
       await loadData();
       alert(`${linhas.length} batida(s) lançada(s) em ${new Date(data + 'T00:00:00').toLocaleDateString('pt-BR')}: ${linhas.map((l) => LABEL_PONTO[l.tipo]).join(', ')}.`);
     });
