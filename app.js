@@ -3404,6 +3404,7 @@ function renderTxRow(t) {
     </div>
     <div class="tx-valor" style="color:${t.tipo === 'entrada' ? 'var(--teal)' : 'var(--pink)'}">${t.tipo === 'entrada' ? '+' : '-'}${fmt(t.valor)}</div>
     ${!state.selectMode ? `
+      ${t.tipo === 'saida' && t.pago === false ? `<button class="trash-btn" style="color:var(--teal)" data-marcar-pago="${t.id}" title="Marcar como pago">✅</button>` : ''}
       <button class="trash-btn" data-edit-tx="${t.id}">✏️</button>
       <button class="trash-btn" data-remove-tx="${t.id}">🗑</button>
     ` : ''}
