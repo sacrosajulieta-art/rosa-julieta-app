@@ -371,6 +371,7 @@ const state = {
   empresaConfig: { cnpj: '', razaoSocial: '', nomeFantasia: '', endereco: '', telefone: '' },
   showEmpresaConfigForm: false,
   holeriteMes: null,
+  holeriteDataPagamento: null,
   showLancamentoBanco: false,
   showHistoricoBanco: false,
   showPagarSaldoBanco: false,
@@ -5289,7 +5290,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
           <input type="text" id="holeriteVr" placeholder="VR mensal fixo" value="${resumoHolerite.valorVr.toFixed(2).replace('.', ',')}" />
         </div>
         <div class="form-hint" style="margin-top:10px;margin-bottom:2px">Data do pagamento (é a data que vai aparecer no Financeiro)</div>
-        <input type="date" id="holeriteDataPagamento" value="${(() => { const [anoH, mesH] = mesHolerite.split('-').map(Number); const ultimoDiaH = new Date(anoH, mesH, 0).getDate(); const hojeReal = todayStr(); const candidato = `${mesHolerite}-${String(ultimoDiaH).padStart(2, '0')}`; return candidato <= hojeReal ? candidato : hojeReal; })()}" />
+        <input type="date" id="holeriteDataPagamento" value="${state.holeriteDataPagamento || (() => { const [anoH, mesH] = mesHolerite.split('-').map(Number); const ultimoDiaH = new Date(anoH, mesH, 0).getDate(); const hojeReal = todayStr(); const candidato = `${mesHolerite}-${String(ultimoDiaH).padStart(2, '0')}`; return candidato <= hojeReal ? candidato : hojeReal; })()}" />
         <div class="form-row" style="margin-top:12px">
           <button class="icon-btn-ghost" data-visualizar-previa="${funcionariaId}">👁️ Visualizar prévia</button>
           <button class="confirm-btn" data-fechar-holerite="${funcionariaId}">Fechar holerite de ${mesLabelHolerite(mesHolerite)}</button>
@@ -5421,7 +5422,7 @@ function attachRHHandlers(c) {
 
   if (state.rhFuncionariaDetalheId) {
     const voltar = document.getElementById('voltarFuncionarias');
-    if (voltar) voltar.addEventListener('click', () => { state.rhFuncionariaDetalheId = null; state.editingPontoId = null; state.showFeriasForm = false; state.showAbonarId = null; state.showPreviaHolerite = false; window.__previaHoleriteData = null; render(); });
+    if (voltar) voltar.addEventListener('click', () => { state.rhFuncionariaDetalheId = null; state.editingPontoId = null; state.showFeriasForm = false; state.showAbonarId = null; state.showPreviaHolerite = false; window.__previaHoleriteData = null; state.holeriteDataPagamento = null; render(); });
 
     document.querySelectorAll('[data-abrir-abonar]').forEach((btn) => {
       btn.addEventListener('click', () => { state.showAbonarId = btn.dataset.abrirAbonar; render(); });
@@ -5525,7 +5526,10 @@ function attachRHHandlers(c) {
     });
 
     const holeriteMesSelect = document.getElementById('holeriteMesSelect');
-    if (holeriteMesSelect) holeriteMesSelect.addEventListener('change', (e) => { state.holeriteMes = e.target.value; state.showPreviaHolerite = false; render(); });
+    if (holeriteMesSelect) holeriteMesSelect.addEventListener('change', (e) => { state.holeriteMes = e.target.value; state.showPreviaHolerite = false; state.holeriteDataPagamento = null; render(); });
+
+    const holeriteDataPagamentoInput = document.getElementById('holeriteDataPagamento');
+    if (holeriteDataPagamentoInput) holeriteDataPagamentoInput.addEventListener('change', (e) => { state.holeriteDataPagamento = e.target.value; });
 
     document.querySelectorAll('[data-holerite-modo-extras]').forEach((btn) => {
       btn.addEventListener('click', () => { window.__holeriteModoExtras = btn.dataset.holeriteModoExtras; render(); });
@@ -5811,6 +5815,7 @@ function attachRHHandlers(c) {
       state.rhFuncionariaDetalheId = row.dataset.abrirFuncionaria;
       state.showPreviaHolerite = false;
       window.__previaHoleriteData = null;
+      state.holeriteDataPagamento = null;
       render();
     });
   });
