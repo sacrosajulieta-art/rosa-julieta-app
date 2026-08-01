@@ -367,6 +367,7 @@ const state = {
   holeriteMes: null,
   showLancamentoBanco: false,
   showHistoricoBanco: false,
+  showPreviaHolerite: false,
   showHoleritesLote: false,
   showAbonarId: null,
 };
@@ -5028,10 +5029,41 @@ function renderFuncionariaDetalhe(funcionariaId) {
           <input type="text" id="holeriteVr" placeholder="VR mensal fixo" value="${resumoHolerite.valorVr.toFixed(2).replace('.', ',')}" />
         </div>
         <div class="form-row" style="margin-top:12px">
-          <button class="icon-btn-ghost" data-baixar-pdf-previa="${funcionariaId}">🖨️ Baixar PDF (prévia)</button>
+          <button class="icon-btn-ghost" data-visualizar-previa="${funcionariaId}">👁️ Visualizar prévia</button>
           <button class="confirm-btn" data-fechar-holerite="${funcionariaId}">Fechar holerite de ${mesLabelHolerite(mesHolerite)}</button>
         </div>
       </div>
+
+      ${state.showPreviaHolerite && window.__previaHoleriteData ? (() => {
+        const d = window.__previaHoleriteData;
+        return `
+          <div class="form-card" style="border-color:var(--border);background:var(--surface2)">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+              <div>
+                <div style="font-weight:700;font-size:14px">ROSA JULIETA</div>
+                <div style="font-size:11.5px;color:var(--text-muted)">Recibo de Pagamento de Salário</div>
+              </div>
+              <button class="trash-btn" data-fechar-previa="1">✕</button>
+            </div>
+            <div style="border-top:1px solid var(--border);padding-top:10px;font-size:12.5px;margin-bottom:10px">
+              <div>Funcionária: <strong>${esc(f.nome)}</strong></div>
+              <div>Referência: <strong>${mesLabelHolerite(mesHolerite)}</strong></div>
+              <div>Dias trabalhados: <strong>${resumoHolerite.diasTrabalhados}</strong></div>
+            </div>
+            <div class="prod-breakdown">
+              <div class="prod-breakdown-item"><span>${f.tipoPagamento === 'mensal' ? 'Salário mensal' : `Salário (${resumoHolerite.horasTrabalhadasTotal.toFixed(1)}h)`}</span><span>${fmt(resumoHolerite.salarioBase)}</span></div>
+              ${resumoHolerite.horasExtras > 0 ? `<div class="prod-breakdown-item"><span>Horas extras (${formatarHorasMin(resumoHolerite.horasExtras)} + ${f.percentualHoraExtra}%)</span><span>${d.modoHorasExtras === 'banco' ? '🏦 banco de horas' : fmt(resumoHolerite.valorHorasExtras)}</span></div>` : ''}
+              ${resumoHolerite.horasExtras100 > 0 ? `<div class="prod-breakdown-item"><span>🗓️ Domingo/feriado — 100%</span><span>${d.modoHorasExtras === 'banco' ? '🏦 banco de horas' : fmt(resumoHolerite.valorHorasExtras100)}</span></div>` : ''}
+              ${d.valorVt > 0 ? `<div class="prod-breakdown-item"><span>Vale-transporte (VT)</span><span>${fmt(d.valorVt)}</span></div>` : ''}
+              ${d.valorVr > 0 ? `<div class="prod-breakdown-item"><span>Vale-refeição/alimentação (VR)</span><span>${fmt(d.valorVr)}</span></div>` : ''}
+            </div>
+            <div class="produto-vendido" style="margin-top:10px">💰 Total líquido: ${fmt(d.totalPagar)}</div>
+            ${resumoHolerite.horasFaltantes > 0 ? `<div class="form-hint" style="margin-top:8px;color:var(--red)">${formatarHorasMin(resumoHolerite.horasFaltantes)} de falta não abonada — vira débito no banco de horas.</div>` : ''}
+            ${d.modoHorasExtras === 'banco' && (resumoHolerite.horasExtras > 0 || resumoHolerite.horasExtras100 > 0) ? `<div class="form-hint" style="margin-top:6px">Horas extras desse mês serão creditadas no banco de horas, não pagas em dinheiro.</div>` : ''}
+            <div class="form-hint" style="margin-top:10px">📌 Isso é só uma prévia na tela — nada foi salvo. Clique em "Fechar holerite" acima quando estiver tudo certo.</div>
+          </div>
+        `;
+      })() : ''}
     `}
 
     ${historicoHolerites.length > 0 ? `
@@ -5156,7 +5188,7 @@ function attachRHHandlers(c) {
     });
 
     const holeriteMesSelect = document.getElementById('holeriteMesSelect');
-    if (holeriteMesSelect) holeriteMesSelect.addEventListener('change', (e) => { state.holeriteMes = e.target.value; render(); });
+    if (holeriteMesSelect) holeriteMesSelect.addEventListener('change', (e) => { state.holeriteMes = e.target.value; state.showPreviaHolerite = false; render(); });
 
     document.querySelectorAll('[data-holerite-modo-extras]').forEach((btn) => {
       btn.addEventListener('click', () => { window.__holeriteModoExtras = btn.dataset.holeriteModoExtras; render(); });
@@ -5170,9 +5202,9 @@ function attachRHHandlers(c) {
       });
     });
 
-    document.querySelectorAll('[data-baixar-pdf-previa]').forEach((btn) => {
+    document.querySelectorAll('[data-visualizar-previa]').forEach((btn) => {
       btn.addEventListener('click', () => {
-        const funcionariaId = btn.dataset.baixarPdfPrevia;
+        const funcionariaId = btn.dataset.visualizarPrevia;
         const funcionaria = state.funcionarias.find((x) => x.id === funcionariaId);
         const mesKey = state.holeriteMes || todayStr().slice(0, 7);
         const resumo = calcularResumoHolerite(funcionaria, mesKey);
@@ -5180,8 +5212,13 @@ function attachRHHandlers(c) {
         const valorVt = parseBRNumber(document.getElementById('holeriteVt').value) || 0;
         const valorVr = parseBRNumber(document.getElementById('holeriteVr').value) || 0;
         const totalPagar = resumo.salarioBase + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras : 0) + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras100 : 0) + valorVt + valorVr;
-        gerarHoleritePDF(funcionaria, mesKey, { ...resumo, modoHorasExtras, valorVt, valorVr, totalPagar, assinadoEm: null });
+        window.__previaHoleriteData = { modoHorasExtras, valorVt, valorVr, totalPagar };
+        state.showPreviaHolerite = true;
+        render();
       });
+    });
+    document.querySelectorAll('[data-fechar-previa]').forEach((btn) => {
+      btn.addEventListener('click', () => { state.showPreviaHolerite = false; render(); });
     });
     document.querySelectorAll('[data-baixar-pdf-holerite]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -5991,6 +6028,7 @@ function attachHandlers(c) {
       state.showAbonarId = null;
       state.showHoleritesLote = false;
       state.showHistoricoBanco = false;
+      state.showPreviaHolerite = false;
       render();
     });
   });
