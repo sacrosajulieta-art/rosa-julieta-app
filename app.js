@@ -453,7 +453,7 @@ async function loadData() {
   state.vendasSkuPendentes = (vendasSkuPendentes || []).map((v) => ({ id: v.id, sku: v.sku, quantidade: Number(v.quantidade), faturamento: Number(v.faturamento), ultimaData: v.ultima_data, plataformaNome: v.plataforma_nome || null }));
   state.vendasDetalhe = (vendasDetalhe || []).map((v) => ({ id: v.id, produtoId: v.produto_id, plataformaId: v.plataforma_id, plataformaNome: v.plataforma_nome || null, sku: v.sku || null, quantidade: Number(v.quantidade), valor: Number(v.valor), data: v.data }));
   state.abonosPonto = (abonosPonto || []).map((a) => ({ id: a.id, funcionariaId: a.funcionaria_id, data: a.data, tipo: a.tipo, motivo: a.motivo || '' }));
-  state.holerites = (holerites || []).map((h) => ({ id: h.id, funcionariaId: h.funcionaria_id, mes: h.mes, diasTrabalhados: Number(h.dias_trabalhados), salarioBase: Number(h.salario_base), horasExtras: Number(h.horas_extras), valorHorasExtras: Number(h.valor_horas_extras), horasExtras100: Number(h.horas_extras_100 || 0), valorHorasExtras100: Number(h.valor_horas_extras_100 || 0), modoHorasExtras: h.modo_horas_extras, horasFaltantes: Number(h.horas_faltantes), valorVt: Number(h.valor_vt), valorVr: Number(h.valor_vr), totalPagar: Number(h.total_pagar), assinadoEm: h.assinado_em || null, createdAt: h.created_at }));
+  state.holerites = (holerites || []).map((h) => ({ id: h.id, funcionariaId: h.funcionaria_id, mes: h.mes, diasTrabalhados: Number(h.dias_trabalhados), salarioBase: Number(h.salario_base), horasExtras: Number(h.horas_extras), valorHorasExtras: Number(h.valor_horas_extras), horasExtras100: Number(h.horas_extras_100 || 0), valorHorasExtras100: Number(h.valor_horas_extras_100 || 0), modoHorasExtras: h.modo_horas_extras, horasFaltantes: Number(h.horas_faltantes), valorVt: Number(h.valor_vt), valorVr: Number(h.valor_vr), totalPagar: Number(h.total_pagar), assinadoEm: h.assinado_em || null, assinaturaImagem: h.assinatura_imagem || null, createdAt: h.created_at }));
   state.feriados = (feriados || []).map((f) => ({ id: f.id, data: f.data, nome: f.nome || '' }));
   state.loading = false;
   render();
@@ -1011,6 +1011,11 @@ function gerarHoleritePDF(funcionaria, mesKey, dados) {
     }
 
     y += 10;
+    if (dados.assinaturaImagem) {
+      try {
+        doc.addImage(dados.assinaturaImagem, 'PNG', margemEsq, y - 14, 60, 20);
+      } catch (e) { /* se a imagem vier corrompida, só pula e segue pro texto */ }
+    }
     doc.line(margemEsq, y, margemEsq + 80, y);
     y += 5;
     if (dados.assinadoEm) {
@@ -1443,10 +1448,10 @@ async function removeFeriado(id) {
   const { error } = await sb.from('feriados').delete().eq('id', id);
   if (error) alert('Erro ao remover feriado: ' + error.message);
 }
-// a funcionária confirma (assina eletronicamente) o holerite dela, pelo próprio celular —
-// fica registrado com data/hora, autenticado pelo PIN dela
-async function confirmarAssinaturaHolerite(id) {
-  const { error } = await sb.from('holerites').update({ assinado_em: new Date().toISOString() }).eq('id', id);
+// a funcionária confirma (assina eletronicamente, desenhando o nome na tela) o holerite
+// dela, pelo próprio celular — fica registrado com data/hora + a imagem da assinatura
+async function confirmarAssinaturaHolerite(id, imagemBase64) {
+  const { error } = await sb.from('holerites').update({ assinado_em: new Date().toISOString(), assinatura_imagem: imagemBase64 || null }).eq('id', id);
   if (error) alert('Erro ao confirmar: ' + error.message);
 }
 async function addFeriasTirada(funcionariaId, dataInicio, dataFim) {
@@ -2503,10 +2508,13 @@ function renderModoPonto(app) {
         return `
           <div class="form-card" style="border-color:var(--amber)55;margin-bottom:24px">
             <div style="font-size:13px;font-weight:600;color:var(--amber);margin-bottom:6px">📄 Holerite de ${mesLabelTexto}</div>
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Total: <strong style="color:var(--text)">${fmt(pendente.totalPagar)}</strong> — confirma que recebeu?</div>
-            <div class="form-row">
-              <button class="icon-btn-ghost" data-baixar-pdf-holerite="${pendente.id}">🖨️ Ver PDF</button>
-              <button class="confirm-btn" data-confirmar-assinatura="${pendente.id}">✅ Confirmar recebimento</button>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Total: <strong style="color:var(--text)">${fmt(pendente.totalPagar)}</strong></div>
+            <button class="icon-btn-ghost" style="margin-bottom:10px" data-baixar-pdf-holerite="${pendente.id}">🖨️ Ver PDF antes de assinar</button>
+            <div class="form-hint" style="margin-bottom:4px">Assine com o dedo aqui embaixo:</div>
+            <canvas id="assinaturaCanvas" width="335" height="150" style="background:#fff;border-radius:8px;width:100%;touch-action:none;cursor:crosshair;display:block"></canvas>
+            <div class="form-row" style="margin-top:8px">
+              <button class="toggle-btn" id="limparAssinatura">Limpar</button>
+              <button class="confirm-btn" data-confirmar-assinatura="${pendente.id}">✅ Confirmar assinatura</button>
             </div>
           </div>
         `;
@@ -2575,13 +2583,51 @@ function renderModoPonto(app) {
       gerarHoleritePDF(funcionaria, holerite.mes, holerite);
     });
   });
-  document.querySelectorAll('[data-confirmar-assinatura]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      if (!confirm('Confirmar que você recebeu esse holerite? Isso fica registrado com data e hora, em nome dela.')) return;
-      await confirmarAssinaturaHolerite(btn.dataset.confirmarAssinatura);
-      await loadData();
+
+  // canvas de assinatura — desenha com o dedo (touch) ou mouse
+  const assinaturaCanvas = document.getElementById('assinaturaCanvas');
+  if (assinaturaCanvas) {
+    const ctx = assinaturaCanvas.getContext('2d');
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#111';
+    let desenhando = false;
+    let temTraço = false;
+    const posicao = (e) => {
+      const rect = assinaturaCanvas.getBoundingClientRect();
+      const escalaX = assinaturaCanvas.width / rect.width;
+      const escalaY = assinaturaCanvas.height / rect.height;
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      return { x: (clientX - rect.left) * escalaX, y: (clientY - rect.top) * escalaY };
+    };
+    const iniciar = (e) => { desenhando = true; temTraço = true; const p = posicao(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); e.preventDefault(); };
+    const desenhar = (e) => { if (!desenhando) return; const p = posicao(e); ctx.lineTo(p.x, p.y); ctx.stroke(); e.preventDefault(); };
+    const parar = () => { desenhando = false; };
+    assinaturaCanvas.addEventListener('mousedown', iniciar);
+    assinaturaCanvas.addEventListener('mousemove', desenhar);
+    assinaturaCanvas.addEventListener('mouseup', parar);
+    assinaturaCanvas.addEventListener('mouseleave', parar);
+    assinaturaCanvas.addEventListener('touchstart', iniciar, { passive: false });
+    assinaturaCanvas.addEventListener('touchmove', desenhar, { passive: false });
+    assinaturaCanvas.addEventListener('touchend', parar);
+
+    const limparBtn = document.getElementById('limparAssinatura');
+    if (limparBtn) limparBtn.addEventListener('click', () => {
+      ctx.clearRect(0, 0, assinaturaCanvas.width, assinaturaCanvas.height);
+      temTraço = false;
     });
-  });
+
+    document.querySelectorAll('[data-confirmar-assinatura]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        if (!temTraço) { alert('Assine com o dedo na tela antes de confirmar.'); return; }
+        if (!confirm('Confirmar essa assinatura? Fica registrada com data e hora, em nome dela.')) return;
+        const imagemBase64 = assinaturaCanvas.toDataURL('image/png');
+        await confirmarAssinaturaHolerite(btn.dataset.confirmarAssinatura, imagemBase64);
+        await loadData();
+      });
+    });
+  }
 }
 
 // ---- Modo Supervisora (lançamento de produção) ----
@@ -4816,6 +4862,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
         </div>
         <div class="produto-vendido" style="margin-top:8px">💰 Total pago: ${fmt(holeriteExistente.totalPagar)}</div>
         <div class="form-hint" style="margin-top:8px">${holeriteExistente.assinadoEm ? `✅ Assinado por ${esc(f.nome)} em ${new Date(holeriteExistente.assinadoEm).toLocaleString('pt-BR')}` : '⏳ Aguardando a funcionária confirmar/assinar pelo celular dela'}</div>
+        ${holeriteExistente.assinaturaImagem ? `<img src="${holeriteExistente.assinaturaImagem}" alt="Assinatura" style="background:#fff;border-radius:6px;height:50px;margin-top:6px" />` : ''}
         <div class="form-row" style="margin-top:10px">
           <button class="icon-btn-ghost" data-baixar-pdf-holerite="${holeriteExistente.id}">🖨️ Baixar PDF</button>
           <button class="toggle-btn" data-reabrir-holerite="${holeriteExistente.id}">Refazer esse holerite</button>
