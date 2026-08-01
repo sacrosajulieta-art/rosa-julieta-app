@@ -365,6 +365,7 @@ const state = {
   feriados: [],
   showFeriadosForm: false,
   holeriteMes: null,
+  showLancamentoBanco: false,
   showHoleritesLote: false,
   showAbonarId: null,
 };
@@ -4655,6 +4656,18 @@ function renderFuncionariaDetalhe(funcionariaId) {
         <div class="stat-value" style="color:${saldoBancoHoras >= 0 ? 'var(--teal)' : 'var(--red)'}">${saldoBancoHoras >= 0 ? '+' : '-'}${formatarHorasMin(saldoBancoHoras)}</div>
       </div>
     </div>
+    <button class="icon-btn-ghost" style="margin-bottom:14px" id="toggleLancamentoBanco">🏦 Lançar horas manual no banco (ex: saldo de antes do sistema)</button>
+    ${state.showLancamentoBanco ? `
+      <div class="form-card">
+        <div class="form-row">
+          <button class="toggle-btn ${(window.__tipoLancBanco || 'credito') === 'credito' ? 'active-teal' : ''}" data-tipo-lanc-banco="credito">➕ Crédito (a favor dela)</button>
+          <button class="toggle-btn ${window.__tipoLancBanco === 'debito' ? 'active-pink' : ''}" data-tipo-lanc-banco="debito">➖ Débito (ela deve)</button>
+        </div>
+        <input type="text" id="lancBancoHoras" placeholder="Quantas horas (ex: 16 ou 16,5)" inputmode="numeric" />
+        <input type="text" id="lancBancoDescricao" placeholder="Descrição (ex: saldo de junho, antes do sistema)" />
+        <button class="confirm-btn" style="margin-top:8px" data-salvar-lanc-banco="${funcionariaId}">Lançar</button>
+      </div>
+    ` : ''}
 
     <input type="month" class="month-input" id="holeriteMesSelect" value="${mesHolerite}" />
 
@@ -4792,6 +4805,28 @@ function attachRHHandlers(c) {
           await loadData();
         }
       });
+    });
+
+    const toggleLancamentoBanco = document.getElementById('toggleLancamentoBanco');
+    if (toggleLancamentoBanco) toggleLancamentoBanco.addEventListener('click', () => { state.showLancamentoBanco = !state.showLancamentoBanco; render(); });
+    document.querySelectorAll('[data-tipo-lanc-banco]').forEach((btn) => {
+      btn.addEventListener('click', () => { window.__tipoLancBanco = btn.dataset.tipoLancBanco; render(); });
+    });
+    const salvarLancBanco = document.querySelector('[data-salvar-lanc-banco]');
+    if (salvarLancBanco) salvarLancBanco.addEventListener('click', async () => {
+      const funcionariaId = salvarLancBanco.dataset.salvarLancBanco;
+      const horasDigitadas = parseBRNumber(document.getElementById('lancBancoHoras').value);
+      const descricao = document.getElementById('lancBancoDescricao').value.trim();
+      const tipo = window.__tipoLancBanco || 'credito';
+      if (!horasDigitadas || horasDigitadas <= 0) { alert('Informe a quantidade de horas.'); return; }
+      const horas = tipo === 'debito' ? -horasDigitadas : horasDigitadas;
+      const { error } = await sb.from('banco_horas_lancamentos').insert({
+        funcionaria_id: funcionariaId, data: todayStr(), tipo, horas, descricao: descricao || null,
+      });
+      if (error) { alert('Erro ao lançar: ' + error.message); return; }
+      state.showLancamentoBanco = false;
+      window.__tipoLancBanco = null;
+      await loadData();
     });
 
     const holeriteMesSelect = document.getElementById('holeriteMesSelect');
