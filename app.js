@@ -5310,8 +5310,20 @@ function renderFuncionariaDetalhe(funcionariaId) {
             </div>
             <div style="border-top:1px solid var(--border);padding-top:10px;font-size:12.5px;margin-bottom:10px">
               <div>Funcionária: <strong>${esc(f.nome)}</strong></div>
+              ${f.cargo ? `<div>Cargo: <strong>${esc(f.cargo)}</strong></div>` : ''}
+              ${f.matricula ? `<div>Matrícula: <strong>${esc(f.matricula)}</strong></div>` : ''}
+              ${f.cpf ? `<div>CPF: <strong>${mascararCpf(f.cpf)}</strong></div>` : ''}
               <div>Referência: <strong>${mesLabelHolerite(mesHolerite)} (${new Date(Number(mesHolerite.slice(0, 4)), Number(mesHolerite.slice(5, 7)), 0).getDate()} dias)</strong></div>
               <div>Dias trabalhados: <strong>${resumoHolerite.diasTrabalhados}</strong></div>
+              ${(() => {
+                const oc = calcularResumoOcorrencias(f.id, mesHolerite);
+                if (oc.diasAtestado + oc.diasAbono + oc.diasFerias === 0) return '';
+                const partes = [];
+                if (oc.diasAtestado > 0) partes.push(`${oc.diasAtestado} atestado(s)`);
+                if (oc.diasAbono > 0) partes.push(`${oc.diasAbono} abono(s)/folga(s)`);
+                if (oc.diasFerias > 0) partes.push(`${oc.diasFerias} dia(s) de férias`);
+                return `<div>Ocorrências: <strong>${partes.join(', ')}</strong></div>`;
+              })()}
             </div>
             <div class="prod-breakdown">
               <div class="prod-breakdown-item"><span>${f.tipoPagamento === 'mensal' ? 'Salário mensal' : `Salário (${resumoHolerite.horasTrabalhadasTotal.toFixed(1)}h)`}</span><span>${fmt(resumoHolerite.salarioBase)}</span></div>
