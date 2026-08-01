@@ -367,6 +367,7 @@ const state = {
   holeriteMes: null,
   showLancamentoBanco: false,
   showHistoricoBanco: false,
+  showPagarSaldoBanco: false,
   showPreviaHolerite: false,
   showHoleritesLote: false,
   showAbonarId: null,
@@ -5018,7 +5019,24 @@ function renderFuncionariaDetalhe(funcionariaId) {
     <div class="form-row" style="margin-bottom:14px">
       <button class="icon-btn-ghost" id="toggleLancamentoBanco">🏦 Lançar horas manual</button>
       <button class="icon-btn-ghost" id="toggleHistoricoBanco">${state.showHistoricoBanco ? '✕ Fechar histórico' : '📜 Ver histórico do banco de horas'}</button>
+      ${saldoBancoHoras > 0 ? `<button class="icon-btn-ghost" id="togglePagarSaldoBanco">💰 Pagar saldo em dinheiro</button>` : ''}
     </div>
+    ${state.showPagarSaldoBanco ? `
+      <div class="form-card">
+        <div class="form-hint" style="margin-bottom:2px">Saldo disponível: <strong style="color:var(--teal)">${formatarHorasMin(saldoBancoHoras)}</strong></div>
+        <div class="form-row">
+          <input type="text" id="pagarBancoHorasH" placeholder="Horas (ex: 5)" inputmode="numeric" />
+          <input type="text" id="pagarBancoHorasM" placeholder="Minutos (ex: 30)" inputmode="numeric" />
+        </div>
+        <input type="text" id="pagarBancoValor" placeholder="Valor a pagar (R$) — sugestão: horas × valor da hora" />
+        <div class="form-hint" style="margin-top:2px">O valor sugerido é só horas × valor da hora (sem adicional) — ajuste na mão se quiser incluir o adicional de hora extra que ela abriu mão ao guardar no banco.</div>
+        <input type="text" id="pagarBancoDescricao" placeholder="Descrição (opcional)" />
+        <div class="form-row" style="margin-top:8px">
+          <button class="confirm-btn" data-confirmar-pagar-banco="${funcionariaId}" data-valor-hora="${f ? f.valorHora : 0}">Pagar e debitar do banco</button>
+          <button class="toggle-btn" id="cancelarPagarSaldoBanco">Cancelar</button>
+        </div>
+      </div>
+    ` : ''}
     ${state.showHistoricoBanco ? (() => {
       const lancamentos = state.bancoHorasLancamentos.filter((b) => b.funcionariaId === funcionariaId).sort((a, b) => b.data.localeCompare(a.data));
       if (lancamentos.length === 0) return `<div class="empty-state">Nenhum lançamento no banco de horas ainda.</div>`;
@@ -5237,6 +5255,54 @@ function attachRHHandlers(c) {
     if (toggleLancamentoBanco) toggleLancamentoBanco.addEventListener('click', () => { state.showLancamentoBanco = !state.showLancamentoBanco; render(); });
     const toggleHistoricoBanco = document.getElementById('toggleHistoricoBanco');
     if (toggleHistoricoBanco) toggleHistoricoBanco.addEventListener('click', () => { state.showHistoricoBanco = !state.showHistoricoBanco; render(); });
+
+    const togglePagarSaldoBanco = document.getElementById('togglePagarSaldoBanco');
+    if (togglePagarSaldoBanco) togglePagarSaldoBanco.addEventListener('click', () => { state.showPagarSaldoBanco = true; render(); });
+    const cancelarPagarSaldoBanco = document.getElementById('cancelarPagarSaldoBanco');
+    if (cancelarPagarSaldoBanco) cancelarPagarSaldoBanco.addEventListener('click', () => { state.showPagarSaldoBanco = false; render(); });
+
+    const pagarBancoConfirmBtn = document.querySelector('[data-confirmar-pagar-banco]');
+    if (pagarBancoConfirmBtn) {
+      const valorHoraFunc = Number(pagarBancoConfirmBtn.dataset.valorHora) || 0;
+      const sugerirValor = () => {
+        const h = Number(document.getElementById('pagarBancoHorasH')?.value) || 0;
+        const m = Number(document.getElementById('pagarBancoHorasM')?.value) || 0;
+        const valorInput = document.getElementById('pagarBancoValor');
+        if (valorInput && !valorInput.dataset.editadoManual) {
+          valorInput.value = ((h + m / 60) * valorHoraFunc).toFixed(2).replace('.', ',');
+        }
+      };
+      document.getElementById('pagarBancoHorasH')?.addEventListener('input', sugerirValor);
+      document.getElementById('pagarBancoHorasM')?.addEventListener('input', sugerirValor);
+      document.getElementById('pagarBancoValor')?.addEventListener('input', (e) => { e.target.dataset.editadoManual = '1'; });
+
+      pagarBancoConfirmBtn.addEventListener('click', async () => {
+        const funcionariaId = pagarBancoConfirmBtn.dataset.confirmarPagarBanco;
+        const funcionaria = state.funcionarias.find((x) => x.id === funcionariaId);
+        const h = Number(document.getElementById('pagarBancoHorasH').value) || 0;
+        const m = Number(document.getElementById('pagarBancoHorasM').value) || 0;
+        const horas = h + m / 60;
+        const valor = parseBRNumber(document.getElementById('pagarBancoValor').value);
+        const descricao = document.getElementById('pagarBancoDescricao').value.trim();
+        if (!horas || horas <= 0) { alert('Informe quantas horas quer pagar.'); return; }
+        if (!valor || valor <= 0) { alert('Informe o valor a pagar.'); return; }
+        const saldoAtual = state.bancoHorasLancamentos.filter((b) => b.funcionariaId === funcionariaId).reduce((a, b) => a + b.horas, 0);
+        if (horas > saldoAtual) { alert(`Ela só tem ${formatarHorasMin(saldoAtual)} de saldo — não dá pra pagar mais do que isso.`); return; }
+        if (!confirm(`Pagar ${formatarHorasMin(horas)} do banco de horas de ${funcionaria.nome} por ${fmt(valor)}?\n\nIsso debita do saldo e lança a saída no Financeiro.`)) return;
+        const { error: errBanco } = await sb.from('banco_horas_lancamentos').insert({
+          funcionaria_id: funcionariaId, data: todayStr(), tipo: 'debito', horas: -horas,
+          descricao: `Pago em dinheiro${descricao ? ' — ' + descricao : ''}`,
+        });
+        if (errBanco) { alert('Erro ao debitar do banco: ' + errBanco.message); return; }
+        await addTx({
+          tipo: 'saida', valor, categoria: 'Funcionários — salário', natureza: 'fixo',
+          descricao: `Pagamento de banco de horas — ${funcionaria.nome} (${formatarHorasMin(horas)})${descricao ? ' — ' + descricao : ''}`,
+          data: todayStr(),
+        });
+        state.showPagarSaldoBanco = false;
+        await loadData();
+      });
+    }
     document.querySelectorAll('[data-tipo-lanc-banco]').forEach((btn) => {
       btn.addEventListener('click', () => { window.__tipoLancBanco = btn.dataset.tipoLancBanco; render(); });
     });
@@ -6104,6 +6170,7 @@ function attachHandlers(c) {
       state.showAbonarId = null;
       state.showHoleritesLote = false;
       state.showHistoricoBanco = false;
+      state.showPagarSaldoBanco = false;
       state.showPreviaHolerite = false;
       render();
     });
