@@ -364,6 +364,8 @@ const state = {
   holerites: [],
   feriados: [],
   showFeriadosForm: false,
+  empresaConfig: { cnpj: '', razaoSocial: '' },
+  showEmpresaConfigForm: false,
   holeriteMes: null,
   showLancamentoBanco: false,
   showHistoricoBanco: false,
@@ -375,7 +377,7 @@ const state = {
 
 // ==================== DATA LAYER ====================
 async function loadData() {
-  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }, { data: feriasTiradas, error: e16 }, { data: solicitacoesPonto, error: e17 }, { data: horasExtrasLiquidadas, error: e18 }, { data: bancoHorasLancamentos, error: e19 }, { data: emprestimos, error: e20 }, { data: emprestimoParcelas, error: e21 }, { data: cartoesCredito, error: e22 }, { data: vendasSkuPendentes, error: e23 }, { data: vendasDetalhe, error: e24 }, { data: abonosPonto, error: e25 }, { data: holerites, error: e26 }, { data: feriados, error: e27 }] = await Promise.all([
+  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }, { data: feriasTiradas, error: e16 }, { data: solicitacoesPonto, error: e17 }, { data: horasExtrasLiquidadas, error: e18 }, { data: bancoHorasLancamentos, error: e19 }, { data: emprestimos, error: e20 }, { data: emprestimoParcelas, error: e21 }, { data: cartoesCredito, error: e22 }, { data: vendasSkuPendentes, error: e23 }, { data: vendasDetalhe, error: e24 }, { data: abonosPonto, error: e25 }, { data: holerites, error: e26 }, { data: feriados, error: e27 }, { data: empresaConfig, error: e28 }] = await Promise.all([
     sb.from('transacoes').select('*').order('data', { ascending: false }),
     sb.from('produtos').select('*').order('created_at', { ascending: false }),
     sb.from('plataformas').select('*').order('nome', { ascending: true }),
@@ -403,6 +405,7 @@ async function loadData() {
     sb.from('abonos_ponto').select('*').order('data', { ascending: false }),
     sb.from('holerites').select('*').order('mes', { ascending: false }),
     sb.from('feriados').select('*').order('data', { ascending: true }),
+    sb.from('empresa_config').select('*').eq('id', 1).maybeSingle(),
   ]);
   if (e1) console.error(e1);
   if (e2) console.error(e2);
@@ -431,6 +434,7 @@ async function loadData() {
   if (e25) console.error(e25);
   if (e26) console.error(e26);
   if (e27) console.error(e27);
+  if (e28) console.error(e28);
   state.tx = (tx || []).map(mapTxFromDb);
   state.produtos = (produtos || []).map(mapProdutoFromDb);
   state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0) }));
@@ -458,6 +462,7 @@ async function loadData() {
   state.abonosPonto = (abonosPonto || []).map((a) => ({ id: a.id, funcionariaId: a.funcionaria_id, data: a.data, tipo: a.tipo, motivo: a.motivo || '', horas: a.horas != null ? Number(a.horas) : null }));
   state.holerites = (holerites || []).map((h) => ({ id: h.id, funcionariaId: h.funcionaria_id, mes: h.mes, diasTrabalhados: Number(h.dias_trabalhados), salarioBase: Number(h.salario_base), horasExtras: Number(h.horas_extras), valorHorasExtras: Number(h.valor_horas_extras), horasExtras100: Number(h.horas_extras_100 || 0), valorHorasExtras100: Number(h.valor_horas_extras_100 || 0), modoHorasExtras: h.modo_horas_extras, horasFaltantes: Number(h.horas_faltantes), valorVt: Number(h.valor_vt), valorVr: Number(h.valor_vr), totalPagar: Number(h.total_pagar), assinadoEm: h.assinado_em || null, assinaturaImagem: h.assinatura_imagem || null, createdAt: h.created_at }));
   state.feriados = (feriados || []).map((f) => ({ id: f.id, data: f.data, nome: f.nome || '' }));
+  state.empresaConfig = { cnpj: empresaConfig?.cnpj || '', razaoSocial: empresaConfig?.razao_social || '' };
   state.loading = false;
   render();
 }
@@ -953,13 +958,16 @@ function gerarHoleritePDF(funcionaria, mesKey, dados) {
     let y = 18;
 
     const mesLabelTexto = new Date(mesKey + '-01T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+    const [anoPdf, mesPdf] = mesKey.split('-').map(Number);
+    const diasCorridosMes = new Date(anoPdf, mesPdf, 0).getDate();
 
     doc.setFontSize(14);
     doc.setFont(undefined, 'bold');
-    doc.text('ROSA JULIETA', margemEsq, y);
+    doc.text(state.empresaConfig.razaoSocial || 'ROSA JULIETA', margemEsq, y);
     doc.setFont(undefined, 'normal');
     doc.setFontSize(10);
     doc.text('Recibo de Pagamento de Salário', margemEsq, y + 6);
+    if (state.empresaConfig.cnpj) { doc.text(`CNPJ: ${state.empresaConfig.cnpj}`, margemEsq, y + 12); y += 6; }
     y += 16;
 
     doc.setDrawColor(200);
@@ -968,7 +976,7 @@ function gerarHoleritePDF(funcionaria, mesKey, dados) {
 
     doc.setFontSize(10);
     doc.text(`Funcionária: ${funcionaria.nome}`, margemEsq, y); y += 6;
-    doc.text(`Referência: ${mesLabelTexto.charAt(0).toUpperCase() + mesLabelTexto.slice(1)}`, margemEsq, y); y += 6;
+    doc.text(`Referência: ${mesLabelTexto.charAt(0).toUpperCase() + mesLabelTexto.slice(1)} (${diasCorridosMes} dias)`, margemEsq, y); y += 6;
     doc.text(`Dias trabalhados no mês: ${dados.diasTrabalhados}`, margemEsq, y); y += 10;
 
     doc.setFont(undefined, 'bold');
@@ -1064,7 +1072,7 @@ function gerarEspelhoPontoPDF(funcionaria, mesKey) {
     const desenharCabecalho = () => {
       doc.setFontSize(13);
       doc.setFont(undefined, 'bold');
-      doc.text('ROSA JULIETA — Espelho de Ponto', margemEsq, y);
+      doc.text(`${state.empresaConfig.razaoSocial || 'ROSA JULIETA'} — Espelho de Ponto`, margemEsq, y);
       doc.setFont(undefined, 'normal');
       doc.setFontSize(10);
       y += 7;
@@ -1578,6 +1586,10 @@ async function addFeriado(data, nome) {
 async function removeFeriado(id) {
   const { error } = await sb.from('feriados').delete().eq('id', id);
   if (error) alert('Erro ao remover feriado: ' + error.message);
+}
+async function salvarEmpresaConfig(cnpj, razaoSocial) {
+  const { error } = await sb.from('empresa_config').upsert({ id: 1, cnpj: cnpj || null, razao_social: razaoSocial || null });
+  if (error) alert('Erro ao salvar dados da empresa: ' + error.message);
 }
 // a funcionária confirma (assina eletronicamente, desenhando o nome na tela) o holerite
 // dela, pelo próprio celular — fica registrado com data/hora + a imagem da assinatura
@@ -4596,11 +4608,22 @@ function renderRH(c) {
       <div><div class="section-title">RH</div><div class="section-subtitle">Funcionárias e ponto eletrônico</div></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="icon-btn-ghost" id="copiarLinkPonto">🔗 Link de ponto</button>
+        <button class="icon-btn-ghost" id="toggleEmpresaConfigForm">🏢 Dados da empresa</button>
         <button class="icon-btn-ghost" id="toggleFeriadosForm">🗓️ Feriados</button>
         <button class="icon-btn-ghost" id="toggleHoleritesLote" style="${lembreteHoleriteRH ? 'background:rgba(255,182,39,0.15);border:1.5px solid var(--amber);color:var(--amber);font-weight:700' : ''}">📋 Fechar holerites do mês</button>
         <button class="icon-btn" id="toggleFuncionariaForm">＋ Funcionária</button>
       </div>
     </div>
+
+    ${state.showEmpresaConfigForm ? `
+      <div class="form-card">
+        <div class="section-title" style="margin-bottom:2px">Dados da empresa</div>
+        <div class="section-subtitle" style="margin-bottom:10px">Usados no cabeçalho dos holerites e recibos em PDF.</div>
+        <input type="text" id="empresaRazaoSocial" placeholder="Razão social (ex: Rosa Julieta Confecções LTDA)" value="${esc(state.empresaConfig.razaoSocial)}" />
+        <input type="text" id="empresaCnpj" placeholder="CNPJ (ex: 00.000.000/0001-00)" value="${esc(state.empresaConfig.cnpj)}" style="margin-top:8px" />
+        <button class="confirm-btn" style="margin-top:8px" id="salvarEmpresaConfig">Salvar</button>
+      </div>
+    ` : ''}
 
     ${state.showFeriadosForm ? `
       <div class="form-card">
@@ -5142,14 +5165,15 @@ function renderFuncionariaDetalhe(funcionariaId) {
           <div class="form-card" style="border-color:var(--border);background:var(--surface2)">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
               <div>
-                <div style="font-weight:700;font-size:14px">ROSA JULIETA</div>
+                <div style="font-weight:700;font-size:14px">${esc(state.empresaConfig.razaoSocial || 'ROSA JULIETA')}</div>
                 <div style="font-size:11.5px;color:var(--text-muted)">Recibo de Pagamento de Salário</div>
+                ${state.empresaConfig.cnpj ? `<div style="font-size:11px;color:var(--text-muted)">CNPJ: ${esc(state.empresaConfig.cnpj)}</div>` : ''}
               </div>
               <button class="trash-btn" data-fechar-previa="1">✕</button>
             </div>
             <div style="border-top:1px solid var(--border);padding-top:10px;font-size:12.5px;margin-bottom:10px">
               <div>Funcionária: <strong>${esc(f.nome)}</strong></div>
-              <div>Referência: <strong>${mesLabelHolerite(mesHolerite)}</strong></div>
+              <div>Referência: <strong>${mesLabelHolerite(mesHolerite)} (${new Date(Number(mesHolerite.slice(0, 4)), Number(mesHolerite.slice(5, 7)), 0).getDate()} dias)</strong></div>
               <div>Dias trabalhados: <strong>${resumoHolerite.diasTrabalhados}</strong></div>
             </div>
             <div class="prod-breakdown">
@@ -5523,6 +5547,17 @@ function attachRHHandlers(c) {
 
   const toggleHoleritesLote = document.getElementById('toggleHoleritesLote');
   if (toggleHoleritesLote) toggleHoleritesLote.addEventListener('click', () => { state.showHoleritesLote = !state.showHoleritesLote; render(); });
+
+  const toggleEmpresaConfigForm = document.getElementById('toggleEmpresaConfigForm');
+  if (toggleEmpresaConfigForm) toggleEmpresaConfigForm.addEventListener('click', () => { state.showEmpresaConfigForm = !state.showEmpresaConfigForm; render(); });
+  const salvarEmpresaConfigBtn = document.getElementById('salvarEmpresaConfig');
+  if (salvarEmpresaConfigBtn) salvarEmpresaConfigBtn.addEventListener('click', async () => {
+    const razaoSocial = document.getElementById('empresaRazaoSocial').value.trim();
+    const cnpj = document.getElementById('empresaCnpj').value.trim();
+    await salvarEmpresaConfig(cnpj, razaoSocial);
+    state.showEmpresaConfigForm = false;
+    await loadData();
+  });
 
   const toggleFeriadosForm = document.getElementById('toggleFeriadosForm');
   if (toggleFeriadosForm) toggleFeriadosForm.addEventListener('click', () => { state.showFeriadosForm = !state.showFeriadosForm; render(); });
@@ -6193,6 +6228,7 @@ function attachHandlers(c) {
       state.showHistoricoBanco = false;
       state.showPagarSaldoBanco = false;
       state.showPreviaHolerite = false;
+      state.showEmpresaConfigForm = false;
       render();
     });
   });
