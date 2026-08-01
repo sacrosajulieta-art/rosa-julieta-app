@@ -1011,6 +1011,10 @@ function gerarHoleritePDF(funcionaria, mesKey, dados) {
       doc.text('Observação: horas extras desse mês foram creditadas no banco de horas (compensação em folga), não pagas em dinheiro.', margemEsq, y, { maxWidth: largura });
       y += 12;
     }
+    if (dados.horasBancoUsadas > 0) {
+      doc.text(`Observação: ${formatarHorasMin(dados.horasBancoUsadas)} do saldo do banco de horas (de meses anteriores) foram usadas pra cobrir faltas parciais nesse mês.`, margemEsq, y, { maxWidth: largura });
+      y += 12;
+    }
 
     y += 10;
     if (dados.assinaturaImagem) {
@@ -1830,7 +1834,11 @@ function calcularResumoHolerite(funcionaria, mesKey) {
   const valorHorasExtras100 = horasExtras100 * (funcionaria.valorHora || 0) * 2;
   const valorVt = funcionaria.valorVtDia || 0;
   const valorVr = funcionaria.valorVrDia || 0;
-  return { diasTrabalhados, horasExtras, horasExtras100, horasFaltantes, horasTrabalhadasTotal, salarioBase, valorHorasExtras, valorHorasExtras100, valorVt, valorVr, debitoCompensacaoSabado };
+  // quanto do banco de horas foi usado nesse mês (soma dos abonos parciais com horas definidas)
+  const horasBancoUsadas = state.abonosPonto
+    .filter((a) => a.funcionariaId === funcionaria.id && a.data.slice(0, 7) === mesKey && a.horas != null)
+    .reduce((acc, a) => acc + a.horas, 0);
+  return { diasTrabalhados, horasExtras, horasExtras100, horasFaltantes, horasTrabalhadasTotal, salarioBase, valorHorasExtras, valorHorasExtras100, valorVt, valorVr, debitoCompensacaoSabado, horasBancoUsadas };
 }
 // procura, nos últimos N dias, dias em que ela deveria ter trabalhado mas falta alguma
 // das 4 batidas — hoje só conta a partir do horário de saída esperado. Separa o que já
@@ -2731,7 +2739,8 @@ function renderModoPonto(app) {
     btn.addEventListener('click', () => {
       const holerite = state.holerites.find((h) => h.id === btn.dataset.baixarPdfHolerite);
       if (!holerite) return;
-      gerarHoleritePDF(funcionaria, holerite.mes, holerite);
+      const horasBancoUsadas = state.abonosPonto.filter((a) => a.funcionariaId === holerite.funcionariaId && a.data.slice(0, 7) === holerite.mes && a.horas != null).reduce((acc, a) => acc + a.horas, 0);
+      gerarHoleritePDF(funcionaria, holerite.mes, { ...holerite, horasBancoUsadas });
     });
   });
 
@@ -4743,6 +4752,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
   const mesHolerite = state.holeriteMes || todayStr().slice(0, 7);
   const resumoHolerite = f ? calcularResumoHolerite(f, mesHolerite) : null;
   const holeriteExistente = state.holerites.find((h) => h.funcionariaId === funcionariaId && h.mes === mesHolerite);
+  const horasBancoUsadasFechado = f ? state.abonosPonto.filter((a) => a.funcionariaId === funcionariaId && a.data.slice(0, 7) === mesHolerite && a.horas != null).reduce((acc, a) => acc + a.horas, 0) : 0;
   const saldoBancoHoras = state.bancoHorasLancamentos.filter((b) => b.funcionariaId === funcionariaId).reduce((a, b) => a + b.horas, 0);
   const historicoHolerites = state.holerites.filter((h) => h.funcionariaId === funcionariaId).sort((a, b) => b.mes.localeCompare(a.mes));
   const mesLabelHolerite = (mk) => new Date(mk + '-01T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
@@ -5050,6 +5060,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
           <div class="prod-breakdown-item"><span>Horas extras (${formatarHorasMin(holeriteExistente.horasExtras)})</span><span>${holeriteExistente.modoHorasExtras === 'dinheiro' ? fmt(holeriteExistente.valorHorasExtras) : '🏦 banco de horas'}</span></div>
           ${holeriteExistente.horasExtras100 > 0 ? `<div class="prod-breakdown-item"><span>🗓️ Domingo/feriado — 100% (${formatarHorasMin(holeriteExistente.horasExtras100)})</span><span>${holeriteExistente.modoHorasExtras === 'dinheiro' ? fmt(holeriteExistente.valorHorasExtras100) : '🏦 banco de horas (em dobro)'}</span></div>` : ''}
           <div class="prod-breakdown-item"><span>Horas faltantes não abonadas</span><span>${formatarHorasMin(holeriteExistente.horasFaltantes)} 🏦 débito no banco</span></div>
+          ${horasBancoUsadasFechado > 0 ? `<div class="prod-breakdown-item"><span>🏦 Banco de horas usado nesse mês</span><span style="color:var(--amber)">-${formatarHorasMin(horasBancoUsadasFechado)}</span></div>` : ''}
           <div class="prod-breakdown-item"><span>VT</span><span>${fmt(holeriteExistente.valorVt)}</span></div>
           <div class="prod-breakdown-item"><span>VR</span><span>${fmt(holeriteExistente.valorVr)}</span></div>
         </div>
@@ -5070,6 +5081,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
           <div class="prod-breakdown-item"><span>Horas extras (${formatarHorasMin(resumoHolerite.horasExtras)} × ${fmt(f.valorHora)} + ${f.percentualHoraExtra}%)</span><span>${fmt(resumoHolerite.valorHorasExtras)}</span></div>
           ${resumoHolerite.horasExtras100 > 0 ? `<div class="prod-breakdown-item"><span>🗓️ Domingo/feriado — 100% (${formatarHorasMin(resumoHolerite.horasExtras100)} × ${fmt(f.valorHora)} × 2)</span><span>${fmt(resumoHolerite.valorHorasExtras100)}</span></div>` : ''}
           ${resumoHolerite.debitoCompensacaoSabado > 0 ? `<div class="prod-breakdown-item"><span>⚖️ Compensação de sábado (já descontada do líquido)</span><span style="color:var(--amber)">-${formatarHorasMin(resumoHolerite.debitoCompensacaoSabado)}</span></div>` : ''}
+          ${resumoHolerite.horasBancoUsadas > 0 ? `<div class="prod-breakdown-item"><span>🏦 Banco de horas usado nesse mês</span><span style="color:var(--amber)">-${formatarHorasMin(resumoHolerite.horasBancoUsadas)}</span></div>` : ''}
           <div class="prod-breakdown-item"><span>Horas faltantes não abonadas</span><span style="color:var(--red)">${formatarHorasMin(resumoHolerite.horasFaltantes)}</span></div>
         </div>
         <div class="form-hint" style="margin-top:10px;margin-bottom:2px">Como pagar as horas extras desse mês?</div>
@@ -5113,6 +5125,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
             </div>
             <div class="produto-vendido" style="margin-top:10px">💰 Total líquido: ${fmt(d.totalPagar)}</div>
             ${resumoHolerite.horasFaltantes > 0 ? `<div class="form-hint" style="margin-top:8px;color:var(--red)">${formatarHorasMin(resumoHolerite.horasFaltantes)} de falta não abonada — vira débito no banco de horas.</div>` : ''}
+            ${resumoHolerite.horasBancoUsadas > 0 ? `<div class="form-hint" style="margin-top:6px;color:var(--amber)">🏦 ${formatarHorasMin(resumoHolerite.horasBancoUsadas)} do saldo do banco de horas foram usadas pra cobrir faltas parciais nesse mês.</div>` : ''}
             ${d.modoHorasExtras === 'banco' && (resumoHolerite.horasExtras > 0 || resumoHolerite.horasExtras100 > 0) ? `<div class="form-hint" style="margin-top:6px">Horas extras desse mês serão creditadas no banco de horas, não pagas em dinheiro.</div>` : ''}
             <div class="form-hint" style="margin-top:10px">📌 Isso é só uma prévia na tela — nada foi salvo. Clique em "Fechar holerite" acima quando estiver tudo certo.</div>
           </div>
@@ -5281,7 +5294,8 @@ function attachRHHandlers(c) {
       btn.addEventListener('click', () => {
         const holerite = state.holerites.find((h) => h.id === btn.dataset.baixarPdfHolerite);
         const funcionaria = state.funcionarias.find((x) => x.id === holerite.funcionariaId);
-        gerarHoleritePDF(funcionaria, holerite.mes, holerite);
+        const horasBancoUsadas = state.abonosPonto.filter((a) => a.funcionariaId === holerite.funcionariaId && a.data.slice(0, 7) === holerite.mes && a.horas != null).reduce((acc, a) => acc + a.horas, 0);
+        gerarHoleritePDF(funcionaria, holerite.mes, { ...holerite, horasBancoUsadas });
       });
     });
 
