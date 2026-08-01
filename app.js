@@ -453,7 +453,7 @@ async function loadData() {
   state.vendasSkuPendentes = (vendasSkuPendentes || []).map((v) => ({ id: v.id, sku: v.sku, quantidade: Number(v.quantidade), faturamento: Number(v.faturamento), ultimaData: v.ultima_data, plataformaNome: v.plataforma_nome || null }));
   state.vendasDetalhe = (vendasDetalhe || []).map((v) => ({ id: v.id, produtoId: v.produto_id, plataformaId: v.plataforma_id, plataformaNome: v.plataforma_nome || null, sku: v.sku || null, quantidade: Number(v.quantidade), valor: Number(v.valor), data: v.data }));
   state.abonosPonto = (abonosPonto || []).map((a) => ({ id: a.id, funcionariaId: a.funcionaria_id, data: a.data, tipo: a.tipo, motivo: a.motivo || '' }));
-  state.holerites = (holerites || []).map((h) => ({ id: h.id, funcionariaId: h.funcionaria_id, mes: h.mes, diasTrabalhados: Number(h.dias_trabalhados), salarioBase: Number(h.salario_base), horasExtras: Number(h.horas_extras), valorHorasExtras: Number(h.valor_horas_extras), horasExtras100: Number(h.horas_extras_100 || 0), valorHorasExtras100: Number(h.valor_horas_extras_100 || 0), modoHorasExtras: h.modo_horas_extras, horasFaltantes: Number(h.horas_faltantes), valorVt: Number(h.valor_vt), valorVr: Number(h.valor_vr), totalPagar: Number(h.total_pagar), createdAt: h.created_at }));
+  state.holerites = (holerites || []).map((h) => ({ id: h.id, funcionariaId: h.funcionaria_id, mes: h.mes, diasTrabalhados: Number(h.dias_trabalhados), salarioBase: Number(h.salario_base), horasExtras: Number(h.horas_extras), valorHorasExtras: Number(h.valor_horas_extras), horasExtras100: Number(h.horas_extras_100 || 0), valorHorasExtras100: Number(h.valor_horas_extras_100 || 0), modoHorasExtras: h.modo_horas_extras, horasFaltantes: Number(h.horas_faltantes), valorVt: Number(h.valor_vt), valorVr: Number(h.valor_vr), totalPagar: Number(h.total_pagar), assinadoEm: h.assinado_em || null, createdAt: h.created_at }));
   state.feriados = (feriados || []).map((f) => ({ id: f.id, data: f.data, nome: f.nome || '' }));
   state.loading = false;
   render();
@@ -934,6 +934,100 @@ function gerarFichaCortePDF(distribuicao, ordem) {
     alert('Não consegui gerar o PDF: ' + err.message);
   }
 }
+// ---- Holerite em PDF ----
+// aceita tanto a prévia (dados calculados na hora, ainda não fechado) quanto um holerite
+// já fechado (com data/hora de assinatura, se a funcionária já confirmou)
+function gerarHoleritePDF(funcionaria, mesKey, dados) {
+  if (!window.jspdf || !window.jspdf.jsPDF) {
+    alert('A biblioteca de PDF ainda não carregou. Aguarda alguns segundos e tenta de novo, ou feche e abra o app.');
+    return;
+  }
+  try {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const margemEsq = 15;
+    const largura = 180;
+    let y = 18;
+
+    const mesLabelTexto = new Date(mesKey + '-01T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+
+    doc.setFontSize(14);
+    doc.setFont(undefined, 'bold');
+    doc.text('ROSA JULIETA', margemEsq, y);
+    doc.setFont(undefined, 'normal');
+    doc.setFontSize(10);
+    doc.text('Recibo de Pagamento de Salário', margemEsq, y + 6);
+    y += 16;
+
+    doc.setDrawColor(200);
+    doc.line(margemEsq, y, margemEsq + largura, y);
+    y += 8;
+
+    doc.setFontSize(10);
+    doc.text(`Funcionária: ${funcionaria.nome}`, margemEsq, y); y += 6;
+    doc.text(`Referência: ${mesLabelTexto.charAt(0).toUpperCase() + mesLabelTexto.slice(1)}`, margemEsq, y); y += 6;
+    doc.text(`Dias trabalhados no mês: ${dados.diasTrabalhados}`, margemEsq, y); y += 10;
+
+    doc.setFont(undefined, 'bold');
+    doc.text('Descrição', margemEsq, y);
+    doc.text('Valor', margemEsq + largura - 25, y);
+    doc.setFont(undefined, 'normal');
+    y += 2;
+    doc.line(margemEsq, y, margemEsq + largura, y);
+    y += 6;
+
+    const linha = (texto, valor) => {
+      doc.text(texto, margemEsq, y);
+      doc.text(fmt(valor), margemEsq + largura - 25, y, { align: 'left' });
+      y += 6.5;
+    };
+
+    linha(funcionaria.tipoPagamento === 'mensal' ? 'Salário mensal' : `Salário (${dados.horasTrabalhadasTotal.toFixed(1)}h trabalhadas)`, dados.salarioBase);
+    if (dados.horasExtras > 0) linha(`Horas extras (${formatarHorasMin(dados.horasExtras)} + ${funcionaria.percentualHoraExtra}%)`, dados.modoHorasExtras === 'banco' ? 0 : dados.valorHorasExtras);
+    if (dados.horasExtras100 > 0) linha(`Horas domingo/feriado (${formatarHorasMin(dados.horasExtras100)} + 100%)`, dados.modoHorasExtras === 'banco' ? 0 : dados.valorHorasExtras100);
+    if (dados.valorVt > 0) linha('Vale-transporte (VT)', dados.valorVt);
+    if (dados.valorVr > 0) linha('Vale-refeição/alimentação (VR)', dados.valorVr);
+
+    y += 2;
+    doc.line(margemEsq, y, margemEsq + largura, y);
+    y += 7;
+    doc.setFont(undefined, 'bold');
+    doc.setFontSize(11);
+    doc.text('Total líquido', margemEsq, y);
+    doc.text(fmt(dados.totalPagar), margemEsq + largura - 25, y);
+    doc.setFont(undefined, 'normal');
+    doc.setFontSize(10);
+    y += 12;
+
+    if (dados.horasFaltantes > 0) {
+      doc.setTextColor(180, 0, 0);
+      doc.text(`Observação: ${formatarHorasMin(dados.horasFaltantes)} de falta não abonada registrada em banco de horas — a compensar.`, margemEsq, y, { maxWidth: largura });
+      doc.setTextColor(0);
+      y += 12;
+    }
+    if (dados.modoHorasExtras === 'banco' && (dados.horasExtras > 0 || dados.horasExtras100 > 0)) {
+      doc.text('Observação: horas extras desse mês foram creditadas no banco de horas (compensação em folga), não pagas em dinheiro.', margemEsq, y, { maxWidth: largura });
+      y += 12;
+    }
+
+    y += 10;
+    doc.line(margemEsq, y, margemEsq + 80, y);
+    y += 5;
+    if (dados.assinadoEm) {
+      doc.setFontSize(9);
+      doc.text(`Assinado eletronicamente por ${funcionaria.nome} em ${new Date(dados.assinadoEm).toLocaleString('pt-BR')}`, margemEsq, y, { maxWidth: 80 });
+    } else {
+      doc.setFontSize(9);
+      doc.text('Assinatura da funcionária', margemEsq, y);
+    }
+
+    const nomeArquivo = `holerite-${funcionaria.nome.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${mesKey}.pdf`;
+    doc.save(nomeArquivo);
+  } catch (err) {
+    console.error(err);
+    alert('Não consegui gerar o PDF: ' + err.message);
+  }
+}
 // baixa automática (FIFO) do que a costureira tem em mãos, quando ela devolve peças prontas
 async function baixarDistribuicoesFIFO(costureiraId, produtoId, varianteId, quantidadeDevolvida) {
   let restante = quantidadeDevolvida;
@@ -1348,6 +1442,12 @@ async function addFeriado(data, nome) {
 async function removeFeriado(id) {
   const { error } = await sb.from('feriados').delete().eq('id', id);
   if (error) alert('Erro ao remover feriado: ' + error.message);
+}
+// a funcionária confirma (assina eletronicamente) o holerite dela, pelo próprio celular —
+// fica registrado com data/hora, autenticado pelo PIN dela
+async function confirmarAssinaturaHolerite(id) {
+  const { error } = await sb.from('holerites').update({ assinado_em: new Date().toISOString() }).eq('id', id);
+  if (error) alert('Erro ao confirmar: ' + error.message);
 }
 async function addFeriasTirada(funcionariaId, dataInicio, dataFim) {
   const { error } = await sb.from('ferias_tiradas').insert({ funcionaria_id: funcionariaId, data_inicio: dataInicio, data_fim: dataFim });
@@ -2396,6 +2496,22 @@ function renderModoPonto(app) {
         `;
       })()}
 
+      ${(() => {
+        const pendente = state.holerites.find((h) => h.funcionariaId === funcionaria.id && !h.assinadoEm);
+        if (!pendente) return '';
+        const mesLabelTexto = new Date(pendente.mes + '-01T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+        return `
+          <div class="form-card" style="border-color:var(--amber)55;margin-bottom:24px">
+            <div style="font-size:13px;font-weight:600;color:var(--amber);margin-bottom:6px">📄 Holerite de ${mesLabelTexto}</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Total: <strong style="color:var(--text)">${fmt(pendente.totalPagar)}</strong> — confirma que recebeu?</div>
+            <div class="form-row">
+              <button class="icon-btn-ghost" data-baixar-pdf-holerite="${pendente.id}">🖨️ Ver PDF</button>
+              <button class="confirm-btn" data-confirmar-assinatura="${pendente.id}">✅ Confirmar recebimento</button>
+            </div>
+          </div>
+        `;
+      })()}
+
       <div class="section-title-wrap"><div><div class="section-title">Hoje</div></div></div>
       ${pontosHoje.length === 0 ? `<div class="empty-state">Nenhuma batida ainda hoje.</div>` : `
         <div class="tx-list">
@@ -2448,6 +2564,21 @@ function renderModoPonto(app) {
       const horarioISO = new Date(`${data}T${hora}:00`).toISOString();
       await addSolicitacaoPonto(funcionariaId, data, tipo, horarioISO, motivo);
       state.showSolicitarPontoId = null;
+      await loadData();
+    });
+  });
+
+  document.querySelectorAll('[data-baixar-pdf-holerite]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const holerite = state.holerites.find((h) => h.id === btn.dataset.baixarPdfHolerite);
+      if (!holerite) return;
+      gerarHoleritePDF(funcionaria, holerite.mes, holerite);
+    });
+  });
+  document.querySelectorAll('[data-confirmar-assinatura]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Confirmar que você recebeu esse holerite? Isso fica registrado com data e hora, em nome dela.')) return;
+      await confirmarAssinaturaHolerite(btn.dataset.confirmarAssinatura);
       await loadData();
     });
   });
@@ -4206,7 +4337,7 @@ function renderHoleritesLote() {
                 <div style="flex:1">
                   <div class="alert-name">${esc(f.nome)}</div>
                   ${jaFechado ? `
-                    <div class="alert-meta" style="color:var(--teal)">✅ Já fechado — ${fmt(jaFechado.totalPagar)}</div>
+                    <div class="alert-meta" style="color:var(--teal)">✅ Já fechado — ${fmt(jaFechado.totalPagar)} · ${jaFechado.assinadoEm ? '✍️ assinado' : '⏳ aguardando assinatura'}</div>
                   ` : `
                     <div class="alert-meta">${resumo.diasTrabalhados} dias · base ${fmt(resumo.salarioBase)} · extras ${formatarHorasMin(resumo.horasExtras)} (${f.modoCompensacaoPadrao === 'banco' ? '🏦 banco' : fmt(resumo.valorHorasExtras)})${resumo.horasExtras100 > 0 ? ` · 🗓️ ${formatarHorasMin(resumo.horasExtras100)} 100%` : ''} · faltas ${formatarHorasMin(resumo.horasFaltantes)}${resumo.valorVt > 0 ? ` · VT ${fmt(resumo.valorVt)}` : ''}${resumo.valorVr > 0 ? ` · VR ${fmt(resumo.valorVr)}` : ''}</div>
                   `}
@@ -4684,7 +4815,11 @@ function renderFuncionariaDetalhe(funcionariaId) {
           <div class="prod-breakdown-item"><span>VR</span><span>${fmt(holeriteExistente.valorVr)}</span></div>
         </div>
         <div class="produto-vendido" style="margin-top:8px">💰 Total pago: ${fmt(holeriteExistente.totalPagar)}</div>
-        <button class="toggle-btn" style="margin-top:10px" data-reabrir-holerite="${holeriteExistente.id}">Refazer esse holerite</button>
+        <div class="form-hint" style="margin-top:8px">${holeriteExistente.assinadoEm ? `✅ Assinado por ${esc(f.nome)} em ${new Date(holeriteExistente.assinadoEm).toLocaleString('pt-BR')}` : '⏳ Aguardando a funcionária confirmar/assinar pelo celular dela'}</div>
+        <div class="form-row" style="margin-top:10px">
+          <button class="icon-btn-ghost" data-baixar-pdf-holerite="${holeriteExistente.id}">🖨️ Baixar PDF</button>
+          <button class="toggle-btn" data-reabrir-holerite="${holeriteExistente.id}">Refazer esse holerite</button>
+        </div>
       </div>
     ` : `
       <div class="form-card">
@@ -4706,7 +4841,10 @@ function renderFuncionariaDetalhe(funcionariaId) {
           <input type="text" id="holeriteVt" placeholder="VT mensal fixo" value="${resumoHolerite.valorVt.toFixed(2).replace('.', ',')}" />
           <input type="text" id="holeriteVr" placeholder="VR mensal fixo" value="${resumoHolerite.valorVr.toFixed(2).replace('.', ',')}" />
         </div>
-        <button class="confirm-btn" style="margin-top:12px" data-fechar-holerite="${funcionariaId}">Fechar holerite de ${mesLabelHolerite(mesHolerite)}</button>
+        <div class="form-row" style="margin-top:12px">
+          <button class="icon-btn-ghost" data-baixar-pdf-previa="${funcionariaId}">🖨️ Baixar PDF (prévia)</button>
+          <button class="confirm-btn" data-fechar-holerite="${funcionariaId}">Fechar holerite de ${mesLabelHolerite(mesHolerite)}</button>
+        </div>
       </div>
     `}
 
@@ -4834,6 +4972,27 @@ function attachRHHandlers(c) {
 
     document.querySelectorAll('[data-holerite-modo-extras]').forEach((btn) => {
       btn.addEventListener('click', () => { window.__holeriteModoExtras = btn.dataset.holeriteModoExtras; render(); });
+    });
+
+    document.querySelectorAll('[data-baixar-pdf-previa]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const funcionariaId = btn.dataset.baixarPdfPrevia;
+        const funcionaria = state.funcionarias.find((x) => x.id === funcionariaId);
+        const mesKey = state.holeriteMes || todayStr().slice(0, 7);
+        const resumo = calcularResumoHolerite(funcionaria, mesKey);
+        const modoHorasExtras = window.__holeriteModoExtras || funcionaria.modoCompensacaoPadrao;
+        const valorVt = parseBRNumber(document.getElementById('holeriteVt').value) || 0;
+        const valorVr = parseBRNumber(document.getElementById('holeriteVr').value) || 0;
+        const totalPagar = resumo.salarioBase + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras : 0) + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras100 : 0) + valorVt + valorVr;
+        gerarHoleritePDF(funcionaria, mesKey, { ...resumo, modoHorasExtras, valorVt, valorVr, totalPagar, assinadoEm: null });
+      });
+    });
+    document.querySelectorAll('[data-baixar-pdf-holerite]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const holerite = state.holerites.find((h) => h.id === btn.dataset.baixarPdfHolerite);
+        const funcionaria = state.funcionarias.find((x) => x.id === holerite.funcionariaId);
+        gerarHoleritePDF(funcionaria, holerite.mes, holerite);
+      });
     });
 
     const fecharHoleriteBtn = document.querySelector('[data-fechar-holerite]');
