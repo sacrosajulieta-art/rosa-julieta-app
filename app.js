@@ -1299,10 +1299,22 @@ async function fecharHolerite(funcionaria, mesKey, resumo, modoHorasExtras, valo
   if (errHolerite) { alert('Erro ao fechar holerite: ' + errHolerite.message); return; }
 
   const mesLabelTexto = new Date(mesKey + '-01T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
-  await addTx({
-    tipo: 'saida', valor: totalPagar, categoria: 'Funcionários — salário', natureza: 'fixo',
-    descricao: `Holerite ${funcionaria.nome} — ${mesLabelTexto}`, data: todayStr(),
-  });
+  const valorSalarioEExtras = resumo.salarioBase
+    + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras : 0)
+    + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras100 : 0);
+  const valorBeneficios = valorVtFinal + valorVrFinal;
+  if (valorSalarioEExtras > 0) {
+    await addTx({
+      tipo: 'saida', valor: valorSalarioEExtras, categoria: 'Funcionários — salário', natureza: 'fixo',
+      descricao: `Holerite ${funcionaria.nome} — ${mesLabelTexto}`, data: todayStr(),
+    });
+  }
+  if (valorBeneficios > 0) {
+    await addTx({
+      tipo: 'saida', valor: valorBeneficios, categoria: 'Funcionários — encargos/benefícios', natureza: 'fixo',
+      descricao: `VT + VR ${funcionaria.nome} — ${mesLabelTexto}`, data: todayStr(),
+    });
+  }
 
   if (modoHorasExtras === 'banco' && resumo.horasExtras > 0) {
     const { error } = await sb.from('banco_horas_lancamentos').insert({
