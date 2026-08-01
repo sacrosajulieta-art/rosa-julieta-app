@@ -2078,7 +2078,11 @@ async function updateProducao(id, novo) {
 
 async function garantirRecorrentes() {
   const hojeMonth = todayStr().slice(0, 7);
-  const templates = state.tx.filter((t) => t.recorrente);
+  // "Empréstimo — parcela" nunca deve virar molde recorrente — cada parcela já nasce com
+  // data própria calculada pelo empréstimo; se essa categoria ficar marcada como recorrente
+  // (por edição antiga ou erro), ela gera parcelas fantasmas todo mês. Trava aqui também,
+  // além da trava na hora de salvar, pra nunca mais duplicar de novo.
+  const templates = state.tx.filter((t) => t.recorrente && t.categoria !== 'Empréstimo — parcela');
   for (const t of templates) {
     const dia = Number(t.data.slice(8, 10));
     let cursor = addMonths(monthKey(t.data), 1);
@@ -6693,6 +6697,7 @@ function attachFinanceiroHandlers(c) {
     const numParcelas = (cartao || parceladoSemCartao) ? (Number(document.getElementById('txNumParcelas').value) || 1) : 1;
     if (!valor || !categoria) { alert('Preencha valor e categoria.'); return; }
     if (parceladoSemCartao && (!numParcelas || numParcelas <= 1)) { alert('Informe um número de parcelas maior que 1, ou escolha "Outro".'); return; }
+    if (recorrente && categoria === 'Empréstimo — parcela') { alert('Parcela de empréstimo não pode ser "repetir todos os meses" — cada parcela já nasce com a data certa, calculada pelo próprio empréstimo. Marcar isso duplica a parcela todo mês.'); return; }
     const natureza = tipo === 'saida' ? (NATUREZA_POR_CATEGORIA[categoria] || 'variavel') : null;
     if (cartao) {
       await criarSaidasCartao({ cartao, categoria, natureza, descricaoBase: descricao || categoria, valorTotal: valor, numParcelas, dataCompra: data });
@@ -6753,6 +6758,7 @@ function attachTxRowHandlers() {
       const data = document.getElementById(`editTxData-${id}`).value || todayStr();
       const recorrente = document.getElementById(`editTxRecorrente-${id}`)?.checked || false;
       if (!valor || !categoria) { alert('Preencha valor e categoria.'); return; }
+      if (recorrente && categoria === 'Empréstimo — parcela') { alert('Parcela de empréstimo não pode ser "repetir todos os meses" — cada parcela já nasce com a data certa, calculada pelo próprio empréstimo. Marcar isso duplica a parcela todo mês.'); return; }
       const natureza = tipo === 'saida' ? (NATUREZA_POR_CATEGORIA[categoria] || 'variavel') : null;
       await updateTx(id, { tipo, valor, categoria, natureza, descricao, data, recorrente });
       await loadData();
