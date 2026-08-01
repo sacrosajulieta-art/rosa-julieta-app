@@ -4300,6 +4300,7 @@ function renderRH(c) {
                 </div>
                 ${(window.__editFuncTipoPag?.[f.id] || f.tipoPagamento) === 'mensal' ? `
                   <input type="text" id="editFuncSalarioMensal-${f.id}" placeholder="Salário mensal (ex: 1500,00)" value="${f.salarioMensal ? f.salarioMensal.toFixed(2).replace('.', ',') : ''}" />
+                  <button class="icon-btn-ghost" type="button" style="margin-top:6px" data-calcular-valor-hora="${f.id}">🧮 Calcular valor da hora automático (salário ÷ jornada)</button>
                 ` : ''}
                 <div class="form-row">
                   <input type="text" id="editFuncValorHora-${f.id}" placeholder="Valor da hora (usado pra calcular hora extra)" value="${f.valorHora ? f.valorHora.toFixed(2).replace('.', ',') : ''}" />
@@ -4993,6 +4994,31 @@ function attachRHHandlers(c) {
       window.__editFuncModoComp = window.__editFuncModoComp || {};
       window.__editFuncModoComp[btn.dataset.editFuncModoComp] = btn.dataset.valor;
       render();
+    });
+  });
+
+  document.querySelectorAll('[data-calcular-valor-hora]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.calcularValorHora;
+      const salarioMensal = parseBRNumber(document.getElementById(`editFuncSalarioMensal-${id}`)?.value || '0');
+      if (!salarioMensal) { alert('Preencha o salário mensal primeiro.'); return; }
+      const jornadaSemanal = coletarJornadaSemanal(`editFunc${id}`);
+      let minutosSemanais = 0;
+      Object.values(jornadaSemanal).forEach((dia) => {
+        if (!dia.trabalha) return;
+        const [hE, mE] = dia.entrada.split(':').map(Number);
+        const [hSA, mSA] = dia.saidaAlmoco.split(':').map(Number);
+        const [hVA, mVA] = dia.voltaAlmoco.split(':').map(Number);
+        const [hS, mS] = dia.saida.split(':').map(Number);
+        minutosSemanais += ((hSA * 60 + mSA) - (hE * 60 + mE)) + ((hS * 60 + mS) - (hVA * 60 + mVA));
+      });
+      const horasSemanais = minutosSemanais / 60;
+      if (horasSemanais <= 0) { alert('Configure a jornada semanal primeiro (marque os dias que ela trabalha).'); return; }
+      // conversão padrão CLT: horas mensais = horas semanais × 30 dias ÷ 7 dias da semana
+      const horasMensais = horasSemanais * 30 / 7;
+      const valorHora = salarioMensal / horasMensais;
+      document.getElementById(`editFuncValorHora-${id}`).value = valorHora.toFixed(2).replace('.', ',');
+      alert(`Calculado: ${horasSemanais.toFixed(1)}h/semana × 30÷7 = ${horasMensais.toFixed(1)}h/mês.\n\nValor da hora: ${fmt(valorHora)}`);
     });
   });
 
