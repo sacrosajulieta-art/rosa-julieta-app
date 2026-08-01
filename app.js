@@ -362,6 +362,8 @@ const state = {
   vendasDetalhe: [],
   abonosPonto: [],
   holerites: [],
+  feriados: [],
+  showFeriadosForm: false,
   holeriteMes: null,
   showHoleritesLote: false,
   showAbonarId: null,
@@ -369,7 +371,7 @@ const state = {
 
 // ==================== DATA LAYER ====================
 async function loadData() {
-  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }, { data: feriasTiradas, error: e16 }, { data: solicitacoesPonto, error: e17 }, { data: horasExtrasLiquidadas, error: e18 }, { data: bancoHorasLancamentos, error: e19 }, { data: emprestimos, error: e20 }, { data: emprestimoParcelas, error: e21 }, { data: cartoesCredito, error: e22 }, { data: vendasSkuPendentes, error: e23 }, { data: vendasDetalhe, error: e24 }, { data: abonosPonto, error: e25 }, { data: holerites, error: e26 }] = await Promise.all([
+  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }, { data: feriasTiradas, error: e16 }, { data: solicitacoesPonto, error: e17 }, { data: horasExtrasLiquidadas, error: e18 }, { data: bancoHorasLancamentos, error: e19 }, { data: emprestimos, error: e20 }, { data: emprestimoParcelas, error: e21 }, { data: cartoesCredito, error: e22 }, { data: vendasSkuPendentes, error: e23 }, { data: vendasDetalhe, error: e24 }, { data: abonosPonto, error: e25 }, { data: holerites, error: e26 }, { data: feriados, error: e27 }] = await Promise.all([
     sb.from('transacoes').select('*').order('data', { ascending: false }),
     sb.from('produtos').select('*').order('created_at', { ascending: false }),
     sb.from('plataformas').select('*').order('nome', { ascending: true }),
@@ -396,6 +398,7 @@ async function loadData() {
     sb.from('vendas_detalhe').select('*').order('data', { ascending: false }).limit(8000),
     sb.from('abonos_ponto').select('*').order('data', { ascending: false }),
     sb.from('holerites').select('*').order('mes', { ascending: false }),
+    sb.from('feriados').select('*').order('data', { ascending: true }),
   ]);
   if (e1) console.error(e1);
   if (e2) console.error(e2);
@@ -423,6 +426,7 @@ async function loadData() {
   if (e24) console.error(e24);
   if (e25) console.error(e25);
   if (e26) console.error(e26);
+  if (e27) console.error(e27);
   state.tx = (tx || []).map(mapTxFromDb);
   state.produtos = (produtos || []).map(mapProdutoFromDb);
   state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0) }));
@@ -448,7 +452,8 @@ async function loadData() {
   state.vendasSkuPendentes = (vendasSkuPendentes || []).map((v) => ({ id: v.id, sku: v.sku, quantidade: Number(v.quantidade), faturamento: Number(v.faturamento), ultimaData: v.ultima_data, plataformaNome: v.plataforma_nome || null }));
   state.vendasDetalhe = (vendasDetalhe || []).map((v) => ({ id: v.id, produtoId: v.produto_id, plataformaId: v.plataforma_id, plataformaNome: v.plataforma_nome || null, sku: v.sku || null, quantidade: Number(v.quantidade), valor: Number(v.valor), data: v.data }));
   state.abonosPonto = (abonosPonto || []).map((a) => ({ id: a.id, funcionariaId: a.funcionaria_id, data: a.data, tipo: a.tipo, motivo: a.motivo || '' }));
-  state.holerites = (holerites || []).map((h) => ({ id: h.id, funcionariaId: h.funcionaria_id, mes: h.mes, diasTrabalhados: Number(h.dias_trabalhados), salarioBase: Number(h.salario_base), horasExtras: Number(h.horas_extras), valorHorasExtras: Number(h.valor_horas_extras), modoHorasExtras: h.modo_horas_extras, horasFaltantes: Number(h.horas_faltantes), valorVt: Number(h.valor_vt), valorVr: Number(h.valor_vr), totalPagar: Number(h.total_pagar), createdAt: h.created_at }));
+  state.holerites = (holerites || []).map((h) => ({ id: h.id, funcionariaId: h.funcionaria_id, mes: h.mes, diasTrabalhados: Number(h.dias_trabalhados), salarioBase: Number(h.salario_base), horasExtras: Number(h.horas_extras), valorHorasExtras: Number(h.valor_horas_extras), horasExtras100: Number(h.horas_extras_100 || 0), valorHorasExtras100: Number(h.valor_horas_extras_100 || 0), modoHorasExtras: h.modo_horas_extras, horasFaltantes: Number(h.horas_faltantes), valorVt: Number(h.valor_vt), valorVr: Number(h.valor_vr), totalPagar: Number(h.total_pagar), createdAt: h.created_at }));
+  state.feriados = (feriados || []).map((f) => ({ id: f.id, data: f.data, nome: f.nome || '' }));
   state.loading = false;
   render();
 }
@@ -1280,10 +1285,14 @@ async function removeAbono(id) {
 // (se as horas extras forem pagas em dinheiro), e movimenta o banco de horas (crédito se
 // escolheu banco pras extras, débito sempre que tem falta não abonada)
 async function fecharHolerite(funcionaria, mesKey, resumo, modoHorasExtras, valorVtFinal, valorVrFinal) {
-  const totalPagar = resumo.salarioBase + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras : 0) + valorVtFinal + valorVrFinal;
+  const totalPagar = resumo.salarioBase
+    + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras : 0)
+    + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras100 : 0)
+    + valorVtFinal + valorVrFinal;
   const { error: errHolerite } = await sb.from('holerites').upsert({
     funcionaria_id: funcionaria.id, mes: mesKey, dias_trabalhados: resumo.diasTrabalhados,
     salario_base: resumo.salarioBase, horas_extras: resumo.horasExtras, valor_horas_extras: resumo.valorHorasExtras,
+    horas_extras_100: resumo.horasExtras100, valor_horas_extras_100: resumo.valorHorasExtras100,
     modo_horas_extras: modoHorasExtras, horas_faltantes: resumo.horasFaltantes,
     valor_vt: valorVtFinal, valor_vr: valorVrFinal, total_pagar: totalPagar,
   }, { onConflict: 'funcionaria_id,mes' });
@@ -1302,6 +1311,14 @@ async function fecharHolerite(funcionaria, mesKey, resumo, modoHorasExtras, valo
     });
     if (error) console.error(error);
   }
+  if (modoHorasExtras === 'banco' && resumo.horasExtras100 > 0) {
+    // domingo/feriado credita em dobro no banco de horas (1h trabalhada = 2h de folga depois)
+    const { error } = await sb.from('banco_horas_lancamentos').insert({
+      funcionaria_id: funcionaria.id, data: todayStr(), tipo: 'credito', horas: resumo.horasExtras100 * 2,
+      descricao: `Horas de domingo/feriado de ${mesLabelTexto} convertidas em banco de horas (em dobro)`,
+    });
+    if (error) console.error(error);
+  }
   if (resumo.horasFaltantes > 0) {
     const { error } = await sb.from('banco_horas_lancamentos').insert({
       funcionaria_id: funcionaria.id, data: todayStr(), tipo: 'debito', horas: -resumo.horasFaltantes,
@@ -1309,6 +1326,15 @@ async function fecharHolerite(funcionaria, mesKey, resumo, modoHorasExtras, valo
     });
     if (error) console.error(error);
   }
+}
+// gerencia a lista de feriados (nacionais + municipais, ela cadastra do jeito que precisar)
+async function addFeriado(data, nome) {
+  const { error } = await sb.from('feriados').upsert({ data, nome: nome || null }, { onConflict: 'data' });
+  if (error) alert('Erro ao adicionar feriado: ' + error.message);
+}
+async function removeFeriado(id) {
+  const { error } = await sb.from('feriados').delete().eq('id', id);
+  if (error) alert('Erro ao remover feriado: ' + error.message);
 }
 async function addFeriasTirada(funcionariaId, dataInicio, dataFim) {
   const { error } = await sb.from('ferias_tiradas').insert({ funcionaria_id: funcionariaId, data_inicio: dataInicio, data_fim: dataFim });
@@ -1503,6 +1529,7 @@ function calcularResumoHolerite(funcionaria, mesKey) {
   const ultimoDia = new Date(ano, mes, 0).getDate();
   let diasTrabalhados = 0;
   let horasExtras = 0;
+  let horasExtras100 = 0;
   let horasFaltantes = 0;
   let horasTrabalhadasTotal = 0;
   for (let dia = 1; dia <= ultimoDia; dia++) {
@@ -1514,6 +1541,14 @@ function calcularResumoHolerite(funcionaria, mesKey) {
     if (!calc.completo) continue;
     diasTrabalhados++;
     horasTrabalhadasTotal += calc.horasTrabalhadas;
+    // domingo ou feriado: todas as horas trabalhadas nesse dia pagam 100% (dobra), não entram
+    // na conta normal de extra/falta
+    const ehDomingo = new Date(dataStr + 'T00:00:00').getDay() === 0;
+    const ehFeriado = state.feriados.some((fer) => fer.data === dataStr);
+    if (ehDomingo || ehFeriado) {
+      horasExtras100 += calc.horasTrabalhadas;
+      continue;
+    }
     if (calc.diferenca >= 0) {
       horasExtras += calc.diferenca;
     } else {
@@ -1523,9 +1558,10 @@ function calcularResumoHolerite(funcionaria, mesKey) {
   }
   const salarioBase = funcionaria.tipoPagamento === 'mensal' ? (funcionaria.salarioMensal || 0) : horasTrabalhadasTotal * (funcionaria.valorHora || 0);
   const valorHorasExtras = horasExtras * (funcionaria.valorHora || 0) * (1 + (funcionaria.percentualHoraExtra || 0) / 100);
+  const valorHorasExtras100 = horasExtras100 * (funcionaria.valorHora || 0) * 2;
   const valorVt = funcionaria.valorVtDia || 0;
   const valorVr = funcionaria.valorVrDia || 0;
-  return { diasTrabalhados, horasExtras, horasFaltantes, horasTrabalhadasTotal, salarioBase, valorHorasExtras, valorVt, valorVr };
+  return { diasTrabalhados, horasExtras, horasExtras100, horasFaltantes, horasTrabalhadasTotal, salarioBase, valorHorasExtras, valorHorasExtras100, valorVt, valorVr };
 }
 // procura, nos últimos N dias, dias em que ela deveria ter trabalhado mas falta alguma
 // das 4 batidas — hoje só conta a partir do horário de saída esperado. Separa o que já
@@ -1689,6 +1725,7 @@ function setupRealtime() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'vendas_detalhe' }, loadData)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'abonos_ponto' }, loadData)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'holerites' }, loadData)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'feriados' }, loadData)
     .subscribe();
 }
 
@@ -4119,7 +4156,7 @@ function renderHoleritesLote() {
     return { f, jaFechado, resumo };
   });
   const pendentes = linhas.filter((l) => !l.jaFechado);
-  const totalGeral = linhas.reduce((a, l) => a + (l.jaFechado ? l.jaFechado.totalPagar : (l.resumo.salarioBase + l.resumo.valorHorasExtras + l.resumo.valorVt + l.resumo.valorVr)), 0);
+  const totalGeral = linhas.reduce((a, l) => a + (l.jaFechado ? l.jaFechado.totalPagar : (l.resumo.salarioBase + l.resumo.valorHorasExtras + l.resumo.valorHorasExtras100 + l.resumo.valorVt + l.resumo.valorVr)), 0);
 
   return `
     <div class="form-card">
@@ -4137,7 +4174,7 @@ function renderHoleritesLote() {
                   ${jaFechado ? `
                     <div class="alert-meta" style="color:var(--teal)">✅ Já fechado — ${fmt(jaFechado.totalPagar)}</div>
                   ` : `
-                    <div class="alert-meta">${resumo.diasTrabalhados} dias · base ${fmt(resumo.salarioBase)} · extras ${formatarHorasMin(resumo.horasExtras)} (${f.modoCompensacaoPadrao === 'banco' ? '🏦 banco' : fmt(resumo.valorHorasExtras)}) · faltas ${formatarHorasMin(resumo.horasFaltantes)}${resumo.valorVt > 0 ? ` · VT ${fmt(resumo.valorVt)}` : ''}${resumo.valorVr > 0 ? ` · VR ${fmt(resumo.valorVr)}` : ''}</div>
+                    <div class="alert-meta">${resumo.diasTrabalhados} dias · base ${fmt(resumo.salarioBase)} · extras ${formatarHorasMin(resumo.horasExtras)} (${f.modoCompensacaoPadrao === 'banco' ? '🏦 banco' : fmt(resumo.valorHorasExtras)})${resumo.horasExtras100 > 0 ? ` · 🗓️ ${formatarHorasMin(resumo.horasExtras100)} 100%` : ''} · faltas ${formatarHorasMin(resumo.horasFaltantes)}${resumo.valorVt > 0 ? ` · VT ${fmt(resumo.valorVt)}` : ''}${resumo.valorVr > 0 ? ` · VR ${fmt(resumo.valorVr)}` : ''}</div>
                   `}
                 </div>
                 ${!jaFechado ? `<button class="confirm-btn" style="width:auto;padding:8px 14px" data-fechar-holerite-lote="${f.id}" data-mes="${mesKey}">Fechar</button>` : ''}
@@ -4173,10 +4210,34 @@ function renderRH(c) {
       <div><div class="section-title">RH</div><div class="section-subtitle">Funcionárias e ponto eletrônico</div></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="icon-btn-ghost" id="copiarLinkPonto">🔗 Link de ponto</button>
+        <button class="icon-btn-ghost" id="toggleFeriadosForm">🗓️ Feriados</button>
         <button class="icon-btn-ghost" id="toggleHoleritesLote" style="${lembreteHoleriteRH ? 'background:rgba(255,182,39,0.15);border:1.5px solid var(--amber);color:var(--amber);font-weight:700' : ''}">📋 Fechar holerites do mês</button>
         <button class="icon-btn" id="toggleFuncionariaForm">＋ Funcionária</button>
       </div>
     </div>
+
+    ${state.showFeriadosForm ? `
+      <div class="form-card">
+        <div class="section-title" style="margin-bottom:2px">Feriados</div>
+        <div class="section-subtitle" style="margin-bottom:10px">Cadastre os feriados (nacionais, estaduais ou municipais) — quando alguém trabalhar num desses dias (ou num domingo), o sistema paga 100% automático no holerite.</div>
+        <div class="form-row">
+          <input type="date" id="novoFeriadoData" />
+          <input type="text" id="novoFeriadoNome" placeholder="Nome (opcional, ex: Aniversário da cidade)" />
+        </div>
+        <button class="confirm-btn" style="margin-top:8px" id="salvarFeriado">Adicionar feriado</button>
+        ${state.feriados.length > 0 ? `
+          <div class="tx-list" style="margin-top:12px">
+            ${state.feriados.map((fr) => `
+              <div class="tx-row">
+                <div class="tx-dot" style="background:var(--pink)"></div>
+                <div style="flex:1"><div class="tx-categoria">${new Date(fr.data + 'T00:00:00').toLocaleDateString('pt-BR')}${fr.nome ? ` — ${esc(fr.nome)}` : ''}</div></div>
+                <button class="trash-btn" data-remover-feriado="${fr.id}">🗑</button>
+              </div>
+            `).join('')}
+          </div>
+        ` : `<div class="form-hint" style="margin-top:10px">Domingos já contam 100% automaticamente, mesmo sem estar aqui — essa lista é só pros feriados.</div>`}
+      </div>
+    ` : ''}
 
     ${state.showHoleritesLote ? renderHoleritesLote() : ''}
 
@@ -4570,6 +4631,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
           <div class="prod-breakdown-item"><span>Dias trabalhados</span><span>${holeriteExistente.diasTrabalhados}</span></div>
           <div class="prod-breakdown-item"><span>Salário base</span><span>${fmt(holeriteExistente.salarioBase)}</span></div>
           <div class="prod-breakdown-item"><span>Horas extras (${formatarHorasMin(holeriteExistente.horasExtras)})</span><span>${holeriteExistente.modoHorasExtras === 'dinheiro' ? fmt(holeriteExistente.valorHorasExtras) : '🏦 banco de horas'}</span></div>
+          ${holeriteExistente.horasExtras100 > 0 ? `<div class="prod-breakdown-item"><span>🗓️ Domingo/feriado — 100% (${formatarHorasMin(holeriteExistente.horasExtras100)})</span><span>${holeriteExistente.modoHorasExtras === 'dinheiro' ? fmt(holeriteExistente.valorHorasExtras100) : '🏦 banco de horas (em dobro)'}</span></div>` : ''}
           <div class="prod-breakdown-item"><span>Horas faltantes não abonadas</span><span>${formatarHorasMin(holeriteExistente.horasFaltantes)} 🏦 débito no banco</span></div>
           <div class="prod-breakdown-item"><span>VT</span><span>${fmt(holeriteExistente.valorVt)}</span></div>
           <div class="prod-breakdown-item"><span>VR</span><span>${fmt(holeriteExistente.valorVr)}</span></div>
@@ -4584,6 +4646,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
           <div class="prod-breakdown-item"><span>Dias trabalhados</span><span>${resumoHolerite.diasTrabalhados}</span></div>
           <div class="prod-breakdown-item"><span>${f.tipoPagamento === 'mensal' ? 'Salário mensal' : `Salário (${resumoHolerite.horasTrabalhadasTotal.toFixed(1)}h × ${fmt(f.valorHora)})`}</span><span>${fmt(resumoHolerite.salarioBase)}</span></div>
           <div class="prod-breakdown-item"><span>Horas extras (${formatarHorasMin(resumoHolerite.horasExtras)} × ${fmt(f.valorHora)} + ${f.percentualHoraExtra}%)</span><span>${fmt(resumoHolerite.valorHorasExtras)}</span></div>
+          ${resumoHolerite.horasExtras100 > 0 ? `<div class="prod-breakdown-item"><span>🗓️ Domingo/feriado — 100% (${formatarHorasMin(resumoHolerite.horasExtras100)} × ${fmt(f.valorHora)} × 2)</span><span>${fmt(resumoHolerite.valorHorasExtras100)}</span></div>` : ''}
           <div class="prod-breakdown-item"><span>Horas faltantes não abonadas</span><span style="color:var(--red)">${formatarHorasMin(resumoHolerite.horasFaltantes)}</span></div>
         </div>
         <div class="form-hint" style="margin-top:10px;margin-bottom:2px">Como pagar as horas extras desse mês?</div>
@@ -4713,7 +4776,7 @@ function attachRHHandlers(c) {
       const modoHorasExtras = window.__holeriteModoExtras || funcionaria.modoCompensacaoPadrao;
       const valorVt = parseBRNumber(document.getElementById('holeriteVt').value) || 0;
       const valorVr = parseBRNumber(document.getElementById('holeriteVr').value) || 0;
-      const totalPagar = resumo.salarioBase + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras : 0) + valorVt + valorVr;
+      const totalPagar = resumo.salarioBase + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras : 0) + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras100 : 0) + valorVt + valorVr;
       if (!confirm(`Fechar o holerite de ${funcionaria.nome}?\n\nTotal a pagar: ${fmt(totalPagar)}\n\nIsso lança a saída no Financeiro e movimenta o banco de horas. Confirma?`)) return;
       await fecharHolerite(funcionaria, mesKey, resumo, modoHorasExtras, valorVt, valorVr);
       window.__holeriteModoExtras = null;
@@ -4837,6 +4900,25 @@ function attachRHHandlers(c) {
 
   const toggleHoleritesLote = document.getElementById('toggleHoleritesLote');
   if (toggleHoleritesLote) toggleHoleritesLote.addEventListener('click', () => { state.showHoleritesLote = !state.showHoleritesLote; render(); });
+
+  const toggleFeriadosForm = document.getElementById('toggleFeriadosForm');
+  if (toggleFeriadosForm) toggleFeriadosForm.addEventListener('click', () => { state.showFeriadosForm = !state.showFeriadosForm; render(); });
+  const salvarFeriado = document.getElementById('salvarFeriado');
+  if (salvarFeriado) salvarFeriado.addEventListener('click', async () => {
+    const data = document.getElementById('novoFeriadoData').value;
+    const nome = document.getElementById('novoFeriadoNome').value.trim();
+    if (!data) { alert('Escolha a data do feriado.'); return; }
+    await addFeriado(data, nome);
+    await loadData();
+  });
+  document.querySelectorAll('[data-remover-feriado]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (confirm('Remover esse feriado?')) {
+        await removeFeriado(btn.dataset.removerFeriado);
+        await loadData();
+      }
+    });
+  });
 
   const holeriteLoteMesSelect = document.getElementById('holeriteLoteMesSelect');
   if (holeriteLoteMesSelect) holeriteLoteMesSelect.addEventListener('change', (e) => { state.holeriteMes = e.target.value; render(); });
