@@ -1523,8 +1523,8 @@ function calcularResumoHolerite(funcionaria, mesKey) {
   }
   const salarioBase = funcionaria.tipoPagamento === 'mensal' ? (funcionaria.salarioMensal || 0) : horasTrabalhadasTotal * (funcionaria.valorHora || 0);
   const valorHorasExtras = horasExtras * (funcionaria.valorHora || 0) * (1 + (funcionaria.percentualHoraExtra || 0) / 100);
-  const valorVt = diasTrabalhados * (funcionaria.valorVtDia || 0);
-  const valorVr = diasTrabalhados * (funcionaria.valorVrDia || 0);
+  const valorVt = funcionaria.valorVtDia || 0;
+  const valorVr = funcionaria.valorVrDia || 0;
   return { diasTrabalhados, horasExtras, horasFaltantes, horasTrabalhadasTotal, salarioBase, valorHorasExtras, valorVt, valorVr };
 }
 // procura, nos últimos N dias, dias em que ela deveria ter trabalhado mas falta alguma
@@ -4250,8 +4250,8 @@ function renderRH(c) {
                   <button class="toggle-btn ${(window.__editFuncModoComp?.[f.id] || f.modoCompensacaoPadrao) === 'banco' ? 'active-pink' : ''}" data-edit-func-modo-comp="${f.id}" data-valor="banco">🏦 Banco de horas</button>
                 </div>
                 <div class="form-row">
-                  <input type="text" id="editFuncVtDia-${f.id}" placeholder="VT por dia trabalhado" value="${f.valorVtDia ? f.valorVtDia.toFixed(2).replace('.', ',') : ''}" />
-                  <input type="text" id="editFuncVrDia-${f.id}" placeholder="VR por dia trabalhado" value="${f.valorVrDia ? f.valorVrDia.toFixed(2).replace('.', ',') : ''}" />
+                  <input type="text" id="editFuncVtDia-${f.id}" placeholder="VT mensal (valor fixo)" value="${f.valorVtDia ? f.valorVtDia.toFixed(2).replace('.', ',') : ''}" />
+                  <input type="text" id="editFuncVrDia-${f.id}" placeholder="VR mensal (valor fixo)" value="${f.valorVrDia ? f.valorVrDia.toFixed(2).replace('.', ',') : ''}" />
                 </div>
                 <div class="form-hint">Jornada de trabalho — marque os dias que ela trabalha e o horário de cada um</div>
                 ${renderEditorJornadaSemanal(`editFunc${f.id}`, f.jornadaSemanal, { entrada: f.jornadaEntrada, saidaAlmoco: f.jornadaSaidaAlmoco, voltaAlmoco: f.jornadaVoltaAlmoco, saida: f.jornadaSaida })}
@@ -4593,8 +4593,8 @@ function renderFuncionariaDetalhe(funcionariaId) {
         </div>
         <div class="form-hint" style="margin-top:10px">Horas faltantes não abonadas sempre viram débito no banco de horas — ela paga trabalhando depois.</div>
         <div class="form-row" style="margin-top:10px">
-          <input type="text" id="holeriteVt" placeholder="VT (${resumoHolerite.diasTrabalhados} dias × ${fmt(f.valorVtDia)})" value="${resumoHolerite.valorVt.toFixed(2).replace('.', ',')}" />
-          <input type="text" id="holeriteVr" placeholder="VR (${resumoHolerite.diasTrabalhados} dias × ${fmt(f.valorVrDia)})" value="${resumoHolerite.valorVr.toFixed(2).replace('.', ',')}" />
+          <input type="text" id="holeriteVt" placeholder="VT mensal fixo" value="${resumoHolerite.valorVt.toFixed(2).replace('.', ',')}" />
+          <input type="text" id="holeriteVr" placeholder="VR mensal fixo" value="${resumoHolerite.valorVr.toFixed(2).replace('.', ',')}" />
         </div>
         <button class="confirm-btn" style="margin-top:12px" data-fechar-holerite="${funcionariaId}">Fechar holerite de ${mesLabelHolerite(mesHolerite)}</button>
       </div>
