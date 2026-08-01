@@ -364,7 +364,7 @@ const state = {
   holerites: [],
   feriados: [],
   showFeriadosForm: false,
-  empresaConfig: { cnpj: '', razaoSocial: '' },
+  empresaConfig: { cnpj: '', razaoSocial: '', nomeFantasia: '', endereco: '', telefone: '' },
   showEmpresaConfigForm: false,
   holeriteMes: null,
   showLancamentoBanco: false,
@@ -448,7 +448,7 @@ async function loadData() {
   state.distribuicoes = (distribuicoes || []).map((d) => ({ id: d.id, ordemItemId: d.ordem_item_id, produtoId: d.produto_id, varianteId: d.variante_id || null, costureiraId: d.costureira_id, quantidadeDistribuida: d.quantidade_distribuida, quantidadeDevolvida: d.quantidade_devolvida, data: d.data }));
   state.fichaTecnicaItens = (fichaTecnicaItens || []).map((f) => ({ id: f.id, produtoId: f.produto_id, tipoItem: f.tipo_item, insumoId: f.insumo_id || null, componenteProdutoId: f.componente_produto_id || null, quantidade: Number(f.quantidade), momento: f.momento || 'venda' }));
   state.insumoPlataformaQtd = (insumoPlataformaQtd || []).map((q) => ({ id: q.id, insumoId: q.insumo_id, plataformaId: q.plataforma_id, quantidade: Number(q.quantidade) }));
-  state.funcionarias = (funcionarias || []).map((f) => ({ id: f.id, nome: f.nome, pin: f.pin, ativa: f.ativa, jornadaEntrada: (f.jornada_entrada || '08:00').slice(0, 5), jornadaSaidaAlmoco: (f.jornada_saida_almoco || '12:00').slice(0, 5), jornadaVoltaAlmoco: (f.jornada_volta_almoco || '13:00').slice(0, 5), jornadaSaida: (f.jornada_saida || '17:00').slice(0, 5), valorHora: Number(f.valor_hora || 0), dataAdmissao: f.data_admissao || null, jornadaSemanal: f.jornada_semanal || {}, percentualHoraExtra: Number(f.percentual_hora_extra != null ? f.percentual_hora_extra : 50), modoCompensacaoPadrao: f.modo_compensacao_padrao || 'dinheiro', tipoPagamento: f.tipo_pagamento || 'hora', salarioMensal: Number(f.salario_mensal || 0), valorVtDia: Number(f.valor_vt_dia || 0), valorVrDia: Number(f.valor_vr_dia || 0), horasCompensacaoSemanal: Number(f.horas_compensacao_semanal || 0) }));
+  state.funcionarias = (funcionarias || []).map((f) => ({ id: f.id, nome: f.nome, pin: f.pin, ativa: f.ativa, jornadaEntrada: (f.jornada_entrada || '08:00').slice(0, 5), jornadaSaidaAlmoco: (f.jornada_saida_almoco || '12:00').slice(0, 5), jornadaVoltaAlmoco: (f.jornada_volta_almoco || '13:00').slice(0, 5), jornadaSaida: (f.jornada_saida || '17:00').slice(0, 5), valorHora: Number(f.valor_hora || 0), dataAdmissao: f.data_admissao || null, jornadaSemanal: f.jornada_semanal || {}, percentualHoraExtra: Number(f.percentual_hora_extra != null ? f.percentual_hora_extra : 50), modoCompensacaoPadrao: f.modo_compensacao_padrao || 'dinheiro', tipoPagamento: f.tipo_pagamento || 'hora', salarioMensal: Number(f.salario_mensal || 0), valorVtDia: Number(f.valor_vt_dia || 0), valorVrDia: Number(f.valor_vr_dia || 0), horasCompensacaoSemanal: Number(f.horas_compensacao_semanal || 0), cpf: f.cpf || '', cargo: f.cargo || '', matricula: f.matricula || '' }));
   state.feriasTiradas = (feriasTiradas || []).map((v) => ({ id: v.id, funcionariaId: v.funcionaria_id, dataInicio: v.data_inicio, dataFim: v.data_fim }));
   state.pontos = (pontos || []).map((p) => ({ id: p.id, funcionariaId: p.funcionaria_id, data: p.data, tipo: p.tipo, horario: p.horario, origem: p.origem || 'propria' }));
   state.solicitacoesPonto = (solicitacoesPonto || []).map((s) => ({ id: s.id, funcionariaId: s.funcionaria_id, data: s.data, tipo: s.tipo, horarioSolicitado: s.horario_solicitado, motivo: s.motivo || '', status: s.status, createdAt: s.created_at }));
@@ -460,9 +460,9 @@ async function loadData() {
   state.vendasSkuPendentes = (vendasSkuPendentes || []).map((v) => ({ id: v.id, sku: v.sku, quantidade: Number(v.quantidade), faturamento: Number(v.faturamento), ultimaData: v.ultima_data, plataformaNome: v.plataforma_nome || null }));
   state.vendasDetalhe = (vendasDetalhe || []).map((v) => ({ id: v.id, produtoId: v.produto_id, plataformaId: v.plataforma_id, plataformaNome: v.plataforma_nome || null, sku: v.sku || null, quantidade: Number(v.quantidade), valor: Number(v.valor), data: v.data }));
   state.abonosPonto = (abonosPonto || []).map((a) => ({ id: a.id, funcionariaId: a.funcionaria_id, data: a.data, tipo: a.tipo, motivo: a.motivo || '', horas: a.horas != null ? Number(a.horas) : null }));
-  state.holerites = (holerites || []).map((h) => ({ id: h.id, funcionariaId: h.funcionaria_id, mes: h.mes, diasTrabalhados: Number(h.dias_trabalhados), salarioBase: Number(h.salario_base), horasExtras: Number(h.horas_extras), valorHorasExtras: Number(h.valor_horas_extras), horasExtras100: Number(h.horas_extras_100 || 0), valorHorasExtras100: Number(h.valor_horas_extras_100 || 0), modoHorasExtras: h.modo_horas_extras, horasFaltantes: Number(h.horas_faltantes), valorVt: Number(h.valor_vt), valorVr: Number(h.valor_vr), totalPagar: Number(h.total_pagar), assinadoEm: h.assinado_em || null, assinaturaImagem: h.assinatura_imagem || null, createdAt: h.created_at }));
+  state.holerites = (holerites || []).map((h) => ({ id: h.id, funcionariaId: h.funcionaria_id, mes: h.mes, diasTrabalhados: Number(h.dias_trabalhados), salarioBase: Number(h.salario_base), horasExtras: Number(h.horas_extras), valorHorasExtras: Number(h.valor_horas_extras), horasExtras100: Number(h.horas_extras_100 || 0), valorHorasExtras100: Number(h.valor_horas_extras_100 || 0), modoHorasExtras: h.modo_horas_extras, horasFaltantes: Number(h.horas_faltantes), valorVt: Number(h.valor_vt), valorVr: Number(h.valor_vr), totalPagar: Number(h.total_pagar), assinadoEm: h.assinado_em || null, assinaturaImagem: h.assinatura_imagem || null, createdAt: h.created_at, numeroRecibo: h.numero_recibo || null, emitidoPor: h.emitido_por || null }));
   state.feriados = (feriados || []).map((f) => ({ id: f.id, data: f.data, nome: f.nome || '' }));
-  state.empresaConfig = { cnpj: empresaConfig?.cnpj || '', razaoSocial: empresaConfig?.razao_social || '' };
+  state.empresaConfig = { cnpj: empresaConfig?.cnpj || '', razaoSocial: empresaConfig?.razao_social || '', nomeFantasia: empresaConfig?.nome_fantasia || '', endereco: empresaConfig?.endereco || '', telefone: empresaConfig?.telefone || '' };
   state.loading = false;
   render();
 }
@@ -960,15 +960,21 @@ function gerarHoleritePDF(funcionaria, mesKey, dados) {
     const mesLabelTexto = new Date(mesKey + '-01T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
     const [anoPdf, mesPdf] = mesKey.split('-').map(Number);
     const diasCorridosMes = new Date(anoPdf, mesPdf, 0).getDate();
+    const ocorrencias = calcularResumoOcorrencias(funcionaria.id, mesKey);
 
     doc.setFontSize(14);
     doc.setFont(undefined, 'bold');
-    doc.text(state.empresaConfig.razaoSocial || 'ROSA JULIETA', margemEsq, y);
+    doc.text(state.empresaConfig.nomeFantasia || state.empresaConfig.razaoSocial || 'ROSA JULIETA', margemEsq, y);
     doc.setFont(undefined, 'normal');
+    doc.setFontSize(9);
+    if (state.empresaConfig.nomeFantasia && state.empresaConfig.razaoSocial) { doc.text(state.empresaConfig.razaoSocial, margemEsq, y + 5); y += 4; }
     doc.setFontSize(10);
     doc.text('Recibo de Pagamento de Salário', margemEsq, y + 6);
-    if (state.empresaConfig.cnpj) { doc.text(`CNPJ: ${state.empresaConfig.cnpj}`, margemEsq, y + 12); y += 6; }
-    y += 16;
+    y += 6;
+    if (state.empresaConfig.cnpj) { doc.text(`CNPJ: ${state.empresaConfig.cnpj}`, margemEsq, y + 6); y += 5; }
+    if (state.empresaConfig.endereco) { doc.text(state.empresaConfig.endereco, margemEsq, y + 6); y += 5; }
+    if (state.empresaConfig.telefone) { doc.text(`Tel: ${state.empresaConfig.telefone}`, margemEsq, y + 6); y += 5; }
+    y += 10;
 
     doc.setDrawColor(200);
     doc.line(margemEsq, y, margemEsq + largura, y);
@@ -976,8 +982,19 @@ function gerarHoleritePDF(funcionaria, mesKey, dados) {
 
     doc.setFontSize(10);
     doc.text(`Funcionária: ${funcionaria.nome}`, margemEsq, y); y += 6;
+    if (funcionaria.cargo) { doc.text(`Cargo: ${funcionaria.cargo}`, margemEsq, y); y += 6; }
+    if (funcionaria.matricula) { doc.text(`Matrícula: ${funcionaria.matricula}`, margemEsq, y); y += 6; }
+    if (funcionaria.cpf) { doc.text(`CPF: ${mascararCpf(funcionaria.cpf)}`, margemEsq, y); y += 6; }
     doc.text(`Referência: ${mesLabelTexto.charAt(0).toUpperCase() + mesLabelTexto.slice(1)} (${diasCorridosMes} dias)`, margemEsq, y); y += 6;
-    doc.text(`Dias trabalhados no mês: ${dados.diasTrabalhados}`, margemEsq, y); y += 10;
+    doc.text(`Dias trabalhados no mês: ${dados.diasTrabalhados}`, margemEsq, y); y += 6;
+    if (ocorrencias.diasAtestado + ocorrencias.diasAbono + ocorrencias.diasFerias > 0) {
+      const partes = [];
+      if (ocorrencias.diasAtestado > 0) partes.push(`${ocorrencias.diasAtestado} atestado(s)`);
+      if (ocorrencias.diasAbono > 0) partes.push(`${ocorrencias.diasAbono} abono(s)/folga(s)`);
+      if (ocorrencias.diasFerias > 0) partes.push(`${ocorrencias.diasFerias} dia(s) de férias`);
+      doc.text(`Ocorrências: ${partes.join(', ')}`, margemEsq, y); y += 6;
+    }
+    y += 4;
 
     doc.setFont(undefined, 'bold');
     doc.text('Descrição', margemEsq, y);
@@ -1029,6 +1046,21 @@ function gerarHoleritePDF(funcionaria, mesKey, dados) {
       y += 12;
     }
 
+    const extrato = calcularExtratoBancoHoras(funcionaria.id, mesKey);
+    if (extrato.saldoAnterior !== 0 || extrato.produzido !== 0 || extrato.consumido !== 0) {
+      doc.setFont(undefined, 'bold');
+      doc.text('Extrato do banco de horas', margemEsq, y);
+      doc.setFont(undefined, 'normal');
+      y += 6;
+      doc.text(`Saldo anterior: ${extrato.saldoAnterior >= 0 ? '+' : '-'}${formatarHorasMin(extrato.saldoAnterior)}`, margemEsq, y); y += 5.5;
+      doc.text(`Produzido no mês: +${formatarHorasMin(extrato.produzido)}`, margemEsq, y); y += 5.5;
+      doc.text(`Consumido no mês: -${formatarHorasMin(extrato.consumido)}`, margemEsq, y); y += 5.5;
+      doc.setFont(undefined, 'bold');
+      doc.text(`Saldo final: ${extrato.saldoFinal >= 0 ? '+' : '-'}${formatarHorasMin(extrato.saldoFinal)}`, margemEsq, y);
+      doc.setFont(undefined, 'normal');
+      y += 12;
+    }
+
     y += 10;
     if (dados.assinaturaImagem) {
       try {
@@ -1044,6 +1076,17 @@ function gerarHoleritePDF(funcionaria, mesKey, dados) {
       doc.setFontSize(9);
       doc.text('Assinatura da funcionária', margemEsq, y);
     }
+
+    y += 16;
+    doc.setFontSize(8);
+    doc.setTextColor(120);
+    const emitidoPorLabel = { dono: 'Proprietária', supervisora: 'Supervisora' }[dados.emitidoPor] || '';
+    const rodapePartes = [];
+    if (dados.numeroRecibo) rodapePartes.push(`Recibo nº ${dados.numeroRecibo}`);
+    rodapePartes.push(`Emitido em ${new Date(dados.createdAt || Date.now()).toLocaleDateString('pt-BR')}`);
+    if (emitidoPorLabel) rodapePartes.push(`por ${emitidoPorLabel}`);
+    doc.text(rodapePartes.join(' · '), margemEsq, y);
+    doc.setTextColor(0);
 
     const nomeArquivo = `holerite-${funcionaria.nome.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${mesKey}.pdf`;
     doc.save(nomeArquivo);
@@ -1473,6 +1516,7 @@ async function updateFuncionaria(id, dados) {
     modo_compensacao_padrao: dados.modoCompensacaoPadrao || 'dinheiro',
     valor_vt_dia: dados.valorVtDia || 0, valor_vr_dia: dados.valorVrDia || 0,
     horas_compensacao_semanal: dados.horasCompensacaoSemanal || 0,
+    cpf: dados.cpf || null, cargo: dados.cargo || null, matricula: dados.matricula || null,
   }).eq('id', id);
   if (error) alert('Erro ao atualizar funcionária: ' + error.message);
 }
@@ -1534,6 +1578,7 @@ async function fecharHolerite(funcionaria, mesKey, resumo, modoHorasExtras, valo
     horas_extras_100: resumo.horasExtras100, valor_horas_extras_100: resumo.valorHorasExtras100,
     modo_horas_extras: modoHorasExtras, horas_faltantes: resumo.horasFaltantes,
     valor_vt: valorVtFinal, valor_vr: valorVrFinal, total_pagar: totalPagar,
+    emitido_por: state.papel,
   }, { onConflict: 'funcionaria_id,mes' });
   if (errHolerite) { alert('Erro ao fechar holerite: ' + errHolerite.message); return; }
 
@@ -1587,8 +1632,11 @@ async function removeFeriado(id) {
   const { error } = await sb.from('feriados').delete().eq('id', id);
   if (error) alert('Erro ao remover feriado: ' + error.message);
 }
-async function salvarEmpresaConfig(cnpj, razaoSocial) {
-  const { error } = await sb.from('empresa_config').upsert({ id: 1, cnpj: cnpj || null, razao_social: razaoSocial || null });
+async function salvarEmpresaConfig(dados) {
+  const { error } = await sb.from('empresa_config').upsert({
+    id: 1, cnpj: dados.cnpj || null, razao_social: dados.razaoSocial || null,
+    nome_fantasia: dados.nomeFantasia || null, endereco: dados.endereco || null, telefone: dados.telefone || null,
+  });
   if (error) alert('Erro ao salvar dados da empresa: ' + error.message);
 }
 // a funcionária confirma (assina eletronicamente, desenhando o nome na tela) o holerite
@@ -1730,6 +1778,12 @@ function coletarJornadaSemanal(prefixo) {
 // a configuração por dia da semana; se não tiver, cai no padrão antigo (seg-sex fixo, sem sáb/dom)
 // formata uma diferença de horas decimal em texto tipo "13min", "1h20min" — mais legível
 // que hora fracionada (0.2h) pra diferenças de ponto
+// mascara o CPF pra exibir em documentos (só os 3 primeiros e 2 últimos dígitos aparecem)
+function mascararCpf(cpf) {
+  const digitos = (cpf || '').replace(/\D/g, '');
+  if (digitos.length !== 11) return cpf || '';
+  return `${digitos.slice(0, 3)}.***.***-${digitos.slice(9)}`;
+}
 function formatarHorasMin(horasDecimais) {
   const totalMin = Math.round(Math.abs(horasDecimais) * 60);
   const h = Math.floor(totalMin / 60);
@@ -1785,6 +1839,39 @@ function calcularHorasDia(pontosDoDia, funcionaria, dataStr) {
 }
 // resume o mês inteiro pra fechar o holerite: dias trabalhados, horas extras, horas
 // faltantes (só as não abonadas), e o salário base (mensal fixo ou por hora trabalhada)
+// extrato do banco de horas de um mês: quanto ela já tinha antes, quanto creditou/debitou
+// dentro do mês, e o saldo final — pra mostrar aberto no holerite, não só o total corrido
+function calcularExtratoBancoHoras(funcionariaId, mesKey) {
+  const primeiroDiaMes = `${mesKey}-01`;
+  const [ano, mes] = mesKey.split('-').map(Number);
+  const ultimoDiaMes = `${mesKey}-${String(new Date(ano, mes, 0).getDate()).padStart(2, '0')}`;
+  const lancamentos = state.bancoHorasLancamentos.filter((b) => b.funcionariaId === funcionariaId);
+  const saldoAnterior = lancamentos.filter((b) => b.data < primeiroDiaMes).reduce((a, b) => a + b.horas, 0);
+  const doMes = lancamentos.filter((b) => b.data >= primeiroDiaMes && b.data <= ultimoDiaMes);
+  const produzido = doMes.filter((b) => b.horas > 0).reduce((a, b) => a + b.horas, 0);
+  const consumido = doMes.filter((b) => b.horas < 0).reduce((a, b) => a + Math.abs(b.horas), 0);
+  const saldoFinal = saldoAnterior + produzido - consumido;
+  return { saldoAnterior, produzido, consumido, saldoFinal };
+}
+// conta quantos dias de atestado, abono/folga e férias caíram dentro do mês — pro
+// resumo da jornada no holerite
+function calcularResumoOcorrencias(funcionariaId, mesKey) {
+  const abonosNoMes = state.abonosPonto.filter((a) => a.funcionariaId === funcionariaId && a.data.slice(0, 7) === mesKey);
+  const diasAtestado = abonosNoMes.filter((a) => a.tipo === 'atestado').length;
+  const diasAbono = abonosNoMes.filter((a) => a.tipo !== 'atestado').length;
+  const [ano, mes] = mesKey.split('-').map(Number);
+  const inicioMes = `${mesKey}-01`;
+  const fimMes = `${mesKey}-${String(new Date(ano, mes, 0).getDate()).padStart(2, '0')}`;
+  const diasFerias = state.feriasTiradas
+    .filter((v) => v.funcionariaId === funcionariaId && v.dataInicio <= fimMes && v.dataFim >= inicioMes)
+    .reduce((acc, v) => {
+      const inicio = v.dataInicio < inicioMes ? inicioMes : v.dataInicio;
+      const fim = v.dataFim > fimMes ? fimMes : v.dataFim;
+      const dias = Math.round((new Date(fim + 'T00:00:00') - new Date(inicio + 'T00:00:00')) / 86400000) + 1;
+      return acc + Math.max(0, dias);
+    }, 0);
+  return { diasAtestado, diasAbono, diasFerias };
+}
 function calcularResumoHolerite(funcionaria, mesKey) {
   const [ano, mes] = mesKey.split('-').map(Number);
   const ultimoDia = new Date(ano, mes, 0).getDate();
@@ -4620,7 +4707,10 @@ function renderRH(c) {
         <div class="section-title" style="margin-bottom:2px">Dados da empresa</div>
         <div class="section-subtitle" style="margin-bottom:10px">Usados no cabeçalho dos holerites e recibos em PDF.</div>
         <input type="text" id="empresaRazaoSocial" placeholder="Razão social (ex: Rosa Julieta Confecções LTDA)" value="${esc(state.empresaConfig.razaoSocial)}" />
+        <input type="text" id="empresaNomeFantasia" placeholder="Nome fantasia (ex: Rosa Julieta) — opcional" value="${esc(state.empresaConfig.nomeFantasia)}" style="margin-top:8px" />
         <input type="text" id="empresaCnpj" placeholder="CNPJ (ex: 00.000.000/0001-00)" value="${esc(state.empresaConfig.cnpj)}" style="margin-top:8px" />
+        <input type="text" id="empresaEndereco" placeholder="Endereço (opcional)" value="${esc(state.empresaConfig.endereco)}" style="margin-top:8px" />
+        <input type="text" id="empresaTelefone" placeholder="Telefone (opcional)" value="${esc(state.empresaConfig.telefone)}" style="margin-top:8px" />
         <button class="confirm-btn" style="margin-top:8px" id="salvarEmpresaConfig">Salvar</button>
       </div>
     ` : ''}
@@ -4702,6 +4792,11 @@ function renderRH(c) {
                 <input type="text" id="editFuncPin-${f.id}" placeholder="PIN pessoal" value="${esc(f.pin)}" inputmode="numeric" />
                 <div class="form-hint" style="margin-bottom:2px">Data de admissão</div>
                 <input type="date" id="editFuncAdmissao-${f.id}" value="${f.dataAdmissao || ''}" />
+                <div class="form-row" style="margin-top:8px">
+                  <input type="text" id="editFuncCargo-${f.id}" placeholder="Cargo/função (ex: Costureira)" value="${esc(f.cargo || '')}" />
+                  <input type="text" id="editFuncMatricula-${f.id}" placeholder="Matrícula (ex: 001)" value="${esc(f.matricula || '')}" />
+                </div>
+                <input type="text" id="editFuncCpf-${f.id}" placeholder="CPF (ex: 000.000.000-00)" value="${esc(f.cpf || '')}" style="margin-top:8px" />
                 <div class="form-hint" style="margin-top:10px">Pagamento — usado pro holerite</div>
                 <div class="form-row">
                   <button class="toggle-btn ${(window.__editFuncTipoPag?.[f.id] || f.tipoPagamento) === 'hora' ? 'active-teal' : ''}" data-edit-func-tipo-pag="${f.id}" data-valor="hora">Por hora</button>
@@ -4795,6 +4890,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
   const valorBancoPagoDinheiroFechado = f ? state.tx.filter((t) => t.tipo === 'saida' && monthKey(t.data) === mesHolerite && t.descricao && t.descricao.startsWith(`Pagamento de banco de horas — ${f.nome}`)).reduce((acc, t) => acc + t.valor, 0) : 0;
   const saldoBancoHoras = state.bancoHorasLancamentos.filter((b) => b.funcionariaId === funcionariaId).reduce((a, b) => a + b.horas, 0);
   const historicoHolerites = state.holerites.filter((h) => h.funcionariaId === funcionariaId).sort((a, b) => b.mes.localeCompare(a.mes));
+  const extratoBancoMes = f ? calcularExtratoBancoHoras(funcionariaId, mesHolerite) : null;
   const mesLabelHolerite = (mk) => new Date(mk + '-01T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
 
   return `
@@ -4803,6 +4899,9 @@ function renderFuncionariaDetalhe(funcionariaId) {
     <div class="section-title-wrap">
       <div><div class="section-title">${esc(f?.nome || 'Funcionária')}</div><div class="section-subtitle">${f ? [1, 2, 3, 4, 5, 6, 0].filter((dia) => (f.jornadaSemanal[dia] ? f.jornadaSemanal[dia].trabalha : (dia >= 1 && dia <= 5))).map((dia) => DIAS_SEMANA[dia].slice(0, 3)).join(', ') : ''}</div></div>
     </div>
+    ${f && (f.cargo || f.matricula || f.cpf) ? `
+      <div class="form-hint" style="margin-top:-10px;margin-bottom:14px">${[f.cargo, f.matricula ? `Matrícula ${f.matricula}` : '', f.cpf ? `CPF ${mascararCpf(f.cpf)}` : ''].filter(Boolean).join(' · ')}</div>
+    ` : ''}
 
     ${diasPendentes.length > 0 ? `
       <div class="form-card" style="border-color:var(--red)55">
@@ -5111,6 +5210,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
     ${!f ? '' : holeriteExistente ? `
       <div class="form-card" style="border-color:var(--teal)55">
         <div class="section-title" style="margin-bottom:2px;color:var(--teal)">✅ Holerite de ${mesLabelHolerite(mesHolerite)} já fechado</div>
+        ${holeriteExistente.numeroRecibo ? `<div class="form-hint" style="margin-bottom:8px">Recibo nº ${holeriteExistente.numeroRecibo} · emitido em ${new Date(holeriteExistente.createdAt).toLocaleDateString('pt-BR')}${holeriteExistente.emitidoPor ? ` por ${holeriteExistente.emitidoPor === 'dono' ? 'Proprietária' : 'Supervisora'}` : ''}</div>` : ''}
         <div class="prod-breakdown" style="margin-top:10px">
           <div class="prod-breakdown-item"><span>Dias trabalhados</span><span>${holeriteExistente.diasTrabalhados}</span></div>
           <div class="prod-breakdown-item"><span>Salário base</span><span>${fmt(holeriteExistente.salarioBase)}</span></div>
@@ -5123,6 +5223,15 @@ function renderFuncionariaDetalhe(funcionariaId) {
           <div class="prod-breakdown-item"><span>VR</span><span>${fmt(holeriteExistente.valorVr)}</span></div>
         </div>
         <div class="produto-vendido" style="margin-top:8px">💰 Total pago: ${fmt(holeriteExistente.totalPagar)}</div>
+        ${extratoBancoMes && (extratoBancoMes.saldoAnterior !== 0 || extratoBancoMes.produzido !== 0 || extratoBancoMes.consumido !== 0) ? `
+          <div class="form-hint" style="margin-top:10px;margin-bottom:2px">Extrato do banco de horas desse mês</div>
+          <div class="prod-breakdown">
+            <div class="prod-breakdown-item"><span>Saldo anterior</span><span>${extratoBancoMes.saldoAnterior >= 0 ? '+' : '-'}${formatarHorasMin(extratoBancoMes.saldoAnterior)}</span></div>
+            <div class="prod-breakdown-item"><span>Produzido no mês</span><span style="color:var(--teal)">+${formatarHorasMin(extratoBancoMes.produzido)}</span></div>
+            <div class="prod-breakdown-item"><span>Consumido no mês</span><span style="color:var(--red)">-${formatarHorasMin(extratoBancoMes.consumido)}</span></div>
+            <div class="prod-breakdown-item"><span><strong>Saldo final</strong></span><span><strong>${extratoBancoMes.saldoFinal >= 0 ? '+' : '-'}${formatarHorasMin(extratoBancoMes.saldoFinal)}</strong></span></div>
+          </div>
+        ` : ''}
         <div class="form-hint" style="margin-top:8px">${holeriteExistente.assinadoEm ? `✅ Assinado por ${esc(f.nome)} em ${new Date(holeriteExistente.assinadoEm).toLocaleString('pt-BR')}` : '⏳ Aguardando a funcionária confirmar/assinar pelo celular dela'}</div>
         ${holeriteExistente.assinaturaImagem ? `<img src="${holeriteExistente.assinaturaImagem}" alt="Assinatura" style="background:#fff;border-radius:6px;height:50px;margin-top:6px" />` : ''}
         <div class="form-row" style="margin-top:10px">
@@ -5143,6 +5252,15 @@ function renderFuncionariaDetalhe(funcionariaId) {
           ${resumoHolerite.horasBancoPagasDinheiro > 0 ? `<div class="prod-breakdown-item"><span>💰 Banco de horas pago em dinheiro (já lançado, não soma no total)</span><span style="color:var(--teal)">${formatarHorasMin(resumoHolerite.horasBancoPagasDinheiro)} · ${fmt(resumoHolerite.valorBancoPagoDinheiro)}</span></div>` : ''}
           <div class="prod-breakdown-item"><span>Horas faltantes não abonadas</span><span style="color:var(--red)">${formatarHorasMin(resumoHolerite.horasFaltantes)}</span></div>
         </div>
+        ${extratoBancoMes && (extratoBancoMes.saldoAnterior !== 0 || extratoBancoMes.produzido !== 0 || extratoBancoMes.consumido !== 0) ? `
+          <div class="form-hint" style="margin-top:10px;margin-bottom:2px">Extrato do banco de horas desse mês</div>
+          <div class="prod-breakdown">
+            <div class="prod-breakdown-item"><span>Saldo anterior</span><span>${extratoBancoMes.saldoAnterior >= 0 ? '+' : '-'}${formatarHorasMin(extratoBancoMes.saldoAnterior)}</span></div>
+            <div class="prod-breakdown-item"><span>Produzido no mês</span><span style="color:var(--teal)">+${formatarHorasMin(extratoBancoMes.produzido)}</span></div>
+            <div class="prod-breakdown-item"><span>Consumido no mês</span><span style="color:var(--red)">-${formatarHorasMin(extratoBancoMes.consumido)}</span></div>
+            <div class="prod-breakdown-item"><span><strong>Saldo final</strong></span><span><strong>${extratoBancoMes.saldoFinal >= 0 ? '+' : '-'}${formatarHorasMin(extratoBancoMes.saldoFinal)}</strong></span></div>
+          </div>
+        ` : ''}
         <div class="form-hint" style="margin-top:10px;margin-bottom:2px">Como pagar as horas extras desse mês?</div>
         <div class="form-row">
           <button class="toggle-btn ${(window.__holeriteModoExtras || f.modoCompensacaoPadrao) === 'dinheiro' ? 'active-teal' : ''}" data-holerite-modo-extras="dinheiro">💰 Dinheiro</button>
@@ -5188,6 +5306,15 @@ function renderFuncionariaDetalhe(funcionariaId) {
             ${resumoHolerite.horasBancoUsadas > 0 ? `<div class="form-hint" style="margin-top:6px;color:var(--amber)">🏦 ${formatarHorasMin(resumoHolerite.horasBancoUsadas)} do saldo do banco de horas foram usadas pra cobrir faltas parciais nesse mês.</div>` : ''}
             ${resumoHolerite.horasBancoPagasDinheiro > 0 ? `<div class="form-hint" style="margin-top:6px;color:var(--teal)">💰 ${formatarHorasMin(resumoHolerite.horasBancoPagasDinheiro)} do banco de horas já foram pagas em dinheiro nesse mês (${fmt(resumoHolerite.valorBancoPagoDinheiro)}), lançamento já feito à parte.</div>` : ''}
             ${d.modoHorasExtras === 'banco' && (resumoHolerite.horasExtras > 0 || resumoHolerite.horasExtras100 > 0) ? `<div class="form-hint" style="margin-top:6px">Horas extras desse mês serão creditadas no banco de horas, não pagas em dinheiro.</div>` : ''}
+            ${extratoBancoMes && (extratoBancoMes.saldoAnterior !== 0 || extratoBancoMes.produzido !== 0 || extratoBancoMes.consumido !== 0) ? `
+              <div class="form-hint" style="margin-top:10px;margin-bottom:2px">Extrato do banco de horas desse mês</div>
+              <div class="prod-breakdown">
+                <div class="prod-breakdown-item"><span>Saldo anterior</span><span>${extratoBancoMes.saldoAnterior >= 0 ? '+' : '-'}${formatarHorasMin(extratoBancoMes.saldoAnterior)}</span></div>
+                <div class="prod-breakdown-item"><span>Produzido no mês</span><span style="color:var(--teal)">+${formatarHorasMin(extratoBancoMes.produzido)}</span></div>
+                <div class="prod-breakdown-item"><span>Consumido no mês</span><span style="color:var(--red)">-${formatarHorasMin(extratoBancoMes.consumido)}</span></div>
+                <div class="prod-breakdown-item"><span><strong>Saldo final</strong></span><span><strong>${extratoBancoMes.saldoFinal >= 0 ? '+' : '-'}${formatarHorasMin(extratoBancoMes.saldoFinal)}</strong></span></div>
+              </div>
+            ` : ''}
             <div class="form-hint" style="margin-top:10px">📌 Isso é só uma prévia na tela — nada foi salvo. Clique em "Fechar holerite" acima quando estiver tudo certo.</div>
           </div>
         `;
@@ -5553,8 +5680,11 @@ function attachRHHandlers(c) {
   const salvarEmpresaConfigBtn = document.getElementById('salvarEmpresaConfig');
   if (salvarEmpresaConfigBtn) salvarEmpresaConfigBtn.addEventListener('click', async () => {
     const razaoSocial = document.getElementById('empresaRazaoSocial').value.trim();
+    const nomeFantasia = document.getElementById('empresaNomeFantasia').value.trim();
     const cnpj = document.getElementById('empresaCnpj').value.trim();
-    await salvarEmpresaConfig(cnpj, razaoSocial);
+    const endereco = document.getElementById('empresaEndereco').value.trim();
+    const telefone = document.getElementById('empresaTelefone').value.trim();
+    await salvarEmpresaConfig({ cnpj, razaoSocial, nomeFantasia, endereco, telefone });
     state.showEmpresaConfigForm = false;
     await loadData();
   });
@@ -5699,10 +5829,14 @@ function attachRHHandlers(c) {
       const valorVtDia = parseBRNumber(document.getElementById(`editFuncVtDia-${id}`).value);
       const valorVrDia = parseBRNumber(document.getElementById(`editFuncVrDia-${id}`).value);
       const horasCompensacaoSemanal = parseBRNumber(document.getElementById(`editFuncCompSabado-${id}`)?.value || '0');
+      const cpf = document.getElementById(`editFuncCpf-${id}`).value.trim();
+      const cargo = document.getElementById(`editFuncCargo-${id}`).value.trim();
+      const matricula = document.getElementById(`editFuncMatricula-${id}`).value.trim();
       await updateFuncionaria(id, {
         nome, pin, dataAdmissao, ativa, jornadaSemanal,
         jornadaEntrada: segunda.entrada, jornadaSaidaAlmoco: segunda.saidaAlmoco, jornadaVoltaAlmoco: segunda.voltaAlmoco, jornadaSaida: segunda.saida,
         tipoPagamento, salarioMensal, valorHora, percentualHoraExtra, modoCompensacaoPadrao, valorVtDia, valorVrDia, horasCompensacaoSemanal,
+        cpf, cargo, matricula,
       });
       state.editingFuncionariaId = null;
       if (window.__editFuncTipoPag) delete window.__editFuncTipoPag[id];
