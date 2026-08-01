@@ -366,6 +366,7 @@ const state = {
   showFeriadosForm: false,
   holeriteMes: null,
   showLancamentoBanco: false,
+  showHistoricoBanco: false,
   showHoleritesLote: false,
   showAbonarId: null,
 };
@@ -4941,7 +4942,28 @@ function renderFuncionariaDetalhe(funcionariaId) {
         <div class="stat-value" style="color:${saldoBancoHoras >= 0 ? 'var(--teal)' : 'var(--red)'}">${saldoBancoHoras >= 0 ? '+' : '-'}${formatarHorasMin(saldoBancoHoras)}</div>
       </div>
     </div>
-    <button class="icon-btn-ghost" style="margin-bottom:14px" id="toggleLancamentoBanco">🏦 Lançar horas manual no banco (ex: saldo de antes do sistema)</button>
+    <div class="form-row" style="margin-bottom:14px">
+      <button class="icon-btn-ghost" id="toggleLancamentoBanco">🏦 Lançar horas manual</button>
+      <button class="icon-btn-ghost" id="toggleHistoricoBanco">${state.showHistoricoBanco ? '✕ Fechar histórico' : '📜 Ver histórico do banco de horas'}</button>
+    </div>
+    ${state.showHistoricoBanco ? (() => {
+      const lancamentos = state.bancoHorasLancamentos.filter((b) => b.funcionariaId === funcionariaId).sort((a, b) => b.data.localeCompare(a.data));
+      if (lancamentos.length === 0) return `<div class="empty-state">Nenhum lançamento no banco de horas ainda.</div>`;
+      return `
+        <div class="tx-list" style="margin-bottom:14px">
+          ${lancamentos.map((b) => `
+            <div class="tx-row">
+              <div class="tx-dot" style="background:${b.horas >= 0 ? 'var(--teal)' : 'var(--red)'}"></div>
+              <div style="flex:1">
+                <div class="tx-categoria">${b.tipo === 'credito' ? '➕ Crédito' : '➖ Débito'}${b.descricao ? ` — ${esc(b.descricao)}` : ''}</div>
+                <div class="tx-date">${new Date(b.data + 'T00:00:00').toLocaleDateString('pt-BR')}</div>
+              </div>
+              <div class="tx-valor" style="color:${b.horas >= 0 ? 'var(--teal)' : 'var(--red)'}">${b.horas >= 0 ? '+' : '-'}${formatarHorasMin(b.horas)}</div>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    })() : ''}
     ${state.showLancamentoBanco ? `
       <div class="form-card">
         <div class="form-row">
@@ -5102,6 +5124,8 @@ function attachRHHandlers(c) {
 
     const toggleLancamentoBanco = document.getElementById('toggleLancamentoBanco');
     if (toggleLancamentoBanco) toggleLancamentoBanco.addEventListener('click', () => { state.showLancamentoBanco = !state.showLancamentoBanco; render(); });
+    const toggleHistoricoBanco = document.getElementById('toggleHistoricoBanco');
+    if (toggleHistoricoBanco) toggleHistoricoBanco.addEventListener('click', () => { state.showHistoricoBanco = !state.showHistoricoBanco; render(); });
     document.querySelectorAll('[data-tipo-lanc-banco]').forEach((btn) => {
       btn.addEventListener('click', () => { window.__tipoLancBanco = btn.dataset.tipoLancBanco; render(); });
     });
@@ -5957,6 +5981,7 @@ function attachHandlers(c) {
       state.showFeriasForm = false;
       state.showAbonarId = null;
       state.showHoleritesLote = false;
+      state.showHistoricoBanco = false;
       render();
     });
   });
