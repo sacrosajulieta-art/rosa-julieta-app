@@ -59,6 +59,10 @@ const NATUREZA_POR_CATEGORIA = (() => {
 // entradas que não são venda (empréstimo, aporte...) — não contam como Receita Bruta no DRE,
 // mas continuam contando no saldo de caixa normalmente
 const CATEGORIAS_ENTRADA_NAO_OPERACIONAL = ['Empréstimo recebido', 'Reembolso de frete'];
+// categorias já geradas automaticamente por outro fluxo do sistema (parcela de empréstimo,
+// holerite) — nunca devem ser marcadas como "repetir todos os meses" manualmente, senão
+// duplicam com o que o próprio sistema já lança sozinho
+const CATEGORIAS_SEM_RECORRENTE_MANUAL = ['Empréstimo — parcela', 'Funcionários — salário', 'Funcionários — encargos/benefícios'];
 
 // ==================== HELPERS ====================
 const fmt = (n) => (n ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -1567,7 +1571,8 @@ async function removeAbono(id) {
 // fecha o holerite de um mês: grava o registro congelado, lança a saída no Financeiro
 // (se as horas extras forem pagas em dinheiro), e movimenta o banco de horas (crédito se
 // escolheu banco pras extras, débito sempre que tem falta não abonada)
-async function fecharHolerite(funcionaria, mesKey, resumo, modoHorasExtras, valorVtFinal, valorVrFinal) {
+async function fecharHolerite(funcionaria, mesKey, resumo, modoHorasExtras, valorVtFinal, valorVrFinal, dataPagamento) {
+  const dataLancamento = dataPagamento || todayStr();
   const totalPagar = resumo.salarioBase
     + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras : 0)
     + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras100 : 0)
@@ -1590,19 +1595,19 @@ async function fecharHolerite(funcionaria, mesKey, resumo, modoHorasExtras, valo
   if (valorSalarioEExtras > 0) {
     await addTx({
       tipo: 'saida', valor: valorSalarioEExtras, categoria: 'Funcionários — salário', natureza: 'fixo',
-      descricao: `Holerite ${funcionaria.nome} — ${mesLabelTexto}`, data: todayStr(),
+      descricao: `Holerite ${funcionaria.nome} — ${mesLabelTexto}`, data: dataLancamento,
     });
   }
   if (valorBeneficios > 0) {
     await addTx({
       tipo: 'saida', valor: valorBeneficios, categoria: 'Funcionários — encargos/benefícios', natureza: 'fixo',
-      descricao: `VT + VR ${funcionaria.nome} — ${mesLabelTexto}`, data: todayStr(),
+      descricao: `VT + VR ${funcionaria.nome} — ${mesLabelTexto}`, data: dataLancamento,
     });
   }
 
   if (modoHorasExtras === 'banco' && resumo.horasExtras > 0) {
     const { error } = await sb.from('banco_horas_lancamentos').insert({
-      funcionaria_id: funcionaria.id, data: todayStr(), tipo: 'credito', horas: resumo.horasExtras,
+      funcionaria_id: funcionaria.id, data: dataLancamento, tipo: 'credito', horas: resumo.horasExtras,
       descricao: `Horas extras de ${mesLabelTexto} convertidas em banco de horas`,
     });
     if (error) console.error(error);
@@ -1610,14 +1615,14 @@ async function fecharHolerite(funcionaria, mesKey, resumo, modoHorasExtras, valo
   if (modoHorasExtras === 'banco' && resumo.horasExtras100 > 0) {
     // domingo/feriado credita em dobro no banco de horas (1h trabalhada = 2h de folga depois)
     const { error } = await sb.from('banco_horas_lancamentos').insert({
-      funcionaria_id: funcionaria.id, data: todayStr(), tipo: 'credito', horas: resumo.horasExtras100 * 2,
+      funcionaria_id: funcionaria.id, data: dataLancamento, tipo: 'credito', horas: resumo.horasExtras100 * 2,
       descricao: `Horas de domingo/feriado de ${mesLabelTexto} convertidas em banco de horas (em dobro)`,
     });
     if (error) console.error(error);
   }
   if (resumo.horasFaltantes > 0) {
     const { error } = await sb.from('banco_horas_lancamentos').insert({
-      funcionaria_id: funcionaria.id, data: todayStr(), tipo: 'debito', horas: -resumo.horasFaltantes,
+      funcionaria_id: funcionaria.id, data: dataLancamento, tipo: 'debito', horas: -resumo.horasFaltantes,
       descricao: `Faltas não abonadas de ${mesLabelTexto} — a compensar trabalhando`,
     });
     if (error) console.error(error);
@@ -2078,11 +2083,12 @@ async function updateProducao(id, novo) {
 
 async function garantirRecorrentes() {
   const hojeMonth = todayStr().slice(0, 7);
-  // "Empréstimo — parcela" nunca deve virar molde recorrente — cada parcela já nasce com
-  // data própria calculada pelo empréstimo; se essa categoria ficar marcada como recorrente
-  // (por edição antiga ou erro), ela gera parcelas fantasmas todo mês. Trava aqui também,
-  // além da trava na hora de salvar, pra nunca mais duplicar de novo.
-  const templates = state.tx.filter((t) => t.recorrente && t.categoria !== 'Empréstimo — parcela');
+  // categorias já geradas por outro fluxo automático (parcela de empréstimo, salário e
+  // benefícios do holerite) nunca devem virar molde recorrente — se ficarem marcadas como
+  // recorrente (por edição antiga ou erro), geram lançamentos fantasmas todo mês, duplicando
+  // com o que o próprio sistema já lança sozinho. Trava aqui também, além da trava na hora
+  // de salvar, pra nunca mais duplicar de novo.
+  const templates = state.tx.filter((t) => t.recorrente && !CATEGORIAS_SEM_RECORRENTE_MANUAL.includes(t.categoria));
   for (const t of templates) {
     const dia = Number(t.data.slice(8, 10));
     let cursor = addMonths(monthKey(t.data), 1);
@@ -5282,6 +5288,8 @@ function renderFuncionariaDetalhe(funcionariaId) {
           <input type="text" id="holeriteVt" placeholder="VT mensal fixo" value="${resumoHolerite.valorVt.toFixed(2).replace('.', ',')}" />
           <input type="text" id="holeriteVr" placeholder="VR mensal fixo" value="${resumoHolerite.valorVr.toFixed(2).replace('.', ',')}" />
         </div>
+        <div class="form-hint" style="margin-top:10px;margin-bottom:2px">Data do pagamento (é a data que vai aparecer no Financeiro)</div>
+        <input type="date" id="holeriteDataPagamento" value="${(() => { const [anoH, mesH] = mesHolerite.split('-').map(Number); const ultimoDiaH = new Date(anoH, mesH, 0).getDate(); const hojeReal = todayStr(); const candidato = `${mesHolerite}-${String(ultimoDiaH).padStart(2, '0')}`; return candidato <= hojeReal ? candidato : hojeReal; })()}" />
         <div class="form-row" style="margin-top:12px">
           <button class="icon-btn-ghost" data-visualizar-previa="${funcionariaId}">👁️ Visualizar prévia</button>
           <button class="confirm-btn" data-fechar-holerite="${funcionariaId}">Fechar holerite de ${mesLabelHolerite(mesHolerite)}</button>
@@ -5557,9 +5565,11 @@ function attachRHHandlers(c) {
       const modoHorasExtras = window.__holeriteModoExtras || funcionaria.modoCompensacaoPadrao;
       const valorVt = parseBRNumber(document.getElementById('holeriteVt').value) || 0;
       const valorVr = parseBRNumber(document.getElementById('holeriteVr').value) || 0;
+      const dataPagamento = document.getElementById('holeriteDataPagamento')?.value || todayStr();
       const totalPagar = resumo.salarioBase + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras : 0) + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras100 : 0) + valorVt + valorVr;
-      if (!confirm(`Fechar o holerite de ${funcionaria.nome}?\n\nTotal a pagar: ${fmt(totalPagar)}\n\nIsso lança a saída no Financeiro e movimenta o banco de horas. Confirma?`)) return;
-      await fecharHolerite(funcionaria, mesKey, resumo, modoHorasExtras, valorVt, valorVr);
+      const dataPagamentoFmt = new Date(dataPagamento + 'T00:00:00').toLocaleDateString('pt-BR');
+      if (!confirm(`Fechar o holerite de ${funcionaria.nome}?\n\nTotal a pagar: ${fmt(totalPagar)}\nData do lançamento: ${dataPagamentoFmt}\n\nIsso lança a saída no Financeiro e movimenta o banco de horas. Confirma?`)) return;
+      await fecharHolerite(funcionaria, mesKey, resumo, modoHorasExtras, valorVt, valorVr, dataPagamento);
       window.__holeriteModoExtras = null;
       await loadData();
     });
@@ -5730,13 +5740,21 @@ function attachRHHandlers(c) {
   const holeriteLoteMesSelect = document.getElementById('holeriteLoteMesSelect');
   if (holeriteLoteMesSelect) holeriteLoteMesSelect.addEventListener('change', (e) => { state.holeriteMes = e.target.value; render(); });
 
+  const dataPagamentoPadrao = (mesKey) => {
+    const [anoP, mesP] = mesKey.split('-').map(Number);
+    const ultimoDiaP = new Date(anoP, mesP, 0).getDate();
+    const hojeReal = todayStr();
+    const candidato = `${mesKey}-${String(ultimoDiaP).padStart(2, '0')}`;
+    return candidato <= hojeReal ? candidato : hojeReal;
+  };
+
   document.querySelectorAll('[data-fechar-holerite-lote]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const funcionaria = state.funcionarias.find((f) => f.id === btn.dataset.fecharHoleriteLote);
       const mesKey = btn.dataset.mes;
       const resumo = calcularResumoHolerite(funcionaria, mesKey);
       const modoHorasExtras = funcionaria.modoCompensacaoPadrao;
-      await fecharHolerite(funcionaria, mesKey, resumo, modoHorasExtras, resumo.valorVt, resumo.valorVr);
+      await fecharHolerite(funcionaria, mesKey, resumo, modoHorasExtras, resumo.valorVt, resumo.valorVr, dataPagamentoPadrao(mesKey));
       await loadData();
     });
   });
@@ -5746,9 +5764,10 @@ function attachRHHandlers(c) {
     const mesKey = fecharTodosBtn.dataset.fecharTodosHolerites;
     const ativas = state.funcionarias.filter((f) => f.ativa !== false && !state.holerites.some((h) => h.funcionariaId === f.id && h.mes === mesKey));
     if (!confirm(`Fechar o holerite de ${ativas.length} funcionária(s) pra ${new Date(mesKey + '-01T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}?\n\nCada uma usa o modo de pagamento de hora extra padrão dela. Isso lança as saídas no Financeiro.`)) return;
+    const dataPagamento = dataPagamentoPadrao(mesKey);
     for (const f of ativas) {
       const resumo = calcularResumoHolerite(f, mesKey);
-      await fecharHolerite(f, mesKey, resumo, f.modoCompensacaoPadrao, resumo.valorVt, resumo.valorVr);
+      await fecharHolerite(f, mesKey, resumo, f.modoCompensacaoPadrao, resumo.valorVt, resumo.valorVr, dataPagamento);
     }
     await loadData();
     alert(`${ativas.length} holerite(s) fechado(s)!`);
@@ -6705,7 +6724,7 @@ function attachFinanceiroHandlers(c) {
     const numParcelas = (cartao || parceladoSemCartao) ? (Number(document.getElementById('txNumParcelas').value) || 1) : 1;
     if (!valor || !categoria) { alert('Preencha valor e categoria.'); return; }
     if (parceladoSemCartao && (!numParcelas || numParcelas <= 1)) { alert('Informe um número de parcelas maior que 1, ou escolha "Outro".'); return; }
-    if (recorrente && categoria === 'Empréstimo — parcela') { alert('Parcela de empréstimo não pode ser "repetir todos os meses" — cada parcela já nasce com a data certa, calculada pelo próprio empréstimo. Marcar isso duplica a parcela todo mês.'); return; }
+    if (recorrente && CATEGORIAS_SEM_RECORRENTE_MANUAL.includes(categoria)) { alert(`"${categoria}" já é lançado automaticamente por outra parte do sistema (empréstimo ou holerite) — marcar "repetir todos os meses" nessa categoria duplica o lançamento. Deixa sem marcar.`); return; }
     const natureza = tipo === 'saida' ? (NATUREZA_POR_CATEGORIA[categoria] || 'variavel') : null;
     if (cartao) {
       await criarSaidasCartao({ cartao, categoria, natureza, descricaoBase: descricao || categoria, valorTotal: valor, numParcelas, dataCompra: data });
@@ -6766,7 +6785,7 @@ function attachTxRowHandlers() {
       const data = document.getElementById(`editTxData-${id}`).value || todayStr();
       const recorrente = document.getElementById(`editTxRecorrente-${id}`)?.checked || false;
       if (!valor || !categoria) { alert('Preencha valor e categoria.'); return; }
-      if (recorrente && categoria === 'Empréstimo — parcela') { alert('Parcela de empréstimo não pode ser "repetir todos os meses" — cada parcela já nasce com a data certa, calculada pelo próprio empréstimo. Marcar isso duplica a parcela todo mês.'); return; }
+      if (recorrente && CATEGORIAS_SEM_RECORRENTE_MANUAL.includes(categoria)) { alert(`"${categoria}" já é lançado automaticamente por outra parte do sistema (empréstimo ou holerite) — marcar "repetir todos os meses" nessa categoria duplica o lançamento. Deixa sem marcar.`); return; }
       const natureza = tipo === 'saida' ? (NATUREZA_POR_CATEGORIA[categoria] || 'variavel') : null;
       await updateTx(id, { tipo, valor, categoria, natureza, descricao, data, recorrente });
       await loadData();
