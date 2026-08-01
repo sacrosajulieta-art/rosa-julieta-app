@@ -374,6 +374,7 @@ const state = {
   holeriteDataPagamento: null,
   showLancamentoBanco: false,
   showHistoricoBanco: false,
+  editingBancoHorasId: null,
   showPagarSaldoBanco: false,
   showPreviaHolerite: false,
   showHoleritesLote: false,
@@ -1568,6 +1569,17 @@ async function salvarAbono(funcionariaId, data, tipo, motivo, horasParciais) {
 async function removeAbono(id) {
   const { error } = await sb.from('abonos_ponto').delete().eq('id', id);
   if (error) alert('Erro ao remover abono: ' + error.message);
+}
+// edita um lançamento manual do banco de horas (corrige tipo/horas/descrição de algo já lançado)
+async function updateBancoHorasLancamento(id, tipo, horas, descricao) {
+  const { error } = await sb.from('banco_horas_lancamentos').update({
+    tipo, horas: tipo === 'debito' ? -Math.abs(horas) : Math.abs(horas), descricao: descricao || null,
+  }).eq('id', id);
+  if (error) alert('Erro ao editar lançamento: ' + error.message);
+}
+async function removeBancoHorasLancamento(id) {
+  const { error } = await sb.from('banco_horas_lancamentos').delete().eq('id', id);
+  if (error) alert('Erro ao remover lançamento: ' + error.message);
 }
 // fecha o holerite de um mês: grava o registro congelado, lança a saída no Financeiro
 // (se as horas extras forem pagas em dinheiro), e movimenta o banco de horas (crédito se
@@ -5194,16 +5206,43 @@ function renderFuncionariaDetalhe(funcionariaId) {
       if (lancamentos.length === 0) return `<div class="empty-state">Nenhum lançamento no banco de horas ainda.</div>`;
       return `
         <div class="tx-list" style="margin-bottom:14px">
-          ${lancamentos.map((b) => `
+          ${lancamentos.map((b) => {
+            if (state.editingBancoHorasId === b.id) {
+              const tipoEdit = window.__editBancoTipo || b.tipo;
+              const horasAbs = Math.abs(b.horas);
+              const hEdit = Math.floor(horasAbs);
+              const mEdit = Math.round((horasAbs - hEdit) * 60);
+              return `
+                <div class="form-card">
+                  <div class="form-row">
+                    <button class="toggle-btn ${tipoEdit === 'credito' ? 'active-teal' : ''}" data-edit-banco-tipo="credito">➕ Crédito</button>
+                    <button class="toggle-btn ${tipoEdit === 'debito' ? 'active-pink' : ''}" data-edit-banco-tipo="debito">➖ Débito</button>
+                  </div>
+                  <div class="form-row">
+                    <input type="text" id="editBancoHorasH-${b.id}" placeholder="Horas" value="${hEdit}" inputmode="numeric" />
+                    <input type="text" id="editBancoHorasM-${b.id}" placeholder="Minutos" value="${mEdit}" inputmode="numeric" />
+                  </div>
+                  <input type="text" id="editBancoDescricao-${b.id}" placeholder="Descrição" value="${esc(b.descricao || '')}" />
+                  <div class="form-row" style="margin-top:8px">
+                    <button class="confirm-btn" data-salvar-edit-banco="${b.id}">Salvar</button>
+                    <button class="toggle-btn" data-cancelar-edit-banco="1">Cancelar</button>
+                  </div>
+                </div>
+              `;
+            }
+            return `
             <div class="tx-row">
               <div class="tx-dot" style="background:${b.horas >= 0 ? 'var(--teal)' : 'var(--red)'}"></div>
               <div style="flex:1">
                 <div class="tx-categoria">${b.tipo === 'credito' ? '➕ Crédito' : '➖ Débito'}${b.descricao ? ` — ${esc(b.descricao)}` : ''}</div>
                 <div class="tx-date">${new Date(b.data + 'T00:00:00').toLocaleDateString('pt-BR')}</div>
               </div>
-              <div class="tx-valor" style="color:${b.horas >= 0 ? 'var(--teal)' : 'var(--red)'}">${b.horas >= 0 ? '+' : '-'}${formatarHorasMin(b.horas)}</div>
+              <div class="tx-valor" style="margin-right:6px;color:${b.horas >= 0 ? 'var(--teal)' : 'var(--red)'}">${b.horas >= 0 ? '+' : '-'}${formatarHorasMin(b.horas)}</div>
+              <button class="trash-btn" data-editar-banco="${b.id}">✏️</button>
+              <button class="trash-btn" data-remover-banco="${b.id}">🗑</button>
             </div>
-          `).join('')}
+          `;
+          }).join('')}
         </div>
       `;
     })() : ''}
@@ -5460,6 +5499,40 @@ function attachRHHandlers(c) {
     if (toggleLancamentoBanco) toggleLancamentoBanco.addEventListener('click', () => { state.showLancamentoBanco = !state.showLancamentoBanco; render(); });
     const toggleHistoricoBanco = document.getElementById('toggleHistoricoBanco');
     if (toggleHistoricoBanco) toggleHistoricoBanco.addEventListener('click', () => { state.showHistoricoBanco = !state.showHistoricoBanco; render(); });
+
+    document.querySelectorAll('[data-editar-banco]').forEach((btn) => {
+      btn.addEventListener('click', () => { state.editingBancoHorasId = btn.dataset.editarBanco; window.__editBancoTipo = null; render(); });
+    });
+    document.querySelectorAll('[data-cancelar-edit-banco]').forEach((btn) => {
+      btn.addEventListener('click', () => { state.editingBancoHorasId = null; render(); });
+    });
+    document.querySelectorAll('[data-edit-banco-tipo]').forEach((btn) => {
+      btn.addEventListener('click', () => { window.__editBancoTipo = btn.dataset.editBancoTipo; render(); });
+    });
+    document.querySelectorAll('[data-salvar-edit-banco]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.salvarEditBanco;
+        const original = state.bancoHorasLancamentos.find((b) => b.id === id);
+        const tipo = window.__editBancoTipo || original.tipo;
+        const h = Number(document.getElementById(`editBancoHorasH-${id}`).value) || 0;
+        const m = Number(document.getElementById(`editBancoHorasM-${id}`).value) || 0;
+        const horas = h + m / 60;
+        const descricao = document.getElementById(`editBancoDescricao-${id}`).value.trim();
+        if (!horas || horas <= 0) { alert('Informe as horas ou minutos.'); return; }
+        await updateBancoHorasLancamento(id, tipo, horas, descricao);
+        state.editingBancoHorasId = null;
+        window.__editBancoTipo = null;
+        await loadData();
+      });
+    });
+    document.querySelectorAll('[data-remover-banco]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        if (confirm('Remover esse lançamento do banco de horas?')) {
+          await removeBancoHorasLancamento(btn.dataset.removerBanco);
+          await loadData();
+        }
+      });
+    });
 
     const togglePagarSaldoBanco = document.getElementById('togglePagarSaldoBanco');
     if (togglePagarSaldoBanco) togglePagarSaldoBanco.addEventListener('click', () => { state.showPagarSaldoBanco = true; render(); });
