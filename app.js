@@ -2323,6 +2323,27 @@ function renderModoPonto(app) {
       `}
 
       ${(() => {
+        const saldoBanco = state.bancoHorasLancamentos.filter((b) => b.funcionariaId === funcionaria.id).reduce((a, b) => a + b.horas, 0);
+        const mesAtual = todayStr().slice(0, 7);
+        const resumoMes = calcularResumoHolerite(funcionaria, mesAtual);
+        const saldoMes = resumoMes.horasExtras + resumoMes.horasExtras100 - resumoMes.horasFaltantes;
+        return `
+          <div class="stats-grid" style="margin-bottom:24px">
+            <div class="stat-card">
+              <div class="stat-icon" style="background:${saldoMes >= 0 ? 'rgba(0,212,160,0.1)' : 'rgba(255,71,87,0.1)'}">⏱️</div>
+              <div class="stat-label">Saldo do mês</div>
+              <div class="stat-value" style="color:${saldoMes >= 0 ? 'var(--teal)' : 'var(--red)'}">${saldoMes >= 0 ? '+' : '-'}${formatarHorasMin(saldoMes)}</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon" style="background:${saldoBanco >= 0 ? 'rgba(0,212,160,0.1)' : 'rgba(255,71,87,0.1)'}">🏦</div>
+              <div class="stat-label">Banco de horas</div>
+              <div class="stat-value" style="color:${saldoBanco >= 0 ? 'var(--teal)' : 'var(--red)'}">${saldoBanco >= 0 ? '+' : '-'}${formatarHorasMin(saldoBanco)}</div>
+            </div>
+          </div>
+        `;
+      })()}
+
+      ${(() => {
         const dias = verificarPontosEsquecidos(funcionaria);
         const diasComAlgo = dias.filter((e) => e.tiposSemSolicitacao.length > 0 || e.tiposPendentesAprovacao.length > 0);
         if (diasComAlgo.length === 0) return '';
