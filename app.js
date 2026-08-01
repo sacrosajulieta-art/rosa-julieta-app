@@ -5255,6 +5255,7 @@ function attachRHHandlers(c) {
     });
 
 
+    const salvarAbonoLivre = document.querySelector('[data-salvar-abono-livre]');
     if (salvarAbonoLivre) salvarAbonoLivre.addEventListener('click', async () => {
       const funcionariaId = salvarAbonoLivre.dataset.salvarAbonoLivre;
       const dataInicio = document.getElementById('abonarLivreData').value;
