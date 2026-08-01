@@ -443,7 +443,7 @@ async function loadData() {
   state.distribuicoes = (distribuicoes || []).map((d) => ({ id: d.id, ordemItemId: d.ordem_item_id, produtoId: d.produto_id, varianteId: d.variante_id || null, costureiraId: d.costureira_id, quantidadeDistribuida: d.quantidade_distribuida, quantidadeDevolvida: d.quantidade_devolvida, data: d.data }));
   state.fichaTecnicaItens = (fichaTecnicaItens || []).map((f) => ({ id: f.id, produtoId: f.produto_id, tipoItem: f.tipo_item, insumoId: f.insumo_id || null, componenteProdutoId: f.componente_produto_id || null, quantidade: Number(f.quantidade), momento: f.momento || 'venda' }));
   state.insumoPlataformaQtd = (insumoPlataformaQtd || []).map((q) => ({ id: q.id, insumoId: q.insumo_id, plataformaId: q.plataforma_id, quantidade: Number(q.quantidade) }));
-  state.funcionarias = (funcionarias || []).map((f) => ({ id: f.id, nome: f.nome, pin: f.pin, ativa: f.ativa, jornadaEntrada: (f.jornada_entrada || '08:00').slice(0, 5), jornadaSaidaAlmoco: (f.jornada_saida_almoco || '12:00').slice(0, 5), jornadaVoltaAlmoco: (f.jornada_volta_almoco || '13:00').slice(0, 5), jornadaSaida: (f.jornada_saida || '17:00').slice(0, 5), valorHora: Number(f.valor_hora || 0), dataAdmissao: f.data_admissao || null, jornadaSemanal: f.jornada_semanal || {}, percentualHoraExtra: Number(f.percentual_hora_extra != null ? f.percentual_hora_extra : 50), modoCompensacaoPadrao: f.modo_compensacao_padrao || 'dinheiro', tipoPagamento: f.tipo_pagamento || 'hora', salarioMensal: Number(f.salario_mensal || 0), valorVtDia: Number(f.valor_vt_dia || 0), valorVrDia: Number(f.valor_vr_dia || 0) }));
+  state.funcionarias = (funcionarias || []).map((f) => ({ id: f.id, nome: f.nome, pin: f.pin, ativa: f.ativa, jornadaEntrada: (f.jornada_entrada || '08:00').slice(0, 5), jornadaSaidaAlmoco: (f.jornada_saida_almoco || '12:00').slice(0, 5), jornadaVoltaAlmoco: (f.jornada_volta_almoco || '13:00').slice(0, 5), jornadaSaida: (f.jornada_saida || '17:00').slice(0, 5), valorHora: Number(f.valor_hora || 0), dataAdmissao: f.data_admissao || null, jornadaSemanal: f.jornada_semanal || {}, percentualHoraExtra: Number(f.percentual_hora_extra != null ? f.percentual_hora_extra : 50), modoCompensacaoPadrao: f.modo_compensacao_padrao || 'dinheiro', tipoPagamento: f.tipo_pagamento || 'hora', salarioMensal: Number(f.salario_mensal || 0), valorVtDia: Number(f.valor_vt_dia || 0), valorVrDia: Number(f.valor_vr_dia || 0), horasCompensacaoSemanal: Number(f.horas_compensacao_semanal || 0) }));
   state.feriasTiradas = (feriasTiradas || []).map((v) => ({ id: v.id, funcionariaId: v.funcionaria_id, dataInicio: v.data_inicio, dataFim: v.data_fim }));
   state.pontos = (pontos || []).map((p) => ({ id: p.id, funcionariaId: p.funcionaria_id, data: p.data, tipo: p.tipo, horario: p.horario, origem: p.origem || 'propria' }));
   state.solicitacoesPonto = (solicitacoesPonto || []).map((s) => ({ id: s.id, funcionariaId: s.funcionaria_id, data: s.data, tipo: s.tipo, horarioSolicitado: s.horario_solicitado, motivo: s.motivo || '', status: s.status, createdAt: s.created_at }));
@@ -1455,6 +1455,7 @@ async function updateFuncionaria(id, dados) {
     percentual_hora_extra: dados.percentualHoraExtra != null ? dados.percentualHoraExtra : 50,
     modo_compensacao_padrao: dados.modoCompensacaoPadrao || 'dinheiro',
     valor_vt_dia: dados.valorVtDia || 0, valor_vr_dia: dados.valorVrDia || 0,
+    horas_compensacao_semanal: dados.horasCompensacaoSemanal || 0,
   }).eq('id', id);
   if (error) alert('Erro ao atualizar funcionária: ' + error.message);
 }
@@ -1810,12 +1811,26 @@ function calcularResumoHolerite(funcionaria, mesKey) {
   horasExtras = Math.max(0, horasExtrasBrutas - horasFaltantesBrutas);
   horasFaltantes = Math.max(0, horasFaltantesBrutas - horasExtrasBrutas);
 
+  // compensação de sábado (ou outro dia não trabalhado) acertada no fim do mês, em vez de
+  // embutida na jornada de cada dia — desconta do líquido de extra/falta já calculado
+  let debitoCompensacaoSabado = 0;
+  if (funcionaria.horasCompensacaoSemanal > 0) {
+    let numSabados = 0;
+    for (let dia = 1; dia <= ultimoDia; dia++) {
+      if (new Date(ano, mes - 1, dia).getDay() === 6) numSabados++;
+    }
+    debitoCompensacaoSabado = numSabados * funcionaria.horasCompensacaoSemanal;
+    const liquido = horasExtras - horasFaltantes - debitoCompensacaoSabado;
+    horasExtras = Math.max(0, liquido);
+    horasFaltantes = Math.max(0, -liquido);
+  }
+
   const salarioBase = funcionaria.tipoPagamento === 'mensal' ? (funcionaria.salarioMensal || 0) : horasTrabalhadasTotal * (funcionaria.valorHora || 0);
   const valorHorasExtras = horasExtras * (funcionaria.valorHora || 0) * (1 + (funcionaria.percentualHoraExtra || 0) / 100);
   const valorHorasExtras100 = horasExtras100 * (funcionaria.valorHora || 0) * 2;
   const valorVt = funcionaria.valorVtDia || 0;
   const valorVr = funcionaria.valorVrDia || 0;
-  return { diasTrabalhados, horasExtras, horasExtras100, horasFaltantes, horasTrabalhadasTotal, salarioBase, valorHorasExtras, valorHorasExtras100, valorVt, valorVr };
+  return { diasTrabalhados, horasExtras, horasExtras100, horasFaltantes, horasTrabalhadasTotal, salarioBase, valorHorasExtras, valorHorasExtras100, valorVt, valorVr, debitoCompensacaoSabado };
 }
 // procura, nos últimos N dias, dias em que ela deveria ter trabalhado mas falta alguma
 // das 4 batidas — hoje só conta a partir do horário de saída esperado. Separa o que já
@@ -4662,7 +4677,9 @@ function renderRH(c) {
                   <input type="text" id="editFuncVtDia-${f.id}" placeholder="VT mensal (valor fixo)" value="${f.valorVtDia ? f.valorVtDia.toFixed(2).replace('.', ',') : ''}" />
                   <input type="text" id="editFuncVrDia-${f.id}" placeholder="VR mensal (valor fixo)" value="${f.valorVrDia ? f.valorVrDia.toFixed(2).replace('.', ',') : ''}" />
                 </div>
-                <div class="form-hint">Jornada de trabalho — marque os dias que ela trabalha e o horário de cada um</div>
+                <div class="form-hint" style="margin-bottom:2px">Horas por semana que ela não trabalha e devem ser compensadas no fim do mês, descontando do saldo de horas extras (ex: sábado não trabalhado = 4h). Deixa em 0 se a jornada semanal abaixo já embutir isso nos horários de cada dia.</div>
+                <input type="text" id="editFuncCompSabado-${f.id}" placeholder="Horas de compensação por semana (ex: 4)" value="${f.horasCompensacaoSemanal || ''}" inputmode="decimal" />
+                <div class="form-hint" style="margin-top:10px">Jornada de trabalho — marque os dias que ela trabalha e o horário de cada um</div>
                 ${renderEditorJornadaSemanal(`editFunc${f.id}`, f.jornadaSemanal, { entrada: f.jornadaEntrada, saidaAlmoco: f.jornadaSaidaAlmoco, voltaAlmoco: f.jornadaVoltaAlmoco, saida: f.jornadaSaida })}
                 <label class="checkbox-label" style="margin-top:10px"><input type="checkbox" id="editFuncAtiva-${f.id}" ${f.ativa !== false ? 'checked' : ''} /> Ativa</label>
                 <div class="form-row">
@@ -5052,6 +5069,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
           <div class="prod-breakdown-item"><span>${f.tipoPagamento === 'mensal' ? 'Salário mensal' : `Salário (${resumoHolerite.horasTrabalhadasTotal.toFixed(1)}h × ${fmt(f.valorHora)})`}</span><span>${fmt(resumoHolerite.salarioBase)}</span></div>
           <div class="prod-breakdown-item"><span>Horas extras (${formatarHorasMin(resumoHolerite.horasExtras)} × ${fmt(f.valorHora)} + ${f.percentualHoraExtra}%)</span><span>${fmt(resumoHolerite.valorHorasExtras)}</span></div>
           ${resumoHolerite.horasExtras100 > 0 ? `<div class="prod-breakdown-item"><span>🗓️ Domingo/feriado — 100% (${formatarHorasMin(resumoHolerite.horasExtras100)} × ${fmt(f.valorHora)} × 2)</span><span>${fmt(resumoHolerite.valorHorasExtras100)}</span></div>` : ''}
+          ${resumoHolerite.debitoCompensacaoSabado > 0 ? `<div class="prod-breakdown-item"><span>⚖️ Compensação de sábado (já descontada do líquido)</span><span style="color:var(--amber)">-${formatarHorasMin(resumoHolerite.debitoCompensacaoSabado)}</span></div>` : ''}
           <div class="prod-breakdown-item"><span>Horas faltantes não abonadas</span><span style="color:var(--red)">${formatarHorasMin(resumoHolerite.horasFaltantes)}</span></div>
         </div>
         <div class="form-hint" style="margin-top:10px;margin-bottom:2px">Como pagar as horas extras desse mês?</div>
@@ -5544,10 +5562,11 @@ function attachRHHandlers(c) {
       const modoCompensacaoPadrao = window.__editFuncModoComp?.[id] || original.modoCompensacaoPadrao;
       const valorVtDia = parseBRNumber(document.getElementById(`editFuncVtDia-${id}`).value);
       const valorVrDia = parseBRNumber(document.getElementById(`editFuncVrDia-${id}`).value);
+      const horasCompensacaoSemanal = parseBRNumber(document.getElementById(`editFuncCompSabado-${id}`)?.value || '0');
       await updateFuncionaria(id, {
         nome, pin, dataAdmissao, ativa, jornadaSemanal,
         jornadaEntrada: segunda.entrada, jornadaSaidaAlmoco: segunda.saidaAlmoco, jornadaVoltaAlmoco: segunda.voltaAlmoco, jornadaSaida: segunda.saida,
-        tipoPagamento, salarioMensal, valorHora, percentualHoraExtra, modoCompensacaoPadrao, valorVtDia, valorVrDia,
+        tipoPagamento, salarioMensal, valorHora, percentualHoraExtra, modoCompensacaoPadrao, valorVtDia, valorVrDia, horasCompensacaoSemanal,
       });
       state.editingFuncionariaId = null;
       if (window.__editFuncTipoPag) delete window.__editFuncTipoPag[id];
