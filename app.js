@@ -361,12 +361,14 @@ const state = {
   vendasSkuPendentes: [],
   vendasDetalhe: [],
   abonosPonto: [],
+  holerites: [],
+  holeriteMes: null,
   showAbonarId: null,
 };
 
 // ==================== DATA LAYER ====================
 async function loadData() {
-  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }, { data: feriasTiradas, error: e16 }, { data: solicitacoesPonto, error: e17 }, { data: horasExtrasLiquidadas, error: e18 }, { data: bancoHorasLancamentos, error: e19 }, { data: emprestimos, error: e20 }, { data: emprestimoParcelas, error: e21 }, { data: cartoesCredito, error: e22 }, { data: vendasSkuPendentes, error: e23 }, { data: vendasDetalhe, error: e24 }, { data: abonosPonto, error: e25 }] = await Promise.all([
+  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }, { data: feriasTiradas, error: e16 }, { data: solicitacoesPonto, error: e17 }, { data: horasExtrasLiquidadas, error: e18 }, { data: bancoHorasLancamentos, error: e19 }, { data: emprestimos, error: e20 }, { data: emprestimoParcelas, error: e21 }, { data: cartoesCredito, error: e22 }, { data: vendasSkuPendentes, error: e23 }, { data: vendasDetalhe, error: e24 }, { data: abonosPonto, error: e25 }, { data: holerites, error: e26 }] = await Promise.all([
     sb.from('transacoes').select('*').order('data', { ascending: false }),
     sb.from('produtos').select('*').order('created_at', { ascending: false }),
     sb.from('plataformas').select('*').order('nome', { ascending: true }),
@@ -392,6 +394,7 @@ async function loadData() {
     sb.from('vendas_sku_pendentes').select('*').order('created_at', { ascending: false }),
     sb.from('vendas_detalhe').select('*').order('data', { ascending: false }).limit(8000),
     sb.from('abonos_ponto').select('*').order('data', { ascending: false }),
+    sb.from('holerites').select('*').order('mes', { ascending: false }),
   ]);
   if (e1) console.error(e1);
   if (e2) console.error(e2);
@@ -418,6 +421,7 @@ async function loadData() {
   if (e23) console.error(e23);
   if (e24) console.error(e24);
   if (e25) console.error(e25);
+  if (e26) console.error(e26);
   state.tx = (tx || []).map(mapTxFromDb);
   state.produtos = (produtos || []).map(mapProdutoFromDb);
   state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0) }));
@@ -431,7 +435,7 @@ async function loadData() {
   state.distribuicoes = (distribuicoes || []).map((d) => ({ id: d.id, ordemItemId: d.ordem_item_id, produtoId: d.produto_id, varianteId: d.variante_id || null, costureiraId: d.costureira_id, quantidadeDistribuida: d.quantidade_distribuida, quantidadeDevolvida: d.quantidade_devolvida, data: d.data }));
   state.fichaTecnicaItens = (fichaTecnicaItens || []).map((f) => ({ id: f.id, produtoId: f.produto_id, tipoItem: f.tipo_item, insumoId: f.insumo_id || null, componenteProdutoId: f.componente_produto_id || null, quantidade: Number(f.quantidade), momento: f.momento || 'venda' }));
   state.insumoPlataformaQtd = (insumoPlataformaQtd || []).map((q) => ({ id: q.id, insumoId: q.insumo_id, plataformaId: q.plataforma_id, quantidade: Number(q.quantidade) }));
-  state.funcionarias = (funcionarias || []).map((f) => ({ id: f.id, nome: f.nome, pin: f.pin, ativa: f.ativa, jornadaEntrada: (f.jornada_entrada || '08:00').slice(0, 5), jornadaSaidaAlmoco: (f.jornada_saida_almoco || '12:00').slice(0, 5), jornadaVoltaAlmoco: (f.jornada_volta_almoco || '13:00').slice(0, 5), jornadaSaida: (f.jornada_saida || '17:00').slice(0, 5), valorHora: Number(f.valor_hora || 0), dataAdmissao: f.data_admissao || null, jornadaSemanal: f.jornada_semanal || {}, percentualHoraExtra: Number(f.percentual_hora_extra != null ? f.percentual_hora_extra : 50), modoCompensacaoPadrao: f.modo_compensacao_padrao || 'dinheiro' }));
+  state.funcionarias = (funcionarias || []).map((f) => ({ id: f.id, nome: f.nome, pin: f.pin, ativa: f.ativa, jornadaEntrada: (f.jornada_entrada || '08:00').slice(0, 5), jornadaSaidaAlmoco: (f.jornada_saida_almoco || '12:00').slice(0, 5), jornadaVoltaAlmoco: (f.jornada_volta_almoco || '13:00').slice(0, 5), jornadaSaida: (f.jornada_saida || '17:00').slice(0, 5), valorHora: Number(f.valor_hora || 0), dataAdmissao: f.data_admissao || null, jornadaSemanal: f.jornada_semanal || {}, percentualHoraExtra: Number(f.percentual_hora_extra != null ? f.percentual_hora_extra : 50), modoCompensacaoPadrao: f.modo_compensacao_padrao || 'dinheiro', tipoPagamento: f.tipo_pagamento || 'hora', salarioMensal: Number(f.salario_mensal || 0), valorVtDia: Number(f.valor_vt_dia || 0), valorVrDia: Number(f.valor_vr_dia || 0) }));
   state.feriasTiradas = (feriasTiradas || []).map((v) => ({ id: v.id, funcionariaId: v.funcionaria_id, dataInicio: v.data_inicio, dataFim: v.data_fim }));
   state.pontos = (pontos || []).map((p) => ({ id: p.id, funcionariaId: p.funcionaria_id, data: p.data, tipo: p.tipo, horario: p.horario, origem: p.origem || 'propria' }));
   state.solicitacoesPonto = (solicitacoesPonto || []).map((s) => ({ id: s.id, funcionariaId: s.funcionaria_id, data: s.data, tipo: s.tipo, horarioSolicitado: s.horario_solicitado, motivo: s.motivo || '', status: s.status, createdAt: s.created_at }));
@@ -443,6 +447,7 @@ async function loadData() {
   state.vendasSkuPendentes = (vendasSkuPendentes || []).map((v) => ({ id: v.id, sku: v.sku, quantidade: Number(v.quantidade), faturamento: Number(v.faturamento), ultimaData: v.ultima_data, plataformaNome: v.plataforma_nome || null }));
   state.vendasDetalhe = (vendasDetalhe || []).map((v) => ({ id: v.id, produtoId: v.produto_id, plataformaId: v.plataforma_id, plataformaNome: v.plataforma_nome || null, sku: v.sku || null, quantidade: Number(v.quantidade), valor: Number(v.valor), data: v.data }));
   state.abonosPonto = (abonosPonto || []).map((a) => ({ id: a.id, funcionariaId: a.funcionaria_id, data: a.data, tipo: a.tipo, motivo: a.motivo || '' }));
+  state.holerites = (holerites || []).map((h) => ({ id: h.id, funcionariaId: h.funcionaria_id, mes: h.mes, diasTrabalhados: Number(h.dias_trabalhados), salarioBase: Number(h.salario_base), horasExtras: Number(h.horas_extras), valorHorasExtras: Number(h.valor_horas_extras), modoHorasExtras: h.modo_horas_extras, horasFaltantes: Number(h.horas_faltantes), valorVt: Number(h.valor_vt), valorVr: Number(h.valor_vr), totalPagar: Number(h.total_pagar), createdAt: h.created_at }));
   state.loading = false;
   render();
 }
@@ -1231,6 +1236,10 @@ async function updateFuncionaria(id, dados) {
     jornada_volta_almoco: dados.jornadaVoltaAlmoco, jornada_saida: dados.jornadaSaida,
     valor_hora: dados.valorHora || 0, data_admissao: dados.dataAdmissao || null,
     jornada_semanal: dados.jornadaSemanal || {},
+    tipo_pagamento: dados.tipoPagamento || 'hora', salario_mensal: dados.salarioMensal || 0,
+    percentual_hora_extra: dados.percentualHoraExtra != null ? dados.percentualHoraExtra : 50,
+    modo_compensacao_padrao: dados.modoCompensacaoPadrao || 'dinheiro',
+    valor_vt_dia: dados.valorVtDia || 0, valor_vr_dia: dados.valorVrDia || 0,
   }).eq('id', id);
   if (error) alert('Erro ao atualizar funcionária: ' + error.message);
 }
@@ -1265,6 +1274,40 @@ async function salvarAbono(funcionariaId, data, tipo, motivo) {
 async function removeAbono(id) {
   const { error } = await sb.from('abonos_ponto').delete().eq('id', id);
   if (error) alert('Erro ao remover abono: ' + error.message);
+}
+// fecha o holerite de um mês: grava o registro congelado, lança a saída no Financeiro
+// (se as horas extras forem pagas em dinheiro), e movimenta o banco de horas (crédito se
+// escolheu banco pras extras, débito sempre que tem falta não abonada)
+async function fecharHolerite(funcionaria, mesKey, resumo, modoHorasExtras, valorVtFinal, valorVrFinal) {
+  const totalPagar = resumo.salarioBase + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras : 0) + valorVtFinal + valorVrFinal;
+  const { error: errHolerite } = await sb.from('holerites').upsert({
+    funcionaria_id: funcionaria.id, mes: mesKey, dias_trabalhados: resumo.diasTrabalhados,
+    salario_base: resumo.salarioBase, horas_extras: resumo.horasExtras, valor_horas_extras: resumo.valorHorasExtras,
+    modo_horas_extras: modoHorasExtras, horas_faltantes: resumo.horasFaltantes,
+    valor_vt: valorVtFinal, valor_vr: valorVrFinal, total_pagar: totalPagar,
+  }, { onConflict: 'funcionaria_id,mes' });
+  if (errHolerite) { alert('Erro ao fechar holerite: ' + errHolerite.message); return; }
+
+  const mesLabelTexto = new Date(mesKey + '-01T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+  await addTx({
+    tipo: 'saida', valor: totalPagar, categoria: 'Funcionários — salário', natureza: 'fixo',
+    descricao: `Holerite ${funcionaria.nome} — ${mesLabelTexto}`, data: todayStr(),
+  });
+
+  if (modoHorasExtras === 'banco' && resumo.horasExtras > 0) {
+    const { error } = await sb.from('banco_horas_lancamentos').insert({
+      funcionaria_id: funcionaria.id, data: todayStr(), tipo: 'credito', horas: resumo.horasExtras,
+      descricao: `Horas extras de ${mesLabelTexto} convertidas em banco de horas`,
+    });
+    if (error) console.error(error);
+  }
+  if (resumo.horasFaltantes > 0) {
+    const { error } = await sb.from('banco_horas_lancamentos').insert({
+      funcionaria_id: funcionaria.id, data: todayStr(), tipo: 'debito', horas: -resumo.horasFaltantes,
+      descricao: `Faltas não abonadas de ${mesLabelTexto} — a compensar trabalhando`,
+    });
+    if (error) console.error(error);
+  }
 }
 async function addFeriasTirada(funcionariaId, dataInicio, dataFim) {
   const { error } = await sb.from('ferias_tiradas').insert({ funcionaria_id: funcionariaId, data_inicio: dataInicio, data_fim: dataFim });
@@ -1452,6 +1495,37 @@ function calcularHorasDia(pontosDoDia, funcionaria, dataStr) {
   const completo = !!(porTipo.entrada && porTipo.saida);
   return { horasTrabalhadas, jornadaEsperada, diferenca: horasTrabalhadas - jornadaEsperada, completo, porTipo, diaTrabalhavel: esperado.trabalha };
 }
+// resume o mês inteiro pra fechar o holerite: dias trabalhados, horas extras, horas
+// faltantes (só as não abonadas), e o salário base (mensal fixo ou por hora trabalhada)
+function calcularResumoHolerite(funcionaria, mesKey) {
+  const [ano, mes] = mesKey.split('-').map(Number);
+  const ultimoDia = new Date(ano, mes, 0).getDate();
+  let diasTrabalhados = 0;
+  let horasExtras = 0;
+  let horasFaltantes = 0;
+  let horasTrabalhadasTotal = 0;
+  for (let dia = 1; dia <= ultimoDia; dia++) {
+    const dataStr = `${mesKey}-${String(dia).padStart(2, '0')}`;
+    if (funcionaria.dataAdmissao && dataStr < funcionaria.dataAdmissao) continue;
+    const pontosDoDia = state.pontos.filter((p) => p.funcionariaId === funcionaria.id && p.data === dataStr);
+    if (pontosDoDia.length === 0) continue;
+    const calc = calcularHorasDia(pontosDoDia, funcionaria, dataStr);
+    if (!calc.completo) continue;
+    diasTrabalhados++;
+    horasTrabalhadasTotal += calc.horasTrabalhadas;
+    if (calc.diferenca >= 0) {
+      horasExtras += calc.diferenca;
+    } else {
+      const abonado = state.abonosPonto.some((a) => a.funcionariaId === funcionaria.id && a.data === dataStr);
+      if (!abonado) horasFaltantes += Math.abs(calc.diferenca);
+    }
+  }
+  const salarioBase = funcionaria.tipoPagamento === 'mensal' ? (funcionaria.salarioMensal || 0) : horasTrabalhadasTotal * (funcionaria.valorHora || 0);
+  const valorHorasExtras = horasExtras * (funcionaria.valorHora || 0) * (1 + (funcionaria.percentualHoraExtra || 0) / 100);
+  const valorVt = diasTrabalhados * (funcionaria.valorVtDia || 0);
+  const valorVr = diasTrabalhados * (funcionaria.valorVrDia || 0);
+  return { diasTrabalhados, horasExtras, horasFaltantes, horasTrabalhadasTotal, salarioBase, valorHorasExtras, valorVt, valorVr };
+}
 // procura, nos últimos N dias, dias em que ela deveria ter trabalhado mas falta alguma
 // das 4 batidas — hoje só conta a partir do horário de saída esperado. Separa o que já
 // tem solicitação pendente daquilo que ainda não foi nem solicitado.
@@ -1613,6 +1687,7 @@ function setupRealtime() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'vendas_sku_pendentes' }, loadData)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'vendas_detalhe' }, loadData)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'abonos_ponto' }, loadData)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'holerites' }, loadData)
     .subscribe();
 }
 
@@ -4107,6 +4182,27 @@ function renderRH(c) {
                 <input type="text" id="editFuncPin-${f.id}" placeholder="PIN pessoal" value="${esc(f.pin)}" inputmode="numeric" />
                 <div class="form-hint" style="margin-bottom:2px">Data de admissão</div>
                 <input type="date" id="editFuncAdmissao-${f.id}" value="${f.dataAdmissao || ''}" />
+                <div class="form-hint" style="margin-top:10px">Pagamento — usado pro holerite</div>
+                <div class="form-row">
+                  <button class="toggle-btn ${(window.__editFuncTipoPag?.[f.id] || f.tipoPagamento) === 'hora' ? 'active-teal' : ''}" data-edit-func-tipo-pag="${f.id}" data-valor="hora">Por hora</button>
+                  <button class="toggle-btn ${(window.__editFuncTipoPag?.[f.id] || f.tipoPagamento) === 'mensal' ? 'active-pink' : ''}" data-edit-func-tipo-pag="${f.id}" data-valor="mensal">Salário fixo mensal</button>
+                </div>
+                ${(window.__editFuncTipoPag?.[f.id] || f.tipoPagamento) === 'mensal' ? `
+                  <input type="text" id="editFuncSalarioMensal-${f.id}" placeholder="Salário mensal (ex: 1500,00)" value="${f.salarioMensal ? f.salarioMensal.toFixed(2).replace('.', ',') : ''}" />
+                ` : ''}
+                <div class="form-row">
+                  <input type="text" id="editFuncValorHora-${f.id}" placeholder="Valor da hora (usado pra calcular hora extra)" value="${f.valorHora ? f.valorHora.toFixed(2).replace('.', ',') : ''}" />
+                  <input type="text" id="editFuncPercentualExtra-${f.id}" placeholder="% adicional hora extra" value="${f.percentualHoraExtra}" />
+                </div>
+                <div class="form-hint" style="margin-bottom:2px">Como pagar hora extra por padrão (dá pra escolher de novo na hora de fechar o holerite)</div>
+                <div class="form-row">
+                  <button class="toggle-btn ${(window.__editFuncModoComp?.[f.id] || f.modoCompensacaoPadrao) === 'dinheiro' ? 'active-teal' : ''}" data-edit-func-modo-comp="${f.id}" data-valor="dinheiro">💰 Dinheiro</button>
+                  <button class="toggle-btn ${(window.__editFuncModoComp?.[f.id] || f.modoCompensacaoPadrao) === 'banco' ? 'active-pink' : ''}" data-edit-func-modo-comp="${f.id}" data-valor="banco">🏦 Banco de horas</button>
+                </div>
+                <div class="form-row">
+                  <input type="text" id="editFuncVtDia-${f.id}" placeholder="VT por dia trabalhado" value="${f.valorVtDia ? f.valorVtDia.toFixed(2).replace('.', ',') : ''}" />
+                  <input type="text" id="editFuncVrDia-${f.id}" placeholder="VR por dia trabalhado" value="${f.valorVrDia ? f.valorVrDia.toFixed(2).replace('.', ',') : ''}" />
+                </div>
                 <div class="form-hint">Jornada de trabalho — marque os dias que ela trabalha e o horário de cada um</div>
                 ${renderEditorJornadaSemanal(`editFunc${f.id}`, f.jornadaSemanal, { entrada: f.jornadaEntrada, saidaAlmoco: f.jornadaSaidaAlmoco, voltaAlmoco: f.jornadaVoltaAlmoco, saida: f.jornadaSaida })}
                 <label class="checkbox-label" style="margin-top:10px"><input type="checkbox" id="editFuncAtiva-${f.id}" ${f.ativa !== false ? 'checked' : ''} /> Ativa</label>
@@ -4166,6 +4262,14 @@ function renderFuncionariaDetalhe(funcionariaId) {
 
   const dataFmt = (d) => new Date(d + 'T00:00:00').toLocaleDateString('pt-BR');
   const diasPendentes = f ? verificarPontosEsquecidos(f).filter((e) => e.tiposSemSolicitacao.length > 0 || e.tiposPendentesAprovacao.length > 0) : [];
+
+  // ---- Holerite ----
+  const mesHolerite = state.holeriteMes || todayStr().slice(0, 7);
+  const resumoHolerite = f ? calcularResumoHolerite(f, mesHolerite) : null;
+  const holeriteExistente = state.holerites.find((h) => h.funcionariaId === funcionariaId && h.mes === mesHolerite);
+  const saldoBancoHoras = state.bancoHorasLancamentos.filter((b) => b.funcionariaId === funcionariaId).reduce((a, b) => a + b.horas, 0);
+  const historicoHolerites = state.holerites.filter((h) => h.funcionariaId === funcionariaId).sort((a, b) => b.mes.localeCompare(a.mes));
+  const mesLabelHolerite = (mk) => new Date(mk + '-01T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
 
   return `
     <button class="icon-btn-ghost" id="voltarFuncionarias" style="margin-bottom:14px">← Voltar</button>
@@ -4394,6 +4498,73 @@ function renderFuncionariaDetalhe(funcionariaId) {
         </div>
       </div>
     ` : ''}
+
+    <div class="section-title-wrap" style="margin-top:24px">
+      <div><div class="section-title">Holerite</div><div class="section-subtitle">Fecha o pagamento do mês — salário, horas extras, VT e VR</div></div>
+    </div>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon" style="background:${saldoBancoHoras >= 0 ? 'rgba(0,212,160,0.1)' : 'rgba(255,71,87,0.1)'}">🏦</div>
+        <div class="stat-label">Saldo no banco de horas</div>
+        <div class="stat-value" style="color:${saldoBancoHoras >= 0 ? 'var(--teal)' : 'var(--red)'}">${saldoBancoHoras >= 0 ? '+' : '-'}${formatarHorasMin(saldoBancoHoras)}</div>
+      </div>
+    </div>
+
+    <input type="month" class="month-input" id="holeriteMesSelect" value="${mesHolerite}" />
+
+    ${!f ? '' : holeriteExistente ? `
+      <div class="form-card" style="border-color:var(--teal)55">
+        <div class="section-title" style="margin-bottom:2px;color:var(--teal)">✅ Holerite de ${mesLabelHolerite(mesHolerite)} já fechado</div>
+        <div class="prod-breakdown" style="margin-top:10px">
+          <div class="prod-breakdown-item"><span>Dias trabalhados</span><span>${holeriteExistente.diasTrabalhados}</span></div>
+          <div class="prod-breakdown-item"><span>Salário base</span><span>${fmt(holeriteExistente.salarioBase)}</span></div>
+          <div class="prod-breakdown-item"><span>Horas extras (${formatarHorasMin(holeriteExistente.horasExtras)})</span><span>${holeriteExistente.modoHorasExtras === 'dinheiro' ? fmt(holeriteExistente.valorHorasExtras) : '🏦 banco de horas'}</span></div>
+          <div class="prod-breakdown-item"><span>Horas faltantes não abonadas</span><span>${formatarHorasMin(holeriteExistente.horasFaltantes)} 🏦 débito no banco</span></div>
+          <div class="prod-breakdown-item"><span>VT</span><span>${fmt(holeriteExistente.valorVt)}</span></div>
+          <div class="prod-breakdown-item"><span>VR</span><span>${fmt(holeriteExistente.valorVr)}</span></div>
+        </div>
+        <div class="produto-vendido" style="margin-top:8px">💰 Total pago: ${fmt(holeriteExistente.totalPagar)}</div>
+        <button class="toggle-btn" style="margin-top:10px" data-reabrir-holerite="${holeriteExistente.id}">Refazer esse holerite</button>
+      </div>
+    ` : `
+      <div class="form-card">
+        <div class="section-subtitle" style="margin-bottom:10px">Resumo calculado de ${mesLabelHolerite(mesHolerite)}</div>
+        <div class="prod-breakdown">
+          <div class="prod-breakdown-item"><span>Dias trabalhados</span><span>${resumoHolerite.diasTrabalhados}</span></div>
+          <div class="prod-breakdown-item"><span>${f.tipoPagamento === 'mensal' ? 'Salário mensal' : `Salário (${resumoHolerite.horasTrabalhadasTotal.toFixed(1)}h × ${fmt(f.valorHora)})`}</span><span>${fmt(resumoHolerite.salarioBase)}</span></div>
+          <div class="prod-breakdown-item"><span>Horas extras (${formatarHorasMin(resumoHolerite.horasExtras)} × ${fmt(f.valorHora)} + ${f.percentualHoraExtra}%)</span><span>${fmt(resumoHolerite.valorHorasExtras)}</span></div>
+          <div class="prod-breakdown-item"><span>Horas faltantes não abonadas</span><span style="color:var(--red)">${formatarHorasMin(resumoHolerite.horasFaltantes)}</span></div>
+        </div>
+        <div class="form-hint" style="margin-top:10px;margin-bottom:2px">Como pagar as horas extras desse mês?</div>
+        <div class="form-row">
+          <button class="toggle-btn ${(window.__holeriteModoExtras || f.modoCompensacaoPadrao) === 'dinheiro' ? 'active-teal' : ''}" data-holerite-modo-extras="dinheiro">💰 Dinheiro</button>
+          <button class="toggle-btn ${(window.__holeriteModoExtras || f.modoCompensacaoPadrao) === 'banco' ? 'active-pink' : ''}" data-holerite-modo-extras="banco">🏦 Banco de horas</button>
+        </div>
+        <div class="form-hint" style="margin-top:10px">Horas faltantes não abonadas sempre viram débito no banco de horas — ela paga trabalhando depois.</div>
+        <div class="form-row" style="margin-top:10px">
+          <input type="text" id="holeriteVt" placeholder="VT (${resumoHolerite.diasTrabalhados} dias × ${fmt(f.valorVtDia)})" value="${resumoHolerite.valorVt.toFixed(2).replace('.', ',')}" />
+          <input type="text" id="holeriteVr" placeholder="VR (${resumoHolerite.diasTrabalhados} dias × ${fmt(f.valorVrDia)})" value="${resumoHolerite.valorVr.toFixed(2).replace('.', ',')}" />
+        </div>
+        <button class="confirm-btn" style="margin-top:12px" data-fechar-holerite="${funcionariaId}">Fechar holerite de ${mesLabelHolerite(mesHolerite)}</button>
+      </div>
+    `}
+
+    ${historicoHolerites.length > 0 ? `
+      <div class="section-title-wrap" style="margin-top:20px"><div><div class="section-title">Histórico de holerites</div></div></div>
+      <div class="tx-list" style="margin-bottom:24px">
+        ${historicoHolerites.map((h) => `
+          <div class="tx-row">
+            <div class="tx-dot" style="background:var(--teal)"></div>
+            <div style="flex:1">
+              <div class="tx-categoria">${mesLabelHolerite(h.mes)}</div>
+              <div class="tx-desc">${h.diasTrabalhados} dias · +${formatarHorasMin(h.horasExtras)} extra · -${formatarHorasMin(h.horasFaltantes)} falta</div>
+            </div>
+            <div class="tx-valor" style="color:var(--teal)">${fmt(h.totalPagar)}</div>
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
   `;
 }
 
@@ -4476,7 +4647,40 @@ function attachRHHandlers(c) {
       });
     });
 
-    const salvarAbonoLivre = document.querySelector('[data-salvar-abono-livre]');
+    const holeriteMesSelect = document.getElementById('holeriteMesSelect');
+    if (holeriteMesSelect) holeriteMesSelect.addEventListener('change', (e) => { state.holeriteMes = e.target.value; render(); });
+
+    document.querySelectorAll('[data-holerite-modo-extras]').forEach((btn) => {
+      btn.addEventListener('click', () => { window.__holeriteModoExtras = btn.dataset.holeriteModoExtras; render(); });
+    });
+
+    const fecharHoleriteBtn = document.querySelector('[data-fechar-holerite]');
+    if (fecharHoleriteBtn) fecharHoleriteBtn.addEventListener('click', async () => {
+      const funcionariaId = fecharHoleriteBtn.dataset.fecharHolerite;
+      const funcionaria = state.funcionarias.find((x) => x.id === funcionariaId);
+      const mesKey = state.holeriteMes || todayStr().slice(0, 7);
+      const resumo = calcularResumoHolerite(funcionaria, mesKey);
+      const modoHorasExtras = window.__holeriteModoExtras || funcionaria.modoCompensacaoPadrao;
+      const valorVt = parseBRNumber(document.getElementById('holeriteVt').value) || 0;
+      const valorVr = parseBRNumber(document.getElementById('holeriteVr').value) || 0;
+      const totalPagar = resumo.salarioBase + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras : 0) + valorVt + valorVr;
+      if (!confirm(`Fechar o holerite de ${funcionaria.nome}?\n\nTotal a pagar: ${fmt(totalPagar)}\n\nIsso lança a saída no Financeiro e movimenta o banco de horas. Confirma?`)) return;
+      await fecharHolerite(funcionaria, mesKey, resumo, modoHorasExtras, valorVt, valorVr);
+      window.__holeriteModoExtras = null;
+      await loadData();
+    });
+
+    document.querySelectorAll('[data-reabrir-holerite]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        if (confirm('Refazer esse holerite? Isso apaga o registro fechado (o lançamento já feito no Financeiro e no banco de horas continuam — remova eles manualmente se precisar) e deixa você fechar de novo com os valores recalculados.')) {
+          const { error } = await sb.from('holerites').delete().eq('id', btn.dataset.reabrirHolerite);
+          if (error) alert('Erro ao reabrir: ' + error.message);
+          await loadData();
+        }
+      });
+    });
+
+
     if (salvarAbonoLivre) salvarAbonoLivre.addEventListener('click', async () => {
       const funcionariaId = salvarAbonoLivre.dataset.salvarAbonoLivre;
       const dataInicio = document.getElementById('abonarLivreData').value;
@@ -4615,9 +4819,25 @@ function attachRHHandlers(c) {
   document.querySelectorAll('[data-cancelar-edit-func]').forEach((btn) => {
     btn.addEventListener('click', () => { state.editingFuncionariaId = null; render(); });
   });
+  document.querySelectorAll('[data-edit-func-tipo-pag]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      window.__editFuncTipoPag = window.__editFuncTipoPag || {};
+      window.__editFuncTipoPag[btn.dataset.editFuncTipoPag] = btn.dataset.valor;
+      render();
+    });
+  });
+  document.querySelectorAll('[data-edit-func-modo-comp]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      window.__editFuncModoComp = window.__editFuncModoComp || {};
+      window.__editFuncModoComp[btn.dataset.editFuncModoComp] = btn.dataset.valor;
+      render();
+    });
+  });
+
   document.querySelectorAll('[data-salvar-edit-func]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const id = btn.dataset.salvarEditFunc;
+      const original = state.funcionarias.find((f) => f.id === id);
       const nome = document.getElementById(`editFuncNome-${id}`).value.trim();
       const pin = document.getElementById(`editFuncPin-${id}`).value.trim();
       if (!nome || !pin) { alert('Informe o nome e o PIN.'); return; }
@@ -4626,11 +4846,21 @@ function attachRHHandlers(c) {
       const ativa = document.getElementById(`editFuncAtiva-${id}`).checked;
       const jornadaSemanal = coletarJornadaSemanal(`editFunc${id}`);
       const segunda = jornadaSemanal[1]?.trabalha ? jornadaSemanal[1] : { entrada: '08:00', saidaAlmoco: '12:00', voltaAlmoco: '13:00', saida: '17:00' };
+      const tipoPagamento = window.__editFuncTipoPag?.[id] || original.tipoPagamento;
+      const salarioMensal = parseBRNumber(document.getElementById(`editFuncSalarioMensal-${id}`)?.value || '0');
+      const valorHora = parseBRNumber(document.getElementById(`editFuncValorHora-${id}`).value);
+      const percentualHoraExtra = Number(document.getElementById(`editFuncPercentualExtra-${id}`).value) || 0;
+      const modoCompensacaoPadrao = window.__editFuncModoComp?.[id] || original.modoCompensacaoPadrao;
+      const valorVtDia = parseBRNumber(document.getElementById(`editFuncVtDia-${id}`).value);
+      const valorVrDia = parseBRNumber(document.getElementById(`editFuncVrDia-${id}`).value);
       await updateFuncionaria(id, {
         nome, pin, dataAdmissao, ativa, jornadaSemanal,
         jornadaEntrada: segunda.entrada, jornadaSaidaAlmoco: segunda.saidaAlmoco, jornadaVoltaAlmoco: segunda.voltaAlmoco, jornadaSaida: segunda.saida,
+        tipoPagamento, salarioMensal, valorHora, percentualHoraExtra, modoCompensacaoPadrao, valorVtDia, valorVrDia,
       });
       state.editingFuncionariaId = null;
+      if (window.__editFuncTipoPag) delete window.__editFuncTipoPag[id];
+      if (window.__editFuncModoComp) delete window.__editFuncModoComp[id];
       await loadData();
     });
   });
