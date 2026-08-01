@@ -1782,6 +1782,15 @@ function calcularResumoHolerite(funcionaria, mesKey) {
       if (!abonado) horasFaltantes += Math.abs(calc.diferenca);
     }
   }
+  // as horas extras normais do mês abatem as faltas do mesmo mês antes de decidir se
+  // sobra alguma coisa "a compensar" — sem isso, um dia com falta pequena virava débito
+  // mesmo que ela tivesse feito bem mais hora extra em outros dias do mesmo mês. As horas
+  // de domingo/feriado (100%) ficam de fora dessa conta, são um direito à parte.
+  const horasExtrasBrutas = horasExtras;
+  const horasFaltantesBrutas = horasFaltantes;
+  horasExtras = Math.max(0, horasExtrasBrutas - horasFaltantesBrutas);
+  horasFaltantes = Math.max(0, horasFaltantesBrutas - horasExtrasBrutas);
+
   const salarioBase = funcionaria.tipoPagamento === 'mensal' ? (funcionaria.salarioMensal || 0) : horasTrabalhadasTotal * (funcionaria.valorHora || 0);
   const valorHorasExtras = horasExtras * (funcionaria.valorHora || 0) * (1 + (funcionaria.percentualHoraExtra || 0) / 100);
   const valorHorasExtras100 = horasExtras100 * (funcionaria.valorHora || 0) * 2;
