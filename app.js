@@ -1016,6 +1016,10 @@ function gerarHoleritePDF(funcionaria, mesKey, dados) {
       doc.text(`Observação: ${formatarHorasMin(dados.horasBancoUsadas)} do saldo do banco de horas (de meses anteriores) foram usadas pra cobrir faltas parciais nesse mês.`, margemEsq, y, { maxWidth: largura });
       y += 12;
     }
+    if (dados.horasBancoPagasDinheiro > 0) {
+      doc.text(`Observação: ${formatarHorasMin(dados.horasBancoPagasDinheiro)} do banco de horas foram pagas em dinheiro nesse mês (${fmt(dados.valorBancoPagoDinheiro || 0)}), lançamento já feito separadamente.`, margemEsq, y, { maxWidth: largura });
+      y += 12;
+    }
 
     y += 10;
     if (dados.assinaturaImagem) {
@@ -1839,7 +1843,15 @@ function calcularResumoHolerite(funcionaria, mesKey) {
   const horasBancoUsadas = state.abonosPonto
     .filter((a) => a.funcionariaId === funcionaria.id && a.data.slice(0, 7) === mesKey && a.horas != null)
     .reduce((acc, a) => acc + a.horas, 0);
-  return { diasTrabalhados, horasExtras, horasExtras100, horasFaltantes, horasTrabalhadasTotal, salarioBase, valorHorasExtras, valorHorasExtras100, valorVt, valorVr, debitoCompensacaoSabado, horasBancoUsadas };
+  // quanto do banco de horas foi pago em dinheiro nesse mês (via "Pagar saldo em dinheiro") —
+  // só informativo, não soma no total do holerite porque já é um lançamento separado no Financeiro
+  const horasBancoPagasDinheiro = state.bancoHorasLancamentos
+    .filter((b) => b.funcionariaId === funcionaria.id && b.data.slice(0, 7) === mesKey && b.descricao && b.descricao.startsWith('Pago em dinheiro'))
+    .reduce((acc, b) => acc + Math.abs(b.horas), 0);
+  const valorBancoPagoDinheiro = state.tx
+    .filter((t) => t.tipo === 'saida' && monthKey(t.data) === mesKey && t.descricao && t.descricao.startsWith(`Pagamento de banco de horas — ${funcionaria.nome}`))
+    .reduce((acc, t) => acc + t.valor, 0);
+  return { diasTrabalhados, horasExtras, horasExtras100, horasFaltantes, horasTrabalhadasTotal, salarioBase, valorHorasExtras, valorHorasExtras100, valorVt, valorVr, debitoCompensacaoSabado, horasBancoUsadas, horasBancoPagasDinheiro, valorBancoPagoDinheiro };
 }
 // procura, nos últimos N dias, dias em que ela deveria ter trabalhado mas falta alguma
 // das 4 batidas — hoje só conta a partir do horário de saída esperado. Separa o que já
@@ -2741,7 +2753,9 @@ function renderModoPonto(app) {
       const holerite = state.holerites.find((h) => h.id === btn.dataset.baixarPdfHolerite);
       if (!holerite) return;
       const horasBancoUsadas = state.abonosPonto.filter((a) => a.funcionariaId === holerite.funcionariaId && a.data.slice(0, 7) === holerite.mes && a.horas != null).reduce((acc, a) => acc + a.horas, 0);
-      gerarHoleritePDF(funcionaria, holerite.mes, { ...holerite, horasBancoUsadas });
+      const horasBancoPagasDinheiro = state.bancoHorasLancamentos.filter((b) => b.funcionariaId === holerite.funcionariaId && b.data.slice(0, 7) === holerite.mes && b.descricao && b.descricao.startsWith('Pago em dinheiro')).reduce((acc, b) => acc + Math.abs(b.horas), 0);
+      const valorBancoPagoDinheiro = state.tx.filter((t) => t.tipo === 'saida' && monthKey(t.data) === holerite.mes && t.descricao && t.descricao.startsWith(`Pagamento de banco de horas — ${funcionaria.nome}`)).reduce((acc, t) => acc + t.valor, 0);
+      gerarHoleritePDF(funcionaria, holerite.mes, { ...holerite, horasBancoUsadas, horasBancoPagasDinheiro, valorBancoPagoDinheiro });
     });
   });
 
@@ -4754,6 +4768,8 @@ function renderFuncionariaDetalhe(funcionariaId) {
   const resumoHolerite = f ? calcularResumoHolerite(f, mesHolerite) : null;
   const holeriteExistente = state.holerites.find((h) => h.funcionariaId === funcionariaId && h.mes === mesHolerite);
   const horasBancoUsadasFechado = f ? state.abonosPonto.filter((a) => a.funcionariaId === funcionariaId && a.data.slice(0, 7) === mesHolerite && a.horas != null).reduce((acc, a) => acc + a.horas, 0) : 0;
+  const horasBancoPagasDinheiroFechado = f ? state.bancoHorasLancamentos.filter((b) => b.funcionariaId === funcionariaId && b.data.slice(0, 7) === mesHolerite && b.descricao && b.descricao.startsWith('Pago em dinheiro')).reduce((acc, b) => acc + Math.abs(b.horas), 0) : 0;
+  const valorBancoPagoDinheiroFechado = f ? state.tx.filter((t) => t.tipo === 'saida' && monthKey(t.data) === mesHolerite && t.descricao && t.descricao.startsWith(`Pagamento de banco de horas — ${f.nome}`)).reduce((acc, t) => acc + t.valor, 0) : 0;
   const saldoBancoHoras = state.bancoHorasLancamentos.filter((b) => b.funcionariaId === funcionariaId).reduce((a, b) => a + b.horas, 0);
   const historicoHolerites = state.holerites.filter((h) => h.funcionariaId === funcionariaId).sort((a, b) => b.mes.localeCompare(a.mes));
   const mesLabelHolerite = (mk) => new Date(mk + '-01T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
@@ -5079,6 +5095,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
           ${holeriteExistente.horasExtras100 > 0 ? `<div class="prod-breakdown-item"><span>🗓️ Domingo/feriado — 100% (${formatarHorasMin(holeriteExistente.horasExtras100)})</span><span>${holeriteExistente.modoHorasExtras === 'dinheiro' ? fmt(holeriteExistente.valorHorasExtras100) : '🏦 banco de horas (em dobro)'}</span></div>` : ''}
           <div class="prod-breakdown-item"><span>Horas faltantes não abonadas</span><span>${formatarHorasMin(holeriteExistente.horasFaltantes)} 🏦 débito no banco</span></div>
           ${horasBancoUsadasFechado > 0 ? `<div class="prod-breakdown-item"><span>🏦 Banco de horas usado nesse mês</span><span style="color:var(--amber)">-${formatarHorasMin(horasBancoUsadasFechado)}</span></div>` : ''}
+          ${horasBancoPagasDinheiroFechado > 0 ? `<div class="prod-breakdown-item"><span>💰 Banco de horas pago em dinheiro</span><span style="color:var(--teal)">${formatarHorasMin(horasBancoPagasDinheiroFechado)} · ${fmt(valorBancoPagoDinheiroFechado)}</span></div>` : ''}
           <div class="prod-breakdown-item"><span>VT</span><span>${fmt(holeriteExistente.valorVt)}</span></div>
           <div class="prod-breakdown-item"><span>VR</span><span>${fmt(holeriteExistente.valorVr)}</span></div>
         </div>
@@ -5100,6 +5117,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
           ${resumoHolerite.horasExtras100 > 0 ? `<div class="prod-breakdown-item"><span>🗓️ Domingo/feriado — 100% (${formatarHorasMin(resumoHolerite.horasExtras100)} × ${fmt(f.valorHora)} × 2)</span><span>${fmt(resumoHolerite.valorHorasExtras100)}</span></div>` : ''}
           ${resumoHolerite.debitoCompensacaoSabado > 0 ? `<div class="prod-breakdown-item"><span>⚖️ Compensação de sábado (já descontada do líquido)</span><span style="color:var(--amber)">-${formatarHorasMin(resumoHolerite.debitoCompensacaoSabado)}</span></div>` : ''}
           ${resumoHolerite.horasBancoUsadas > 0 ? `<div class="prod-breakdown-item"><span>🏦 Banco de horas usado nesse mês</span><span style="color:var(--amber)">-${formatarHorasMin(resumoHolerite.horasBancoUsadas)}</span></div>` : ''}
+          ${resumoHolerite.horasBancoPagasDinheiro > 0 ? `<div class="prod-breakdown-item"><span>💰 Banco de horas pago em dinheiro (já lançado, não soma no total)</span><span style="color:var(--teal)">${formatarHorasMin(resumoHolerite.horasBancoPagasDinheiro)} · ${fmt(resumoHolerite.valorBancoPagoDinheiro)}</span></div>` : ''}
           <div class="prod-breakdown-item"><span>Horas faltantes não abonadas</span><span style="color:var(--red)">${formatarHorasMin(resumoHolerite.horasFaltantes)}</span></div>
         </div>
         <div class="form-hint" style="margin-top:10px;margin-bottom:2px">Como pagar as horas extras desse mês?</div>
@@ -5144,6 +5162,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
             <div class="produto-vendido" style="margin-top:10px">💰 Total líquido: ${fmt(d.totalPagar)}</div>
             ${resumoHolerite.horasFaltantes > 0 ? `<div class="form-hint" style="margin-top:8px;color:var(--red)">${formatarHorasMin(resumoHolerite.horasFaltantes)} de falta não abonada — vira débito no banco de horas.</div>` : ''}
             ${resumoHolerite.horasBancoUsadas > 0 ? `<div class="form-hint" style="margin-top:6px;color:var(--amber)">🏦 ${formatarHorasMin(resumoHolerite.horasBancoUsadas)} do saldo do banco de horas foram usadas pra cobrir faltas parciais nesse mês.</div>` : ''}
+            ${resumoHolerite.horasBancoPagasDinheiro > 0 ? `<div class="form-hint" style="margin-top:6px;color:var(--teal)">💰 ${formatarHorasMin(resumoHolerite.horasBancoPagasDinheiro)} do banco de horas já foram pagas em dinheiro nesse mês (${fmt(resumoHolerite.valorBancoPagoDinheiro)}), lançamento já feito à parte.</div>` : ''}
             ${d.modoHorasExtras === 'banco' && (resumoHolerite.horasExtras > 0 || resumoHolerite.horasExtras100 > 0) ? `<div class="form-hint" style="margin-top:6px">Horas extras desse mês serão creditadas no banco de horas, não pagas em dinheiro.</div>` : ''}
             <div class="form-hint" style="margin-top:10px">📌 Isso é só uma prévia na tela — nada foi salvo. Clique em "Fechar holerite" acima quando estiver tudo certo.</div>
           </div>
@@ -5361,7 +5380,9 @@ function attachRHHandlers(c) {
         const holerite = state.holerites.find((h) => h.id === btn.dataset.baixarPdfHolerite);
         const funcionaria = state.funcionarias.find((x) => x.id === holerite.funcionariaId);
         const horasBancoUsadas = state.abonosPonto.filter((a) => a.funcionariaId === holerite.funcionariaId && a.data.slice(0, 7) === holerite.mes && a.horas != null).reduce((acc, a) => acc + a.horas, 0);
-        gerarHoleritePDF(funcionaria, holerite.mes, { ...holerite, horasBancoUsadas });
+        const horasBancoPagasDinheiro = state.bancoHorasLancamentos.filter((b) => b.funcionariaId === holerite.funcionariaId && b.data.slice(0, 7) === holerite.mes && b.descricao && b.descricao.startsWith('Pago em dinheiro')).reduce((acc, b) => acc + Math.abs(b.horas), 0);
+        const valorBancoPagoDinheiro = state.tx.filter((t) => t.tipo === 'saida' && monthKey(t.data) === holerite.mes && t.descricao && t.descricao.startsWith(`Pagamento de banco de horas — ${funcionaria.nome}`)).reduce((acc, t) => acc + t.valor, 0);
+        gerarHoleritePDF(funcionaria, holerite.mes, { ...holerite, horasBancoUsadas, horasBancoPagasDinheiro, valorBancoPagoDinheiro });
       });
     });
 
