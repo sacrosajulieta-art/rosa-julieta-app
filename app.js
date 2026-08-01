@@ -5401,7 +5401,7 @@ function attachRHHandlers(c) {
 
   if (state.rhFuncionariaDetalheId) {
     const voltar = document.getElementById('voltarFuncionarias');
-    if (voltar) voltar.addEventListener('click', () => { state.rhFuncionariaDetalheId = null; state.editingPontoId = null; state.showFeriasForm = false; state.showAbonarId = null; render(); });
+    if (voltar) voltar.addEventListener('click', () => { state.rhFuncionariaDetalheId = null; state.editingPontoId = null; state.showFeriasForm = false; state.showAbonarId = null; state.showPreviaHolerite = false; window.__previaHoleriteData = null; render(); });
 
     document.querySelectorAll('[data-abrir-abonar]').forEach((btn) => {
       btn.addEventListener('click', () => { state.showAbonarId = btn.dataset.abrirAbonar; render(); });
@@ -5778,6 +5778,8 @@ function attachRHHandlers(c) {
     row.addEventListener('click', (e) => {
       if (e.target.closest('[data-editar-func]') || e.target.closest('[data-remover-func]')) return;
       state.rhFuncionariaDetalheId = row.dataset.abrirFuncionaria;
+      state.showPreviaHolerite = false;
+      window.__previaHoleriteData = null;
       render();
     });
   });
