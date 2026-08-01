@@ -363,6 +363,7 @@ const state = {
   abonosPonto: [],
   holerites: [],
   holeriteMes: null,
+  showHoleritesLote: false,
   showAbonarId: null,
 };
 
@@ -4106,6 +4107,50 @@ function attachFichaTecnicaHandlers(c) {
 }
 
 // ---- RH: funcionárias e ponto eletrônico ----
+// painel de fechar o holerite de todas as funcionárias ativas de uma vez, com revisão
+// antes de confirmar — mostra o resumo calculado de cada uma, lado a lado
+function renderHoleritesLote() {
+  const mesKey = state.holeriteMes || todayStr().slice(0, 7);
+  const mesLabelTexto = new Date(mesKey + '-01T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+  const ativas = state.funcionarias.filter((f) => f.ativa !== false);
+  const linhas = ativas.map((f) => {
+    const jaFechado = state.holerites.find((h) => h.funcionariaId === f.id && h.mes === mesKey);
+    const resumo = jaFechado ? null : calcularResumoHolerite(f, mesKey);
+    return { f, jaFechado, resumo };
+  });
+  const pendentes = linhas.filter((l) => !l.jaFechado);
+  const totalGeral = linhas.reduce((a, l) => a + (l.jaFechado ? l.jaFechado.totalPagar : (l.resumo.salarioBase + l.resumo.valorHorasExtras + l.resumo.valorVt + l.resumo.valorVr)), 0);
+
+  return `
+    <div class="form-card">
+      <div class="section-title" style="margin-bottom:2px">Fechar holerites — ${mesLabelTexto}</div>
+      <div class="section-subtitle" style="margin-bottom:10px">Revise cada uma antes de confirmar. As horas extras usam o modo padrão configurado no cadastro dela (dá pra mudar individualmente no perfil, se precisar).</div>
+      <input type="month" id="holeriteLoteMesSelect" value="${mesKey}" style="margin-bottom:12px" />
+
+      ${linhas.length === 0 ? `<div class="empty-state">Nenhuma funcionária ativa cadastrada.</div>` : `
+        <div style="display:flex;flex-direction:column;gap:8px">
+          ${linhas.map(({ f, jaFechado, resumo }) => `
+            <div class="alert-card" style="border-color:${jaFechado ? 'var(--teal)55' : 'var(--border)'}">
+              <div class="alert-card-row">
+                <div style="flex:1">
+                  <div class="alert-name">${esc(f.nome)}</div>
+                  ${jaFechado ? `
+                    <div class="alert-meta" style="color:var(--teal)">✅ Já fechado — ${fmt(jaFechado.totalPagar)}</div>
+                  ` : `
+                    <div class="alert-meta">${resumo.diasTrabalhados} dias · base ${fmt(resumo.salarioBase)} · extras ${formatarHorasMin(resumo.horasExtras)} (${f.modoCompensacaoPadrao === 'banco' ? '🏦 banco' : fmt(resumo.valorHorasExtras)}) · faltas ${formatarHorasMin(resumo.horasFaltantes)}${resumo.valorVt > 0 ? ` · VT ${fmt(resumo.valorVt)}` : ''}${resumo.valorVr > 0 ? ` · VR ${fmt(resumo.valorVr)}` : ''}</div>
+                  `}
+                </div>
+                ${!jaFechado ? `<button class="confirm-btn" style="width:auto;padding:8px 14px" data-fechar-holerite-lote="${f.id}" data-mes="${mesKey}">Fechar</button>` : ''}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+        <div class="produto-vendido" style="margin-top:10px">💰 Total do mês (fechados + pendentes): ${fmt(totalGeral)}</div>
+        ${pendentes.length > 0 ? `<button class="confirm-btn" style="margin-top:10px" data-fechar-todos-holerites="${mesKey}">Fechar os ${pendentes.length} pendente(s)</button>` : `<div class="form-hint" style="margin-top:10px">Todo mundo já está fechado esse mês 🎉</div>`}
+      `}
+    </div>
+  `;
+}
 function renderRH(c) {
   if (state.rhFuncionariaDetalheId) return renderFuncionariaDetalhe(state.rhFuncionariaDetalheId);
 
@@ -4120,15 +4165,20 @@ function renderRH(c) {
     totalProblemas += semSolicitacao + aguardando;
   });
   const solicitacoesPendentes = state.solicitacoesPonto.filter((s) => s.status === 'pendente').sort((a, b) => a.data.localeCompare(b.data));
+  const mesAtualKeyRH = todayStr().slice(0, 7);
+  const lembreteHoleriteRH = state.funcionarias.some((f) => f.ativa !== false && !state.holerites.some((h) => h.funcionariaId === f.id && h.mes === mesAtualKeyRH));
 
   return `
     <div class="section-title-wrap">
       <div><div class="section-title">RH</div><div class="section-subtitle">Funcionárias e ponto eletrônico</div></div>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="icon-btn-ghost" id="copiarLinkPonto">🔗 Link de ponto</button>
+        <button class="icon-btn-ghost" id="toggleHoleritesLote" style="${lembreteHoleriteRH ? 'background:rgba(255,182,39,0.15);border:1.5px solid var(--amber);color:var(--amber);font-weight:700' : ''}">📋 Fechar holerites do mês</button>
         <button class="icon-btn" id="toggleFuncionariaForm">＋ Funcionária</button>
       </div>
     </div>
+
+    ${state.showHoleritesLote ? renderHoleritesLote() : ''}
 
     ${totalProblemas > 0 ? `
       <div class="alerta-vencimento">
@@ -4785,6 +4835,36 @@ function attachRHHandlers(c) {
     return;
   }
 
+  const toggleHoleritesLote = document.getElementById('toggleHoleritesLote');
+  if (toggleHoleritesLote) toggleHoleritesLote.addEventListener('click', () => { state.showHoleritesLote = !state.showHoleritesLote; render(); });
+
+  const holeriteLoteMesSelect = document.getElementById('holeriteLoteMesSelect');
+  if (holeriteLoteMesSelect) holeriteLoteMesSelect.addEventListener('change', (e) => { state.holeriteMes = e.target.value; render(); });
+
+  document.querySelectorAll('[data-fechar-holerite-lote]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const funcionaria = state.funcionarias.find((f) => f.id === btn.dataset.fecharHoleriteLote);
+      const mesKey = btn.dataset.mes;
+      const resumo = calcularResumoHolerite(funcionaria, mesKey);
+      const modoHorasExtras = funcionaria.modoCompensacaoPadrao;
+      await fecharHolerite(funcionaria, mesKey, resumo, modoHorasExtras, resumo.valorVt, resumo.valorVr);
+      await loadData();
+    });
+  });
+
+  const fecharTodosBtn = document.querySelector('[data-fechar-todos-holerites]');
+  if (fecharTodosBtn) fecharTodosBtn.addEventListener('click', async () => {
+    const mesKey = fecharTodosBtn.dataset.fecharTodosHolerites;
+    const ativas = state.funcionarias.filter((f) => f.ativa !== false && !state.holerites.some((h) => h.funcionariaId === f.id && h.mes === mesKey));
+    if (!confirm(`Fechar o holerite de ${ativas.length} funcionária(s) pra ${new Date(mesKey + '-01T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}?\n\nCada uma usa o modo de pagamento de hora extra padrão dela. Isso lança as saídas no Financeiro.`)) return;
+    for (const f of ativas) {
+      const resumo = calcularResumoHolerite(f, mesKey);
+      await fecharHolerite(f, mesKey, resumo, f.modoCompensacaoPadrao, resumo.valorVt, resumo.valorVr);
+    }
+    await loadData();
+    alert(`${ativas.length} holerite(s) fechado(s)!`);
+  });
+
   const toggleForm = document.getElementById('toggleFuncionariaForm');
   if (toggleForm) toggleForm.addEventListener('click', () => { state.showFuncionariaForm = !state.showFuncionariaForm; render(); });
 
@@ -5178,6 +5258,14 @@ function renderDashboard(c) {
     .filter((p) => p.status !== 'ok' && p.ativo !== false)
     .sort((a, b) => ({ critico: 0, aguarde: 1, 'pode-cortar': 2 }[a.status] - { critico: 0, aguarde: 1, 'pode-cortar': 2 }[b.status]));
 
+  // lembrete de holerite: aparece nos últimos 3 dias do mês se tiver funcionária ativa
+  // ainda sem holerite fechado nesse mês
+  const hoje = new Date();
+  const ultimoDiaMes = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).getDate();
+  const mesAtualKey = todayStr().slice(0, 7);
+  const funcionariasSemHolerite = state.funcionarias.filter((f) => f.ativa !== false && !state.holerites.some((h) => h.funcionariaId === f.id && h.mes === mesAtualKey));
+  const lembreteHolerite = hoje.getDate() >= ultimoDiaMes - 2 && funcionariasSemHolerite.length > 0;
+
   return `
     <input type="month" class="month-input" id="dashboardMonthSelect" value="${state.selectedMonth}" />
 
@@ -5192,6 +5280,13 @@ function renderDashboard(c) {
       <div class="alerta-vencimento" data-ir-financeiro="1">
         <span>📅 ${c.contasAVencer.length} conta(s) vencendo nos próximos 7 dias — ${fmt(c.contasAVencer.reduce((a, t) => a + t.valor, 0))}</span>
         <span class="alerta-vencimento-link">Ver no Financeiro ›</span>
+      </div>
+    ` : ''}
+
+    ${lembreteHolerite ? `
+      <div class="alerta-vencimento" data-ir-rh="1" style="background:rgba(255,182,39,0.1);border-color:var(--amber);color:var(--amber)">
+        <span>📋 ${funcionariasSemHolerite.length} funcionária(s) sem holerite fechado esse mês — feche até o fim do mês</span>
+        <span class="alerta-vencimento-link">Ver no RH ›</span>
       </div>
     ` : ''}
 
@@ -5363,6 +5458,7 @@ function attachHandlers(c) {
       state.editingPontoId = null;
       state.showFeriasForm = false;
       state.showAbonarId = null;
+      state.showHoleritesLote = false;
       render();
     });
   });
@@ -5374,6 +5470,10 @@ function attachHandlers(c) {
     document.querySelectorAll('[data-ir-financeiro]').forEach((el) => el.addEventListener('click', () => {
       state.tab = 'financeiro';
       state.showContasAVencer = true;
+      render();
+    }));
+    document.querySelectorAll('[data-ir-rh]').forEach((el) => el.addEventListener('click', () => {
+      state.tab = 'rh';
       render();
     }));
   }
