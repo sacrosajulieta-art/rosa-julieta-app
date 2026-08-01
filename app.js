@@ -4757,8 +4757,12 @@ function renderFuncionariaDetalhe(funcionariaId) {
                   <option value="abono">✅ Abono simples</option>
                 </select>
                 <input type="text" id="abonarMotivo-${e.data}" placeholder="Motivo/observação (opcional)" />
-                <input type="text" id="abonarHoras-${e.data}" placeholder="Só parte do dia? Quantas horas (ex: 0,5 = 30min) — deixe em branco pro dia inteiro" inputmode="decimal" />
-                <div class="form-hint" style="margin-top:2px">Preenchendo as horas, isso debita automaticamente do banco de horas dela (é o que acontece de verdade quando ela usa o saldo).</div>
+                <div class="form-hint" style="margin-top:2px;margin-bottom:2px">Só parte do dia? Quanto tempo do saldo ela usou (deixe os dois em branco pra abonar o dia inteiro):</div>
+                <div class="form-row">
+                  <input type="text" id="abonarHorasH-${e.data}" placeholder="Horas (ex: 1)" inputmode="numeric" />
+                  <input type="text" id="abonarHorasM-${e.data}" placeholder="Minutos (ex: 30)" inputmode="numeric" />
+                </div>
+                <div class="form-hint" style="margin-top:2px">Preenchendo isso, debita automaticamente do banco de horas dela (é o que acontece de verdade quando ela usa o saldo).</div>
                 <div class="form-row">
                   <button class="confirm-btn" data-salvar-abono="${funcionariaId}" data-data="${e.data}">Salvar</button>
                   <button class="toggle-btn" data-cancelar-abonar="1">Cancelar</button>
@@ -4887,8 +4891,12 @@ function renderFuncionariaDetalhe(funcionariaId) {
         <option value="abono">✅ Abono simples</option>
       </select>
       <input type="text" id="abonarLivreMotivo" placeholder="Motivo/observação (opcional)" style="margin-top:8px" />
-      <input type="text" id="abonarLivreHoras" placeholder="Só parte do dia (ex: 0,5 = 30min)? Deixe em branco pro dia inteiro" style="margin-top:8px" inputmode="decimal" />
-      <div class="form-hint" style="margin-top:2px">Preenchendo as horas, debita automaticamente do banco de horas (usa quando ela cobrir a falta com saldo que já tinha).</div>
+      <div class="form-hint" style="margin-top:8px;margin-bottom:2px">Só parte do dia? Quanto tempo do saldo ela usou (deixe os dois em branco pra abonar o dia inteiro):</div>
+      <div class="form-row">
+        <input type="text" id="abonarLivreHorasH" placeholder="Horas (ex: 1)" inputmode="numeric" />
+        <input type="text" id="abonarLivreHorasM" placeholder="Minutos (ex: 30)" inputmode="numeric" />
+      </div>
+      <div class="form-hint" style="margin-top:2px">Preenchendo isso, debita automaticamente do banco de horas (usa quando ela cobrir a falta com saldo que já tinha).</div>
       <button class="confirm-btn" style="margin-top:10px" data-salvar-abono-livre="${funcionariaId}">Abonar</button>
     </div>
 
@@ -5177,7 +5185,9 @@ function attachRHHandlers(c) {
         const data = btn.dataset.data;
         const tipo = document.getElementById(`abonarTipo-${data}`).value;
         const motivo = document.getElementById(`abonarMotivo-${data}`).value.trim();
-        const horasParciais = parseBRNumber(document.getElementById(`abonarHoras-${data}`)?.value || '') || null;
+        const h = Number(document.getElementById(`abonarHorasH-${data}`)?.value) || 0;
+        const m = Number(document.getElementById(`abonarHorasM-${data}`)?.value) || 0;
+        const horasParciais = (h + m / 60) || null;
         await salvarAbono(funcionariaId, data, tipo, motivo, horasParciais);
         state.showAbonarId = null;
         await loadData();
@@ -5291,7 +5301,9 @@ function attachRHHandlers(c) {
       const dataFim = document.getElementById('abonarLivreDataFim').value || dataInicio;
       const tipo = document.getElementById('abonarLivreTipo').value;
       const motivo = document.getElementById('abonarLivreMotivo').value.trim();
-      const horasParciais = parseBRNumber(document.getElementById('abonarLivreHoras')?.value || '') || null;
+      const hLivre = Number(document.getElementById('abonarLivreHorasH')?.value) || 0;
+      const mLivre = Number(document.getElementById('abonarLivreHorasM')?.value) || 0;
+      const horasParciais = (hLivre + mLivre / 60) || null;
       if (!dataInicio) { alert('Preencha a data.'); return; }
       if (dataFim < dataInicio) { alert('A data final precisa ser depois (ou igual) à data inicial.'); return; }
       const datas = [];
