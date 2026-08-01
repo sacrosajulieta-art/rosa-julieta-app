@@ -1033,6 +1033,113 @@ function gerarHoleritePDF(funcionaria, mesKey, dados) {
     alert('Não consegui gerar o PDF: ' + err.message);
   }
 }
+// ---- Espelho de ponto em PDF (batidas dia a dia do mês, separado do holerite) ----
+function gerarEspelhoPontoPDF(funcionaria, mesKey) {
+  if (!window.jspdf || !window.jspdf.jsPDF) {
+    alert('A biblioteca de PDF ainda não carregou. Aguarda alguns segundos e tenta de novo, ou feche e abra o app.');
+    return;
+  }
+  try {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const margemEsq = 12;
+    const alturaPagina = 285;
+    let y = 18;
+
+    const [ano, mesNum] = mesKey.split('-').map(Number);
+    const ultimoDia = new Date(ano, mesNum, 0).getDate();
+    const mesLabelTexto = new Date(mesKey + '-01T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+
+    const desenharCabecalho = () => {
+      doc.setFontSize(13);
+      doc.setFont(undefined, 'bold');
+      doc.text('ROSA JULIETA — Espelho de Ponto', margemEsq, y);
+      doc.setFont(undefined, 'normal');
+      doc.setFontSize(10);
+      y += 7;
+      doc.text(`Funcionária: ${funcionaria.nome}`, margemEsq, y);
+      doc.text(`Referência: ${mesLabelTexto.charAt(0).toUpperCase() + mesLabelTexto.slice(1)}`, margemEsq + 100, y);
+      y += 6;
+      doc.setDrawColor(200);
+      doc.line(margemEsq, y, margemEsq + 186, y);
+      y += 6;
+      doc.setFont(undefined, 'bold');
+      doc.setFontSize(8.5);
+      doc.text('Data', margemEsq, y);
+      doc.text('Entrada', margemEsq + 25, y);
+      doc.text('Saída Almoço', margemEsq + 55, y);
+      doc.text('Volta Almoço', margemEsq + 90, y);
+      doc.text('Saída', margemEsq + 125, y);
+      doc.text('Total', margemEsq + 150, y);
+      doc.text('Diferença', margemEsq + 168, y);
+      doc.setFont(undefined, 'normal');
+      y += 2;
+      doc.line(margemEsq, y, margemEsq + 186, y);
+      y += 5;
+    };
+
+    desenharCabecalho();
+
+    let totalExtra = 0;
+    let totalFalta = 0;
+    let diasComBatida = 0;
+
+    for (let dia = 1; dia <= ultimoDia; dia++) {
+      const dataStr = `${mesKey}-${String(dia).padStart(2, '0')}`;
+      const pontosDoDia = state.pontos.filter((p) => p.funcionariaId === funcionaria.id && p.data === dataStr).sort((a, b) => new Date(a.horario) - new Date(b.horario));
+      if (pontosDoDia.length === 0) continue;
+      diasComBatida++;
+      const porTipo = {};
+      pontosDoDia.forEach((p) => { porTipo[p.tipo] = new Date(p.horario); });
+      const hora = (d) => d ? d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '—';
+      const calc = calcularHorasDia(pontosDoDia, funcionaria, dataStr);
+      const abonado = state.abonosPonto.some((a) => a.funcionariaId === funcionaria.id && a.data === dataStr);
+
+      if (y > alturaPagina) { doc.addPage(); y = 18; desenharCabecalho(); }
+
+      doc.setFontSize(8.5);
+      doc.text(new Date(dataStr + 'T00:00:00').toLocaleDateString('pt-BR'), margemEsq, y);
+      doc.text(hora(porTipo.entrada), margemEsq + 25, y);
+      doc.text(hora(porTipo.saida_almoco), margemEsq + 55, y);
+      doc.text(hora(porTipo.volta_almoco), margemEsq + 90, y);
+      doc.text(hora(porTipo.saida), margemEsq + 125, y);
+      doc.text(calc.completo ? `${calc.horasTrabalhadas.toFixed(1)}h` : '—', margemEsq + 150, y);
+      if (calc.completo) {
+        if (abonado && calc.diferenca < 0) {
+          doc.text('abonado', margemEsq + 168, y);
+        } else {
+          doc.text(`${calc.diferenca >= 0 ? '+' : '-'}${formatarHorasMin(calc.diferenca)}`, margemEsq + 168, y);
+          if (calc.diferenca >= 0) totalExtra += calc.diferenca; else totalFalta += Math.abs(calc.diferenca);
+        }
+      } else {
+        doc.text('incompleto', margemEsq + 168, y);
+      }
+      y += 5.5;
+    }
+
+    if (diasComBatida === 0) {
+      doc.setFontSize(9);
+      doc.text('Nenhuma batida registrada nesse mês.', margemEsq, y);
+      y += 8;
+    }
+
+    y += 4;
+    doc.line(margemEsq, y, margemEsq + 186, y);
+    y += 6;
+    doc.setFontSize(9);
+    doc.setFont(undefined, 'bold');
+    doc.text(`Total de horas extras: +${formatarHorasMin(totalExtra)}`, margemEsq, y);
+    y += 6;
+    doc.text(`Total de horas faltantes (não abonadas): -${formatarHorasMin(totalFalta)}`, margemEsq, y);
+    doc.setFont(undefined, 'normal');
+
+    const nomeArquivo = `espelho-ponto-${funcionaria.nome.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${mesKey}.pdf`;
+    doc.save(nomeArquivo);
+  } catch (err) {
+    console.error(err);
+    alert('Não consegui gerar o PDF: ' + err.message);
+  }
+}
 // baixa automática (FIFO) do que a costureira tem em mãos, quando ela devolve peças prontas
 async function baixarDistribuicoesFIFO(costureiraId, produtoId, varianteId, quantidadeDevolvida) {
   let restante = quantidadeDevolvida;
@@ -4824,6 +4931,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
 
     <div class="section-title-wrap" style="margin-top:24px">
       <div><div class="section-title">Holerite</div><div class="section-subtitle">Fecha o pagamento do mês — salário, horas extras, VT e VR</div></div>
+      <button class="icon-btn-ghost" data-baixar-espelho-ponto="${funcionariaId}">🗓️ Espelho de ponto (PDF)</button>
     </div>
 
     <div class="stats-grid">
@@ -5019,6 +5127,14 @@ function attachRHHandlers(c) {
 
     document.querySelectorAll('[data-holerite-modo-extras]').forEach((btn) => {
       btn.addEventListener('click', () => { window.__holeriteModoExtras = btn.dataset.holeriteModoExtras; render(); });
+    });
+
+    document.querySelectorAll('[data-baixar-espelho-ponto]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const funcionaria = state.funcionarias.find((x) => x.id === btn.dataset.baixarEspelhoPonto);
+        const mesKey = state.holeriteMes || todayStr().slice(0, 7);
+        gerarEspelhoPontoPDF(funcionaria, mesKey);
+      });
     });
 
     document.querySelectorAll('[data-baixar-pdf-previa]').forEach((btn) => {
