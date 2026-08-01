@@ -5818,15 +5818,21 @@ function attachRHHandlers(c) {
         const [hS, mS] = dia.saida.split(':').map(Number);
         minutosSemanais += ((hSA * 60 + mSA) - (hE * 60 + mE)) + ((hS * 60 + mS) - (hVA * 60 + mVA));
       });
-      const horasSemanais = minutosSemanais / 60;
+      const horasSemanaisJornada = minutosSemanais / 60;
+      const horasCompensacaoSemanal = parseBRNumber(document.getElementById(`editFuncCompSabado-${id}`)?.value || '0');
+      const horasSemanais = horasSemanaisJornada + horasCompensacaoSemanal;
       if (horasSemanais <= 0) { alert('Configure a jornada semanal primeiro (marque os dias que ela trabalha).'); return; }
       // divisor padrão de folha de pagamento: jornada semanal × 5 (ex: 44h/semana → 220h/mês,
       // 40h/semana → 200h/mês, 36h/semana → 180h/mês) — é o divisor usado na prática pela
-      // maioria dos sistemas de RH no Brasil
+      // maioria dos sistemas de RH no Brasil. A jornada semanal aqui já soma o campo de
+      // "compensação de sábado" — se a jornada configurada é só seg-sex (ex: 40h) e o sábado
+      // fica de fora dela (compensado à parte), essas horas do sábado ainda contam na jornada
+      // contratual total, e precisam entrar nessa conta pra não subestimar o valor da hora
       const horasMensais = horasSemanais * 5;
       const valorHora = salarioMensal / horasMensais;
       document.getElementById(`editFuncValorHora-${id}`).value = valorHora.toFixed(2).replace('.', ',');
-      alert(`Calculado: ${horasSemanais.toFixed(1)}h/semana × 5 = ${horasMensais.toFixed(1)}h/mês (divisor padrão).\n\nValor da hora: ${fmt(valorHora)}`);
+      const detalheCompensacao = horasCompensacaoSemanal > 0 ? ` (${horasSemanaisJornada.toFixed(1)}h da jornada + ${horasCompensacaoSemanal}h de compensação de sábado)` : '';
+      alert(`Calculado: ${horasSemanais.toFixed(1)}h/semana${detalheCompensacao} × 5 = ${horasMensais.toFixed(1)}h/mês (divisor padrão).\n\nValor da hora: ${fmt(valorHora)}`);
     });
   });
 
