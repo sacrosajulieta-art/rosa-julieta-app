@@ -5042,6 +5042,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
           </div>
         `;
       }).join('')}
+      <button class="icon-btn-ghost" style="margin-top:8px" id="ptManualLimparAlmoco">🕐 Meio período (limpar Saída/Volta Almoço)</button>
       <button class="confirm-btn" style="margin-top:10px" data-lancar-ponto-manual="${funcionariaId}">Lançar</button>
     </div>
 
@@ -5618,6 +5619,14 @@ function attachRHHandlers(c) {
     if (estaSemana) estaSemana.addEventListener('click', () => { state.rhFiltroInicio = inicioDaSemana(todayStr()); state.rhFiltroFim = todayStr(); salvarRhFiltro(state.rhFiltroInicio, state.rhFiltroFim); render(); });
     const esteMes = document.getElementById('rhEsteMes');
     if (esteMes) esteMes.addEventListener('click', () => { state.rhFiltroInicio = todayStr().slice(0, 8) + '01'; state.rhFiltroFim = todayStr(); salvarRhFiltro(state.rhFiltroInicio, state.rhFiltroFim); render(); });
+
+    const ptManualLimparAlmoco = document.getElementById('ptManualLimparAlmoco');
+    if (ptManualLimparAlmoco) ptManualLimparAlmoco.addEventListener('click', () => {
+      const saidaAlmocoInput = document.getElementById('ptManual-saida_almoco');
+      const voltaAlmocoInput = document.getElementById('ptManual-volta_almoco');
+      if (saidaAlmocoInput) saidaAlmocoInput.value = '';
+      if (voltaAlmocoInput) voltaAlmocoInput.value = '';
+    });
 
     const lancarManual = document.querySelector('[data-lancar-ponto-manual]');
     if (lancarManual) lancarManual.addEventListener('click', async () => {
