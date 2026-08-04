@@ -3456,15 +3456,21 @@ function renderCorte(c) {
           <button class="toggle-btn ${window.__ordemTipo === 'retalho' ? 'active-pink' : ''}" data-ordem-tipo="retalho">♻️ Corte de retalhos</button>
         </div>
         ${(window.__ordemTipo || 'principal') === 'principal' ? `
-          <select id="ordemCor">
-            <option value="">Selecione a cor</option>
-            ${state.materiaPrima.map((m) => `<option value="${esc(m.cor)}" data-custo="${m.custoMedioRolo}">${esc(m.cor)} (${m.rolosDisponiveis} disponível)</option>`).join('')}
-          </select>
-          <div class="form-row">
-            <input type="text" id="ordemRolos" placeholder="Quantidade de rolos enviados" inputmode="numeric" />
-            <input type="text" id="ordemValor" placeholder="Valor do tecido usado (R$)" />
-          </div>
-          <input type="text" id="ordemValorCorte" placeholder="Valor do corte, se pagar à parte (opcional)" />
+          <div class="form-hint" style="margin-bottom:2px">Mandando mais de uma cor pro mesmo corte (cortadas juntas)? Adiciona uma linha pra cada cor.</div>
+          ${Array.from({ length: window.__numCoresOrdemCorte || 1 }, (_, i) => `
+            <div style="border-top:${i > 0 ? '1px solid var(--border)' : 'none'};padding-top:${i > 0 ? '8px' : '0'};margin-top:${i > 0 ? '8px' : '0'}">
+              <select id="ordemCor-${i}">
+                <option value="">Selecione a cor</option>
+                ${state.materiaPrima.map((m) => `<option value="${esc(m.cor)}" data-custo="${m.custoMedioRolo}">${esc(m.cor)} (${m.rolosDisponiveis} disponível)</option>`).join('')}
+              </select>
+              <div class="form-row">
+                <input type="text" id="ordemRolos-${i}" placeholder="Quantidade de rolos enviados" inputmode="numeric" />
+                <input type="text" id="ordemValor-${i}" placeholder="Valor do tecido usado (R$)" />
+              </div>
+            </div>
+          `).join('')}
+          <button class="entrada-btn" type="button" id="adicionarCorOrdemCorte">＋ Adicionar outra cor</button>
+          <input type="text" id="ordemValorCorte" placeholder="Valor do corte, se pagar à parte (opcional) — total do lote, dividido entre as cores" style="margin-top:8px" />
         ` : `
           <div class="form-hint">O tecido dos retalhos já foi pago no corte principal — aqui só entra o valor de cortar de novo.</div>
           <input type="text" id="ordemCorRetalho" placeholder="De qual cor são esses retalhos? (referência)" />
@@ -7600,21 +7606,30 @@ function attachTecidoHandlers(c) {
   if (toggleOrdem) toggleOrdem.addEventListener('click', () => {
     state.showOrdemCorteForm = !state.showOrdemCorteForm;
     window.__ordemTipo = 'principal';
+    window.__numCoresOrdemCorte = 1;
     render();
   });
 
-  const ordemCorSelect = document.getElementById('ordemCor');
-  if (ordemCorSelect) ordemCorSelect.addEventListener('change', (e) => {
-    const opt = e.target.selectedOptions[0];
-    const custo = opt ? Number(opt.dataset.custo || 0) : 0;
-    const rolosInput = document.getElementById('ordemRolos');
-    const valorInput = document.getElementById('ordemValor');
-    const atualizarSugestao = () => {
-      const qtd = Number(rolosInput.value) || 0;
-      if (qtd > 0 && custo > 0) valorInput.value = (qtd * custo).toFixed(2).replace('.', ',');
-    };
-    rolosInput.oninput = atualizarSugestao;
-    atualizarSugestao();
+  document.querySelectorAll('[id^="ordemCor-"]').forEach((sel) => {
+    sel.addEventListener('change', (e) => {
+      const opt = e.target.selectedOptions[0];
+      const custo = opt ? Number(opt.dataset.custo || 0) : 0;
+      const indice = sel.id.replace('ordemCor-', '');
+      const rolosInput = document.getElementById(`ordemRolos-${indice}`);
+      const valorInput = document.getElementById(`ordemValor-${indice}`);
+      const atualizarSugestao = () => {
+        const qtd = Number(rolosInput.value) || 0;
+        if (qtd > 0 && custo > 0) valorInput.value = (qtd * custo).toFixed(2).replace('.', ',');
+      };
+      rolosInput.oninput = atualizarSugestao;
+      atualizarSugestao();
+    });
+  });
+
+  const adicionarCorOrdemCorte = document.getElementById('adicionarCorOrdemCorte');
+  if (adicionarCorOrdemCorte) adicionarCorOrdemCorte.addEventListener('click', () => {
+    window.__numCoresOrdemCorte = (window.__numCoresOrdemCorte || 1) + 1;
+    render();
   });
 
   document.querySelectorAll('[data-ordem-tipo]').forEach((btn) => {
@@ -7628,12 +7643,32 @@ function attachTecidoHandlers(c) {
     const valorCorte = parseBRNumber(document.getElementById('ordemValorCorte')?.value || '0');
 
     if (tipo === 'principal') {
-      const cor = document.getElementById('ordemCor').value;
-      const rolos = Number(document.getElementById('ordemRolos').value);
-      const valor = parseBRNumber(document.getElementById('ordemValor').value);
-      if (!cor || !rolos || rolos <= 0) { alert('Selecione a cor e informe a quantidade de rolos.'); return; }
-      const ok = await criarOrdemCorte(cor, rolos, valor, data, 'principal', valorCorte);
-      if (ok) { state.showOrdemCorteForm = false; window.__ordemTipo = 'principal'; await loadData(); }
+      const numLinhas = window.__numCoresOrdemCorte || 1;
+      const linhas = [];
+      for (let i = 0; i < numLinhas; i++) {
+        const cor = document.getElementById(`ordemCor-${i}`)?.value;
+        const rolos = Number(document.getElementById(`ordemRolos-${i}`)?.value);
+        const valor = parseBRNumber(document.getElementById(`ordemValor-${i}`)?.value || '0');
+        if (cor && rolos > 0) linhas.push({ cor, rolos, valor });
+      }
+      if (linhas.length === 0) { alert('Selecione pelo menos uma cor e informe a quantidade de rolos.'); return; }
+      // valor do corte é do lote inteiro (cortadas juntas) — divide proporcional aos rolos de
+      // cada cor, pra cada ordem individual carregar seu pedaço justo do custo do corte
+      const totalRolos = linhas.reduce((a, l) => a + l.rolos, 0);
+      let somaParcialCorte = 0;
+      for (let i = 0; i < linhas.length; i++) {
+        const ultima = i === linhas.length - 1;
+        const valorCorteLinha = ultima
+          ? Math.round((valorCorte - somaParcialCorte) * 100) / 100
+          : Math.round((valorCorte * (linhas[i].rolos / totalRolos)) * 100) / 100;
+        somaParcialCorte += valorCorteLinha;
+        const ok = await criarOrdemCorte(linhas[i].cor, linhas[i].rolos, linhas[i].valor, data, 'principal', valorCorteLinha);
+        if (!ok) return;
+      }
+      state.showOrdemCorteForm = false;
+      window.__ordemTipo = 'principal';
+      window.__numCoresOrdemCorte = 1;
+      await loadData();
     } else {
       const cor = document.getElementById('ordemCorRetalho').value.trim() || 'Retalhos';
       if (!valorCorte || valorCorte <= 0) { alert('Informe o valor pago pelo corte dos retalhos.'); return; }
