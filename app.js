@@ -4142,13 +4142,14 @@ function render() {
     renderGate(app);
     return;
   }
-  if (state.papel === 'supervisora') {
-    renderModoSupervisora(app);
-    return;
-  }
   if (state.papel === 'ponto') {
     renderModoPonto(app);
     return;
+  }
+  // supervisora usa a mesma navegação por abas, só que travada em Estoque e Produção —
+  // sem acesso a Financeiro, Vendas, RH, DRE, nem ao saldo de caixa da empresa
+  if (state.papel === 'supervisora' && state.tab !== 'estoque' && state.tab !== 'producao') {
+    state.tab = 'estoque';
   }
   const c = getComputed();
   const positivo = c.saldoTotal >= 0;
@@ -4164,15 +4165,26 @@ function render() {
     <div class="header">
       <div>
         <div class="brand-row"><div class="brand-dot"></div><span class="brand-name">ROSA JULIETA</span></div>
-        <div class="brand-sub"><span class="sync-dot"></span>Painel de Gestão</div>
+        <div class="brand-sub"><span class="sync-dot"></span>${state.papel === 'supervisora' ? 'Estoque e Produção' : 'Painel de Gestão'}</div>
       </div>
-      <div class="saldo-box">
-        <div class="saldo-label">Saldo disponível</div>
-        <div class="saldo-value" style="color:${positivo ? 'var(--teal)' : 'var(--red)'}">${fmt(c.saldoTotal)}</div>
-        <button class="sair-link" id="sairApp">Trocar código</button>
-      </div>
+      ${state.papel === 'supervisora' ? `
+        <div class="saldo-box">
+          <button class="sair-link" id="sairApp">Trocar código</button>
+        </div>
+      ` : `
+        <div class="saldo-box">
+          <div class="saldo-label">Saldo disponível</div>
+          <div class="saldo-value" style="color:${positivo ? 'var(--teal)' : 'var(--red)'}">${fmt(c.saldoTotal)}</div>
+          <button class="sair-link" id="sairApp">Trocar código</button>
+        </div>
+      `}
     </div>
-    ${renderTabsBar(c)}
+    ${state.papel === 'supervisora' ? `
+      <div class="tabs-wrap">
+        ${tabBtn('estoque', TABS.estoque.label)}
+        ${tabBtn('producao', TABS.producao.label)}
+      </div>
+    ` : renderTabsBar(c)}
     <div class="content" id="tabContent"></div>
   `;
 
