@@ -316,6 +316,7 @@ const state = {
   showCompraTecidoForm: false,
   showOrdemCorteForm: false,
   ordemConcluindoId: null,
+  grupoConcluindoId: null,
   insumos: [],
   showCompraInsumoForm: false,
   showBaixaInsumoId: null,
@@ -739,6 +740,13 @@ async function concluirOrdemCorte(ordemId, itens) {
 async function removeOrdemCorte(id) {
   const ordem = state.ordensCorte.find((o) => o.id === id);
   if (ordem && ordem.transacaoCorteId) await removeTx(ordem.transacaoCorteId);
+  // devolve os rolos pro estoque de matéria-prima — só se foi corte principal AINDA
+  // aguardando resultado (se já tinha sido concluído, o tecido virou peça de verdade,
+  // não deve "reaparecer" no estoque de matéria-prima)
+  if (ordem && ordem.tipo === 'principal' && ordem.status === 'aguardando' && ordem.quantidadeRolos > 0) {
+    const materia = state.materiaPrima.find((m) => m.cor.trim().toLowerCase() === ordem.cor.trim().toLowerCase());
+    if (materia) await sb.from('materia_prima').update({ rolos_disponiveis: materia.rolosDisponiveis + ordem.quantidadeRolos }).eq('id', materia.id);
+  }
   const { error } = await sb.from('ordens_corte').delete().eq('id', id);
   if (error) alert('Erro ao remover ordem: ' + error.message);
 }
@@ -3483,62 +3491,121 @@ function renderCorte(c) {
 
     ${aguardando.length === 0 ? '' : `
       <div style="display:grid;grid-template-columns:${gridColumnsStyle('corteAguardando', 240)};gap:10px;margin-bottom:20px">
-        ${aguardando.map((o) => {
-          if (state.editingOrdemCorteId === o.id) {
-            return `
-              <div class="form-card" style="grid-column:1 / -1">
-                <input type="text" id="editOrdemCor-${o.id}" placeholder="Cor" value="${esc(o.cor)}" />
-                <div class="form-row">
-                  <input type="text" id="editOrdemRolos-${o.id}" placeholder="Rolos" value="${o.quantidadeRolos}" />
-                  <input type="text" id="editOrdemValorTecido-${o.id}" placeholder="Valor do tecido (R$)" value="${o.valorTecido.toFixed(2).replace('.', ',')}" />
-                </div>
-                <div class="form-row">
-                  <input type="text" id="editOrdemValorCorte-${o.id}" placeholder="Valor do corte (R$)" value="${o.valorCorte.toFixed(2).replace('.', ',')}" />
-                  <input type="date" id="editOrdemData-${o.id}" value="${o.dataEnvio}" />
-                </div>
-                <div class="form-row">
-                  <button class="confirm-btn" data-salvar-edit-ordem="${o.id}">Salvar</button>
-                  <button class="toggle-btn" data-cancelar-edit-ordem="${o.id}">Cancelar</button>
-                </div>
-              </div>
-            `;
-          }
-          const expandido = state.ordemConcluindoId === o.id;
-          const outrasDoGrupo = o.grupoId ? state.ordensCorte.filter((x) => x.grupoId === o.grupoId && x.id !== o.id) : [];
-          return `
-          <div class="produto-card" style="border-color:var(--amber)55${expandido ? ';grid-column:1 / -1' : ''}">
-            <div class="produto-header">
-              <div>
-                <div class="produto-nome">${o.tipo === 'retalho' ? '♻️ ' : ''}${esc(o.cor)}${o.quantidadeRolos > 0 ? ` — ${o.quantidadeRolos} rolo(s)` : ''}</div>
-                <div class="produto-sku">Enviado em ${o.dataEnvio} · ${o.valorTecido > 0 ? fmt(o.valorTecido) + ' tecido' : ''}${o.valorCorte > 0 ? `${o.valorTecido > 0 ? ' + ' : ''}${fmt(o.valorCorte)} corte` : ''} · 🟡 Aguardando resultado</div>
-                ${outrasDoGrupo.length > 0 ? `<div style="font-size:11px;color:var(--teal);margin-top:2px">🔗 Cortada junto com: ${outrasDoGrupo.map((x) => esc(x.cor)).join(', ')}</div>` : ''}
-              </div>
-              <div style="display:flex;gap:2px">
-                <button class="trash-btn" data-editar-ordem="${o.id}">✏️</button>
-                <button class="trash-btn" data-remover-ordem="${o.id}">🗑</button>
-              </div>
-            </div>
-            ${expandido ? `
-              <div class="entrada-box">
-                <div class="form-hint">Quantas peças de cada modelo saíram desse corte?</div>
-                ${[0, 1, 2, 3, 4].map((i) => `
+        ${(() => {
+          // agrupa por grupoId (cores cortadas juntas viram 1 card só); ordens sem grupo
+          // continuam cada uma com seu próprio card, como sempre foi
+          const jaRenderizado = new Set();
+          const cartoes = [];
+          aguardando.forEach((o) => {
+            if (jaRenderizado.has(o.id)) return;
+            if (o.grupoId) {
+              const doGrupo = aguardando.filter((x) => x.grupoId === o.grupoId);
+              doGrupo.forEach((x) => jaRenderizado.add(x.id));
+              cartoes.push({ tipo: 'grupo', ordens: doGrupo });
+            } else {
+              jaRenderizado.add(o.id);
+              cartoes.push({ tipo: 'individual', ordens: [o] });
+            }
+          });
+          return cartoes.map(({ tipo, ordens: ordensDoCartao }) => {
+            const o = ordensDoCartao[0];
+            if (state.editingOrdemCorteId === o.id) {
+              return `
+                <div class="form-card" style="grid-column:1 / -1">
+                  <input type="text" id="editOrdemCor-${o.id}" placeholder="Cor" value="${esc(o.cor)}" />
                   <div class="form-row">
-                    <select id="corteItemProduto-${o.id}-${i}">
-                      <option value="">Modelo (opcional)</option>
-                      ${state.produtos.map((p) => `<option value="${p.id}">${esc(p.nome)}</option>`).join('')}
-                    </select>
-                    <input type="text" id="corteItemQtd-${o.id}-${i}" placeholder="Peças" inputmode="numeric" />
+                    <input type="text" id="editOrdemRolos-${o.id}" placeholder="Rolos" value="${o.quantidadeRolos}" />
+                    <input type="text" id="editOrdemValorTecido-${o.id}" placeholder="Valor do tecido (R$)" value="${o.valorTecido.toFixed(2).replace('.', ',')}" />
                   </div>
-                `).join('')}
-                <div class="form-row">
-                  <button class="confirm-btn" data-confirmar-conclusao="${o.id}">Salvar resultado</button>
-                  <button class="toggle-btn" data-cancelar-conclusao="${o.id}">Cancelar</button>
+                  <div class="form-row">
+                    <input type="text" id="editOrdemValorCorte-${o.id}" placeholder="Valor do corte (R$)" value="${o.valorCorte.toFixed(2).replace('.', ',')}" />
+                    <input type="date" id="editOrdemData-${o.id}" value="${o.dataEnvio}" />
+                  </div>
+                  <div class="form-row">
+                    <button class="confirm-btn" data-salvar-edit-ordem="${o.id}">Salvar</button>
+                    <button class="toggle-btn" data-cancelar-edit-ordem="${o.id}">Cancelar</button>
+                  </div>
+                </div>
+              `;
+            }
+
+            if (tipo === 'grupo') {
+              const chaveGrupo = o.grupoId;
+              const expandidoGrupo = state.grupoConcluindoId === chaveGrupo;
+              const totalRolosGrupo = ordensDoCartao.reduce((a, x) => a + x.quantidadeRolos, 0);
+              const totalTecidoGrupo = ordensDoCartao.reduce((a, x) => a + x.valorTecido, 0);
+              const totalCorteGrupo = ordensDoCartao.reduce((a, x) => a + x.valorCorte, 0);
+              return `
+              <div class="produto-card" style="border-color:var(--teal)55${expandidoGrupo ? ';grid-column:1 / -1' : ''}">
+                <div class="produto-header">
+                  <div>
+                    <div class="produto-nome">🔗 ${ordensDoCartao.map((x) => esc(x.cor)).join(' + ')} — ${totalRolosGrupo} rolo(s)</div>
+                    <div class="produto-sku">Enviado em ${o.dataEnvio} · ${fmt(totalTecidoGrupo + totalCorteGrupo)} no total · 🟡 Aguardando resultado</div>
+                  </div>
+                </div>
+                <div class="prod-breakdown" style="margin-top:6px">
+                  ${ordensDoCartao.map((x) => `<div class="prod-breakdown-item"><span>${esc(x.cor)} — ${x.quantidadeRolos} rolo(s)</span><span>${fmt(x.valorTecido + x.valorCorte)}<button class="trash-btn" style="padding:2px 4px" data-editar-ordem="${x.id}">✏️</button><button class="trash-btn" style="padding:2px 4px" data-remover-ordem="${x.id}">🗑</button></span></div>`).join('')}
+                </div>
+                ${expandidoGrupo ? `
+                  <div class="entrada-box">
+                    <div class="form-hint">Quantas peças de cada modelo, e de qual cor?</div>
+                    ${[0, 1, 2, 3, 4, 5, 6].map((i) => `
+                      <div class="form-row">
+                        <select id="grupoItemProduto-${chaveGrupo}-${i}">
+                          <option value="">Modelo (opcional)</option>
+                          ${state.produtos.map((p) => `<option value="${p.id}">${esc(p.nome)}</option>`).join('')}
+                        </select>
+                        <select id="grupoItemCor-${chaveGrupo}-${i}">
+                          ${ordensDoCartao.map((x) => `<option value="${x.id}">${esc(x.cor)}</option>`).join('')}
+                        </select>
+                        <input type="text" id="grupoItemQtd-${chaveGrupo}-${i}" placeholder="Peças" inputmode="numeric" />
+                      </div>
+                    `).join('')}
+                    <div class="form-row">
+                      <button class="confirm-btn" data-confirmar-conclusao-grupo="${chaveGrupo}">Salvar resultado</button>
+                      <button class="toggle-btn" data-cancelar-conclusao-grupo="1">Cancelar</button>
+                    </div>
+                  </div>
+                ` : `<button class="entrada-btn" data-abrir-conclusao-grupo="${chaveGrupo}">📋 Registrar resultado do corte</button>`}
+              </div>
+              `;
+            }
+
+            const expandido = state.ordemConcluindoId === o.id;
+            return `
+            <div class="produto-card" style="border-color:var(--amber)55${expandido ? ';grid-column:1 / -1' : ''}">
+              <div class="produto-header">
+                <div>
+                  <div class="produto-nome">${o.tipo === 'retalho' ? '♻️ ' : ''}${esc(o.cor)}${o.quantidadeRolos > 0 ? ` — ${o.quantidadeRolos} rolo(s)` : ''}</div>
+                  <div class="produto-sku">Enviado em ${o.dataEnvio} · ${o.valorTecido > 0 ? fmt(o.valorTecido) + ' tecido' : ''}${o.valorCorte > 0 ? `${o.valorTecido > 0 ? ' + ' : ''}${fmt(o.valorCorte)} corte` : ''} · 🟡 Aguardando resultado</div>
+                </div>
+                <div style="display:flex;gap:2px">
+                  <button class="trash-btn" data-editar-ordem="${o.id}">✏️</button>
+                  <button class="trash-btn" data-remover-ordem="${o.id}">🗑</button>
                 </div>
               </div>
-            ` : `<button class="entrada-btn" data-abrir-conclusao="${o.id}">📋 Registrar resultado do corte</button>`}
-          </div>
-        `;
-        }).join('')}
+              ${expandido ? `
+                <div class="entrada-box">
+                  <div class="form-hint">Quantas peças de cada modelo saíram desse corte?</div>
+                  ${[0, 1, 2, 3, 4].map((i) => `
+                    <div class="form-row">
+                      <select id="corteItemProduto-${o.id}-${i}">
+                        <option value="">Modelo (opcional)</option>
+                        ${state.produtos.map((p) => `<option value="${p.id}">${esc(p.nome)}</option>`).join('')}
+                      </select>
+                      <input type="text" id="corteItemQtd-${o.id}-${i}" placeholder="Peças" inputmode="numeric" />
+                    </div>
+                  `).join('')}
+                  <div class="form-row">
+                    <button class="confirm-btn" data-confirmar-conclusao="${o.id}">Salvar resultado</button>
+                    <button class="toggle-btn" data-cancelar-conclusao="${o.id}">Cancelar</button>
+                  </div>
+                </div>
+              ` : `<button class="entrada-btn" data-abrir-conclusao="${o.id}">📋 Registrar resultado do corte</button>`}
+            </div>
+          `;
+          }).join('');
+        })()}
       </div>
     `}
 
@@ -7709,6 +7776,37 @@ function attachTecidoHandlers(c) {
       if (!itens.length) { alert('Informe pelo menos um modelo e quantidade de peças.'); return; }
       await concluirOrdemCorte(ordemId, itens);
       state.ordemConcluindoId = null;
+      await loadData();
+    });
+  });
+
+  document.querySelectorAll('[data-abrir-conclusao-grupo]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.grupoConcluindoId = btn.dataset.abrirConclusaoGrupo; render(); });
+  });
+  document.querySelectorAll('[data-cancelar-conclusao-grupo]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.grupoConcluindoId = null; render(); });
+  });
+  document.querySelectorAll('[data-confirmar-conclusao-grupo]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const grupoId = btn.dataset.confirmarConclusaoGrupo;
+      // cada linha tem produto + qual ordem (cor) ela veio — agrupa os itens por ordem,
+      // já que cada cor do lote continua sendo uma ordem_corte separada por baixo dos panos
+      const itensPorOrdem = {};
+      for (let i = 0; i < 7; i++) {
+        const produtoId = document.getElementById(`grupoItemProduto-${grupoId}-${i}`)?.value;
+        const ordemIdDaLinha = document.getElementById(`grupoItemCor-${grupoId}-${i}`)?.value;
+        const quantidade = Number(document.getElementById(`grupoItemQtd-${grupoId}-${i}`)?.value);
+        if (produtoId && ordemIdDaLinha && quantidade > 0) {
+          if (!itensPorOrdem[ordemIdDaLinha]) itensPorOrdem[ordemIdDaLinha] = [];
+          itensPorOrdem[ordemIdDaLinha].push({ produtoId, quantidade });
+        }
+      }
+      const ordensComItens = Object.keys(itensPorOrdem);
+      if (ordensComItens.length === 0) { alert('Informe pelo menos um modelo, a cor e a quantidade de peças.'); return; }
+      for (const ordemId of ordensComItens) {
+        await concluirOrdemCorte(ordemId, itensPorOrdem[ordemId]);
+      }
+      state.grupoConcluindoId = null;
       await loadData();
     });
   });
