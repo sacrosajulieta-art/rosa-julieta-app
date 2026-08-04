@@ -448,7 +448,7 @@ async function loadData() {
   state.producoes = (producoes || []).map((p) => ({ id: p.id, costureiraId: p.costureira_id, produtoId: p.produto_id, quantidade: p.quantidade, data: p.data, pago: p.pago, varianteId: p.variante_id || null }));
   state.variantes = (variantes || []).map((v) => ({ id: v.id, produtoId: v.produto_id, nome: v.nome, estoqueAtual: v.estoque_atual, skuVariante: v.sku_variante }));
   state.materiaPrima = (materiaPrima || []).map((m) => ({ id: m.id, cor: m.cor, rolosDisponiveis: m.rolos_disponiveis, custoMedioRolo: Number(m.custo_medio_rolo || 0) }));
-  state.ordensCorte = (ordensCorte || []).map((o) => ({ id: o.id, cor: o.cor, quantidadeRolos: o.quantidade_rolos, valorTecido: Number(o.valor_tecido), dataEnvio: o.data_envio, status: o.status, dataConclusao: o.data_conclusao, tipo: o.tipo || 'principal', valorCorte: Number(o.valor_corte || 0), transacaoCorteId: o.transacao_corte_id || null }));
+  state.ordensCorte = (ordensCorte || []).map((o) => ({ id: o.id, cor: o.cor, quantidadeRolos: o.quantidade_rolos, valorTecido: Number(o.valor_tecido), dataEnvio: o.data_envio, status: o.status, dataConclusao: o.data_conclusao, tipo: o.tipo || 'principal', valorCorte: Number(o.valor_corte || 0), transacaoCorteId: o.transacao_corte_id || null, grupoId: o.grupo_id || null }));
   state.ordensCorteItens = (ordensCorteItens || []).map((i) => ({ id: i.id, ordemId: i.ordem_id, produtoId: i.produto_id, quantidade: i.quantidade, varianteId: i.variante_id || null }));
   state.insumos = (insumos || []).map((i) => ({ id: i.id, nome: i.nome, unidade: i.unidade, quantidadeDisponivel: Number(i.quantidade_disponivel), custoMedioUnitario: Number(i.custo_medio_unitario), usadoNoEnvio: !!i.usado_no_envio, qtdVendaManual: Number(i.qtd_venda_manual ?? 1) }));
   state.distribuicoes = (distribuicoes || []).map((d) => ({ id: d.id, ordemItemId: d.ordem_item_id, produtoId: d.produto_id, varianteId: d.variante_id || null, costureiraId: d.costureira_id, quantidadeDistribuida: d.quantidade_distribuida, quantidadeDevolvida: d.quantidade_devolvida, data: d.data }));
@@ -707,7 +707,7 @@ async function removeMateriaPrima(id) {
   const { error } = await sb.from('materia_prima').delete().eq('id', id);
   if (error) alert('Erro ao remover matéria-prima: ' + error.message);
 }
-async function criarOrdemCorte(cor, quantidadeRolos, valorTecido, dataEnvio, tipo, valorCorte) {
+async function criarOrdemCorte(cor, quantidadeRolos, valorTecido, dataEnvio, tipo, valorCorte, grupoId) {
   if (tipo === 'principal') {
     const materia = state.materiaPrima.find((m) => m.cor.trim().toLowerCase() === cor.trim().toLowerCase());
     if (!materia || materia.rolosDisponiveis < quantidadeRolos) {
@@ -716,7 +716,7 @@ async function criarOrdemCorte(cor, quantidadeRolos, valorTecido, dataEnvio, tip
     if (materia) await sb.from('materia_prima').update({ rolos_disponiveis: Math.max(0, materia.rolosDisponiveis - quantidadeRolos) }).eq('id', materia.id);
   }
   const { data: ordemCriada, error } = await sb.from('ordens_corte').insert({
-    cor, quantidade_rolos: quantidadeRolos, valor_tecido: valorTecido, data_envio: dataEnvio, status: 'aguardando', tipo, valor_corte: valorCorte || 0,
+    cor, quantidade_rolos: quantidadeRolos, valor_tecido: valorTecido, data_envio: dataEnvio, status: 'aguardando', tipo, valor_corte: valorCorte || 0, grupo_id: grupoId || null,
   }).select().single();
   if (error) { alert('Erro ao criar ordem de corte: ' + error.message); return false; }
   if (valorCorte > 0) {
@@ -3504,12 +3504,14 @@ function renderCorte(c) {
             `;
           }
           const expandido = state.ordemConcluindoId === o.id;
+          const outrasDoGrupo = o.grupoId ? state.ordensCorte.filter((x) => x.grupoId === o.grupoId && x.id !== o.id) : [];
           return `
           <div class="produto-card" style="border-color:var(--amber)55${expandido ? ';grid-column:1 / -1' : ''}">
             <div class="produto-header">
               <div>
                 <div class="produto-nome">${o.tipo === 'retalho' ? '♻️ ' : ''}${esc(o.cor)}${o.quantidadeRolos > 0 ? ` — ${o.quantidadeRolos} rolo(s)` : ''}</div>
                 <div class="produto-sku">Enviado em ${o.dataEnvio} · ${o.valorTecido > 0 ? fmt(o.valorTecido) + ' tecido' : ''}${o.valorCorte > 0 ? `${o.valorTecido > 0 ? ' + ' : ''}${fmt(o.valorCorte)} corte` : ''} · 🟡 Aguardando resultado</div>
+                ${outrasDoGrupo.length > 0 ? `<div style="font-size:11px;color:var(--teal);margin-top:2px">🔗 Cortada junto com: ${outrasDoGrupo.map((x) => esc(x.cor)).join(', ')}</div>` : ''}
               </div>
               <div style="display:flex;gap:2px">
                 <button class="trash-btn" data-editar-ordem="${o.id}">✏️</button>
@@ -3578,6 +3580,7 @@ function renderCorte(c) {
             return x.quantidadeRolos > 0 ? tot / x.quantidadeRolos : null;
           }).filter((v) => v !== null);
           const mediaAnterior = rendimentosAnteriores.length ? rendimentosAnteriores.reduce((a, v) => a + v, 0) / rendimentosAnteriores.length : null;
+          const outrasDoGrupoConcluida = o.grupoId ? state.ordensCorte.filter((x) => x.grupoId === o.grupoId && x.id !== o.id) : [];
 
           return `
             <div class="produto-card"${state.distribuindoOrdemId === o.id ? ' style="grid-column:1 / -1"' : ''}>
@@ -3585,6 +3588,7 @@ function renderCorte(c) {
                 <div>
                   <div class="produto-nome">${o.tipo === 'retalho' ? '♻️ ' : ''}${esc(o.cor)}${o.quantidadeRolos > 0 ? ` — ${o.quantidadeRolos} rolo(s)` : ''}</div>
                   <div class="produto-sku">${o.dataEnvio} → ${o.dataConclusao} · ${o.valorTecido > 0 ? fmt(o.valorTecido) + ' tecido' : ''}${o.valorCorte > 0 ? `${o.valorTecido > 0 ? ' + ' : ''}${fmt(o.valorCorte)} corte` : ''}</div>
+                  ${outrasDoGrupoConcluida.length > 0 ? `<div style="font-size:11px;color:var(--teal);margin-top:2px">🔗 Cortada junto com: ${outrasDoGrupoConcluida.map((x) => esc(x.cor)).join(', ')}</div>` : ''}
                 </div>
                 <div style="display:flex;gap:2px">
                   <button class="trash-btn" data-editar-ordem="${o.id}">✏️</button>
@@ -7655,6 +7659,7 @@ function attachTecidoHandlers(c) {
       // valor do corte é do lote inteiro (cortadas juntas) — divide proporcional aos rolos de
       // cada cor, pra cada ordem individual carregar seu pedaço justo do custo do corte
       const totalRolos = linhas.reduce((a, l) => a + l.rolos, 0);
+      const grupoId = linhas.length > 1 ? crypto.randomUUID() : null;
       let somaParcialCorte = 0;
       for (let i = 0; i < linhas.length; i++) {
         const ultima = i === linhas.length - 1;
@@ -7662,7 +7667,7 @@ function attachTecidoHandlers(c) {
           ? Math.round((valorCorte - somaParcialCorte) * 100) / 100
           : Math.round((valorCorte * (linhas[i].rolos / totalRolos)) * 100) / 100;
         somaParcialCorte += valorCorteLinha;
-        const ok = await criarOrdemCorte(linhas[i].cor, linhas[i].rolos, linhas[i].valor, data, 'principal', valorCorteLinha);
+        const ok = await criarOrdemCorte(linhas[i].cor, linhas[i].rolos, linhas[i].valor, data, 'principal', valorCorteLinha, grupoId);
         if (!ok) return;
       }
       state.showOrdemCorteForm = false;
