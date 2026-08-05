@@ -3612,7 +3612,25 @@ function renderCorte(c) {
     </div>
     ${concluidas.length === 0 ? `<div class="empty-state">Nenhum corte concluído ainda.</div>` : `
       <div style="display:grid;grid-template-columns:${gridColumnsStyle('corteConcluidos', 240)};gap:10px">
-        ${concluidas.map((o) => {
+        ${(() => {
+          const jaRenderizadoConcluido = new Set();
+          const listaDeduplicada = [];
+          concluidas.forEach((o) => {
+            if (jaRenderizadoConcluido.has(o.id)) return;
+            if (o.grupoId) {
+              const doGrupo = concluidas.filter((x) => x.grupoId === o.grupoId);
+              doGrupo.forEach((x) => jaRenderizadoConcluido.add(x.id));
+              // usa como card principal quem realmente tem os itens registrados (o "representante"
+              // escolhido lá na hora de fechar o resultado do corte em grupo)
+              const comItens = doGrupo.find((x) => state.ordensCorteItens.some((i) => i.ordemId === x.id));
+              listaDeduplicada.push(comItens || doGrupo[0]);
+            } else {
+              jaRenderizadoConcluido.add(o.id);
+              listaDeduplicada.push(o);
+            }
+          });
+          return listaDeduplicada;
+        })().map((o) => {
           if (state.editingOrdemCorteId === o.id) {
             return `
               <div class="form-card" style="grid-column:1 / -1">
@@ -3659,9 +3677,9 @@ function renderCorte(c) {
             <div class="produto-card"${state.distribuindoOrdemId === o.id ? ' style="grid-column:1 / -1"' : ''}>
               <div class="produto-header">
                 <div>
-                  <div class="produto-nome">${o.tipo === 'retalho' ? '♻️ ' : ''}${esc(o.cor)}${o.quantidadeRolos > 0 ? ` — ${o.quantidadeRolos} rolo(s)` : ''}</div>
-                  <div class="produto-sku">${o.dataEnvio} → ${o.dataConclusao} · ${o.valorTecido > 0 ? fmt(o.valorTecido) + ' tecido' : ''}${o.valorCorte > 0 ? `${o.valorTecido > 0 ? ' + ' : ''}${fmt(o.valorCorte)} corte` : ''}</div>
-                  ${outrasDoGrupoConcluida.length > 0 ? `<div style="font-size:11px;color:var(--teal);margin-top:2px">🔗 Cortada junto com: ${outrasDoGrupoConcluida.map((x) => esc(x.cor)).join(', ')} — custo e peças abaixo são do lote inteiro</div>` : ''}
+                  <div class="produto-nome">${outrasDoGrupoConcluida.length > 0 ? `🔗 ${membrosDoGrupo.map((x) => esc(x.cor)).join(' + ')} — ${totalRolosCombo} rolo(s)` : `${o.tipo === 'retalho' ? '♻️ ' : ''}${esc(o.cor)}${o.quantidadeRolos > 0 ? ` — ${o.quantidadeRolos} rolo(s)` : ''}`}</div>
+                  <div class="produto-sku">${o.dataEnvio} → ${o.dataConclusao} · ${fmt(custoTotal)} no total</div>
+                  ${outrasDoGrupoConcluida.length > 0 ? `<div style="font-size:11px;color:var(--teal);margin-top:2px">${membrosDoGrupo.map((x) => `${esc(x.cor)} (${fmt(x.valorTecido + x.valorCorte)})`).join(' + ')}</div>` : ''}
                 </div>
                 <div style="display:flex;gap:2px">
                   <button class="trash-btn" data-editar-ordem="${o.id}">✏️</button>
