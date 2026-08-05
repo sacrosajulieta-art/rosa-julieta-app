@@ -3548,17 +3548,14 @@ function renderCorte(c) {
                 </div>
                 ${expandidoGrupo ? `
                   <div class="entrada-box">
-                    <div class="form-hint">Quantas peças de cada modelo, e de qual cor?</div>
+                    <div class="form-hint">Quantas peças de cada modelo saíram desse corte (total, sem separar por cor — o sistema divide o custo sozinho, proporcional aos rolos de cada cor)?</div>
                     ${[0, 1, 2, 3, 4, 5, 6].map((i) => `
                       <div class="form-row">
                         <select id="grupoItemProduto-${chaveGrupo}-${i}">
                           <option value="">Modelo (opcional)</option>
                           ${state.produtos.map((p) => `<option value="${p.id}">${esc(p.nome)}</option>`).join('')}
                         </select>
-                        <select id="grupoItemCor-${chaveGrupo}-${i}">
-                          ${ordensDoCartao.map((x) => `<option value="${x.id}">${esc(x.cor)}</option>`).join('')}
-                        </select>
-                        <input type="text" id="grupoItemQtd-${chaveGrupo}-${i}" placeholder="Peças" inputmode="numeric" />
+                        <input type="text" id="grupoItemQtd-${chaveGrupo}-${i}" placeholder="Peças (total, misturadas)" inputmode="numeric" />
                       </div>
                     `).join('')}
                     <div class="form-row">
@@ -3636,10 +3633,20 @@ function renderCorte(c) {
             `;
           }
           const itens = state.ordensCorteItens.filter((i) => i.ordemId === o.id);
-          const totalPecas = itens.reduce((a, i) => a + i.quantidade, 0);
-          const custoTotal = o.valorTecido + o.valorCorte;
+          const outrasDoGrupoConcluida = o.grupoId ? state.ordensCorte.filter((x) => x.grupoId === o.grupoId && x.id !== o.id) : [];
+          const membrosDoGrupo = [o, ...outrasDoGrupoConcluida];
+          // se for corte em grupo (várias cores juntas), o custo e o rendimento consideram
+          // o lote inteiro — os itens ficam registrados numa ordem só, mas o custo é de
+          // todas as cores que entraram no corte misturado
+          const totalPecas = o.grupoId
+            ? membrosDoGrupo.reduce((a, m) => a + state.ordensCorteItens.filter((i) => i.ordemId === m.id).reduce((a2, i) => a2 + i.quantidade, 0), 0)
+            : itens.reduce((a, i) => a + i.quantidade, 0);
+          const custoTotal = o.grupoId
+            ? membrosDoGrupo.reduce((a, m) => a + m.valorTecido + m.valorCorte, 0)
+            : o.valorTecido + o.valorCorte;
+          const totalRolosCombo = o.grupoId ? membrosDoGrupo.reduce((a, m) => a + m.quantidadeRolos, 0) : o.quantidadeRolos;
           const custoPorPeca = totalPecas > 0 ? custoTotal / totalPecas : 0;
-          const rendimento = o.quantidadeRolos > 0 ? totalPecas / o.quantidadeRolos : null;
+          const rendimento = totalRolosCombo > 0 ? totalPecas / totalRolosCombo : null;
           const outrasDaCor = concluidas.filter((x) => x.id !== o.id && x.cor === o.cor && x.tipo === 'principal');
           const rendimentosAnteriores = outrasDaCor.map((x) => {
             const its = state.ordensCorteItens.filter((i) => i.ordemId === x.id);
@@ -3647,7 +3654,6 @@ function renderCorte(c) {
             return x.quantidadeRolos > 0 ? tot / x.quantidadeRolos : null;
           }).filter((v) => v !== null);
           const mediaAnterior = rendimentosAnteriores.length ? rendimentosAnteriores.reduce((a, v) => a + v, 0) / rendimentosAnteriores.length : null;
-          const outrasDoGrupoConcluida = o.grupoId ? state.ordensCorte.filter((x) => x.grupoId === o.grupoId && x.id !== o.id) : [];
 
           return `
             <div class="produto-card"${state.distribuindoOrdemId === o.id ? ' style="grid-column:1 / -1"' : ''}>
@@ -3655,7 +3661,7 @@ function renderCorte(c) {
                 <div>
                   <div class="produto-nome">${o.tipo === 'retalho' ? '♻️ ' : ''}${esc(o.cor)}${o.quantidadeRolos > 0 ? ` — ${o.quantidadeRolos} rolo(s)` : ''}</div>
                   <div class="produto-sku">${o.dataEnvio} → ${o.dataConclusao} · ${o.valorTecido > 0 ? fmt(o.valorTecido) + ' tecido' : ''}${o.valorCorte > 0 ? `${o.valorTecido > 0 ? ' + ' : ''}${fmt(o.valorCorte)} corte` : ''}</div>
-                  ${outrasDoGrupoConcluida.length > 0 ? `<div style="font-size:11px;color:var(--teal);margin-top:2px">🔗 Cortada junto com: ${outrasDoGrupoConcluida.map((x) => esc(x.cor)).join(', ')}</div>` : ''}
+                  ${outrasDoGrupoConcluida.length > 0 ? `<div style="font-size:11px;color:var(--teal);margin-top:2px">🔗 Cortada junto com: ${outrasDoGrupoConcluida.map((x) => esc(x.cor)).join(', ')} — custo e peças abaixo são do lote inteiro</div>` : ''}
                 </div>
                 <div style="display:flex;gap:2px">
                   <button class="trash-btn" data-editar-ordem="${o.id}">✏️</button>
@@ -7801,22 +7807,22 @@ function attachTecidoHandlers(c) {
   document.querySelectorAll('[data-confirmar-conclusao-grupo]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const grupoId = btn.dataset.confirmarConclusaoGrupo;
-      // cada linha tem produto + qual ordem (cor) ela veio — agrupa os itens por ordem,
-      // já que cada cor do lote continua sendo uma ordem_corte separada por baixo dos panos
-      const itensPorOrdem = {};
+      const ordensDoGrupo = state.ordensCorte.filter((o) => o.grupoId === grupoId);
+      const itensTotais = [];
       for (let i = 0; i < 7; i++) {
         const produtoId = document.getElementById(`grupoItemProduto-${grupoId}-${i}`)?.value;
-        const ordemIdDaLinha = document.getElementById(`grupoItemCor-${grupoId}-${i}`)?.value;
         const quantidade = Number(document.getElementById(`grupoItemQtd-${grupoId}-${i}`)?.value);
-        if (produtoId && ordemIdDaLinha && quantidade > 0) {
-          if (!itensPorOrdem[ordemIdDaLinha]) itensPorOrdem[ordemIdDaLinha] = [];
-          itensPorOrdem[ordemIdDaLinha].push({ produtoId, quantidade });
-        }
+        if (produtoId && quantidade > 0) itensTotais.push({ produtoId, quantidade });
       }
-      const ordensComItens = Object.keys(itensPorOrdem);
-      if (ordensComItens.length === 0) { alert('Informe pelo menos um modelo, a cor e a quantidade de peças.'); return; }
-      for (const ordemId of ordensComItens) {
-        await concluirOrdemCorte(ordemId, itensPorOrdem[ordemId]);
+      if (itensTotais.length === 0) { alert('Informe pelo menos um modelo e a quantidade de peças.'); return; }
+      // não divide nada por cor — grava o total combinado numa ordem "representante" do
+      // grupo (a primeira), e só marca as outras cores do mesmo grupo como concluídas junto,
+      // sem itens próprios. A separação por cor de verdade só acontece quando a costureira
+      // devolver as peças prontas, lá em "Registrar produção" (onde já dá pra escolher a cor)
+      const [representante, ...outras] = ordensDoGrupo;
+      await concluirOrdemCorte(representante.id, itensTotais);
+      for (const outra of outras) {
+        await concluirOrdemCorte(outra.id, []);
       }
       state.grupoConcluindoId = null;
       await loadData();
