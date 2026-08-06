@@ -371,6 +371,8 @@ const state = {
   showFeriadosForm: false,
   empresaConfig: { cnpj: '', razaoSocial: '', nomeFantasia: '', endereco: '', telefone: '' },
   showEmpresaConfigForm: false,
+  importacoesVendas: [],
+  showImportacoesVendas: false,
   holeriteMes: null,
   holeriteDataPagamento: null,
   showLancamentoBanco: false,
@@ -384,7 +386,7 @@ const state = {
 
 // ==================== DATA LAYER ====================
 async function loadData() {
-  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }, { data: feriasTiradas, error: e16 }, { data: solicitacoesPonto, error: e17 }, { data: horasExtrasLiquidadas, error: e18 }, { data: bancoHorasLancamentos, error: e19 }, { data: emprestimos, error: e20 }, { data: emprestimoParcelas, error: e21 }, { data: cartoesCredito, error: e22 }, { data: vendasSkuPendentes, error: e23 }, { data: vendasDetalhe, error: e24 }, { data: abonosPonto, error: e25 }, { data: holerites, error: e26 }, { data: feriados, error: e27 }, { data: empresaConfig, error: e28 }] = await Promise.all([
+  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }, { data: feriasTiradas, error: e16 }, { data: solicitacoesPonto, error: e17 }, { data: horasExtrasLiquidadas, error: e18 }, { data: bancoHorasLancamentos, error: e19 }, { data: emprestimos, error: e20 }, { data: emprestimoParcelas, error: e21 }, { data: cartoesCredito, error: e22 }, { data: vendasSkuPendentes, error: e23 }, { data: vendasDetalhe, error: e24 }, { data: abonosPonto, error: e25 }, { data: holerites, error: e26 }, { data: feriados, error: e27 }, { data: empresaConfig, error: e28 }, { data: importacoesVendas, error: e29 }] = await Promise.all([
     sb.from('transacoes').select('*').order('data', { ascending: false }),
     sb.from('produtos').select('*').order('created_at', { ascending: false }),
     sb.from('plataformas').select('*').order('nome', { ascending: true }),
@@ -413,6 +415,7 @@ async function loadData() {
     sb.from('holerites').select('*').order('mes', { ascending: false }),
     sb.from('feriados').select('*').order('data', { ascending: true }),
     sb.from('empresa_config').select('*').eq('id', 1).maybeSingle(),
+    sb.from('importacoes_vendas').select('id, nome_arquivo, transacao_ids, vendas_detalhe_ids, sku_pendente_ids, desfeita, created_at').order('created_at', { ascending: false }).limit(10),
   ]);
   if (e1) console.error(e1);
   if (e2) console.error(e2);
@@ -442,6 +445,7 @@ async function loadData() {
   if (e26) console.error(e26);
   if (e27) console.error(e27);
   if (e28) console.error(e28);
+  if (e29) console.error(e29);
   state.tx = (tx || []).map(mapTxFromDb);
   state.produtos = (produtos || []).map(mapProdutoFromDb);
   state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0) }));
@@ -470,6 +474,7 @@ async function loadData() {
   state.holerites = (holerites || []).map((h) => ({ id: h.id, funcionariaId: h.funcionaria_id, mes: h.mes, diasTrabalhados: Number(h.dias_trabalhados), salarioBase: Number(h.salario_base), horasExtras: Number(h.horas_extras), valorHorasExtras: Number(h.valor_horas_extras), horasExtras100: Number(h.horas_extras_100 || 0), valorHorasExtras100: Number(h.valor_horas_extras_100 || 0), modoHorasExtras: h.modo_horas_extras, horasFaltantes: Number(h.horas_faltantes), valorVt: Number(h.valor_vt), valorVr: Number(h.valor_vr), totalPagar: Number(h.total_pagar), assinadoEm: h.assinado_em || null, assinaturaImagem: h.assinatura_imagem || null, createdAt: h.created_at, numeroRecibo: h.numero_recibo || null, emitidoPor: h.emitido_por || null }));
   state.feriados = (feriados || []).map((f) => ({ id: f.id, data: f.data, nome: f.nome || '' }));
   state.empresaConfig = { cnpj: empresaConfig?.cnpj || '', razaoSocial: empresaConfig?.razao_social || '', nomeFantasia: empresaConfig?.nome_fantasia || '', endereco: empresaConfig?.endereco || '', telefone: empresaConfig?.telefone || '' };
+  state.importacoesVendas = (importacoesVendas || []).map((i) => ({ id: i.id, nomeArquivo: i.nome_arquivo || 'Importação', transacaoIds: i.transacao_ids || [], vendasDetalheIds: i.vendas_detalhe_ids || [], skuPendenteIds: i.sku_pendente_ids || [], desfeita: i.desfeita, createdAt: i.created_at }));
   state.loading = false;
   render();
 }
@@ -516,19 +521,21 @@ async function marcarTxComoPago(id) {
   if (error) alert('Erro ao confirmar pagamento: ' + error.message);
 }
 async function addTxBatch(rows) {
-  const { error } = await sb.from('transacoes').insert(rows.map((tx) => ({
+  const { data, error } = await sb.from('transacoes').insert(rows.map((tx) => ({
     tipo: tx.tipo, valor: tx.valor, categoria: tx.categoria, natureza: tx.natureza || null, descricao: tx.descricao || null, data: tx.data, id_pedido: tx.idPedido || null,
-  })));
-  if (error) alert('Erro ao importar: ' + error.message);
+  }))).select('id');
+  if (error) { alert('Erro ao importar: ' + error.message); return []; }
+  return (data || []).map((r) => r.id);
 }
 // grava o detalhe de vendas por produto+plataforma+data de cada import — usado pra
 // alimentar o ranking de produtos e a comparação entre plataformas na aba Vendas
 async function addVendasDetalheBatch(rows) {
-  if (!rows.length) return;
-  const { error } = await sb.from('vendas_detalhe').insert(rows.map((v) => ({
+  if (!rows.length) return [];
+  const { data, error } = await sb.from('vendas_detalhe').insert(rows.map((v) => ({
     produto_id: v.produtoId, plataforma_id: v.plataformaId || null, plataforma_nome: v.plataformaNome || null, sku: v.sku || null, quantidade: v.quantidade, valor: v.valor, data: v.data,
-  })));
-  if (error) console.error('Erro ao gravar detalhe de vendas: ' + error.message);
+  }))).select('id');
+  if (error) { console.error('Erro ao gravar detalhe de vendas: ' + error.message); return []; }
+  return (data || []).map((r) => r.id);
 }
 // cria N saídas parceladas (ex: compra no cartão em 3x) — cada parcela é uma "conta a
 // vencer" normal, na data certa; a última parcela absorve a diferença de arredondamento
@@ -1312,6 +1319,7 @@ async function removeProduto(id) {
 // grava (ou soma, se já existir) um SKU que não bateu com nenhum produto no import —
 // fica pendente até a Daniela vincular manualmente ao produto certo, em Estoque
 async function registrarSkusPendentes(pendentesMap) {
+  const novosIds = [];
   for (const [sku, info] of pendentesMap.entries()) {
     const existente = state.vendasSkuPendentes.find((v) => v.sku.trim().toLowerCase() === sku.trim().toLowerCase());
     if (existente) {
@@ -1322,12 +1330,14 @@ async function registrarSkusPendentes(pendentesMap) {
       }).eq('id', existente.id);
       if (error) console.error(error);
     } else {
-      const { error } = await sb.from('vendas_sku_pendentes').insert({
+      const { data, error } = await sb.from('vendas_sku_pendentes').insert({
         sku, quantidade: info.qtd, faturamento: info.faturamento, ultima_data: info.ultimaData, plataforma_nome: info.plataformaNome || null,
-      });
+      }).select('id').single();
       if (error) console.error(error);
+      else if (data) novosIds.push(data.id);
     }
   }
+  return novosIds;
 }
 // vincula um SKU pendente a um produto (e, opcionalmente, a uma cor específica): salva o
 // SKU como apelido do produto ou da cor (pra próximos imports já entrarem automático) e
@@ -1365,6 +1375,37 @@ async function vincularSkuPendente(pendenteId, produtoId, varianteId) {
 async function removerSkuPendente(id) {
   const { error } = await sb.from('vendas_sku_pendentes').delete().eq('id', id);
   if (error) alert('Erro ao remover SKU pendente: ' + error.message);
+}
+// guarda uma "foto" de como estava produtos/variantes/insumos ANTES do import, junto com
+// os ids de tudo que foi criado — assim dá pra desfazer com segurança depois, sem duplicar
+// nem deixar estoque errado, mesmo se algo der errado no meio do caminho
+async function salvarImportacaoVendas(nomeArquivo, snapshot, transacaoIds, vendasDetalheIds, skuPendenteIds) {
+  const { error } = await sb.from('importacoes_vendas').insert({
+    nome_arquivo: nomeArquivo, snapshot, transacao_ids: transacaoIds, vendas_detalhe_ids: vendasDetalheIds, sku_pendente_ids: skuPendenteIds,
+  });
+  if (error) console.error('Erro ao salvar histórico de importação: ' + error.message);
+}
+// desfaz uma importação inteira: restaura estoque/total vendido/preço médio de produtos e
+// variantes, restaura insumos, e apaga tudo que foi criado (lançamentos, detalhe de vendas,
+// skus pendentes) — usa o snapshot gravado no momento da importação, não recalcula nada
+async function desfazerImportacaoVendas(importacaoId) {
+  const { data: importacao, error: errBusca } = await sb.from('importacoes_vendas').select('*').eq('id', importacaoId).single();
+  if (errBusca || !importacao) { alert('Erro ao buscar a importação: ' + (errBusca?.message || 'não encontrada')); return; }
+  const snap = importacao.snapshot;
+  for (const p of snap.produtos || []) {
+    await sb.from('produtos').update({ estoque_atual: p.estoqueAtual, total_vendido: p.totalVendido, preco_venda_medio: p.precoVendaMedio }).eq('id', p.id);
+  }
+  for (const v of snap.variantes || []) {
+    await sb.from('variantes').update({ estoque_atual: v.estoqueAtual }).eq('id', v.id);
+  }
+  for (const i of snap.insumos || []) {
+    await sb.from('insumos').update({ quantidade_disponivel: i.quantidadeDisponivel, custo_medio_unitario: i.custoMedioUnitario }).eq('id', i.id);
+  }
+  if (importacao.transacao_ids?.length) await sb.from('transacoes').delete().in('id', importacao.transacao_ids);
+  if (importacao.vendas_detalhe_ids?.length) await sb.from('vendas_detalhe').delete().in('id', importacao.vendas_detalhe_ids);
+  if (importacao.sku_pendente_ids?.length) await sb.from('vendas_sku_pendentes').delete().in('id', importacao.sku_pendente_ids);
+  const { error } = await sb.from('importacoes_vendas').update({ desfeita: true }).eq('id', importacaoId);
+  if (error) alert('Erro ao marcar importação como desfeita: ' + error.message);
 }
 // venda manual (atacado, feira, venda direta etc) — mesma lógica de baixa de estoque
 // do import, só que lançada na mão em vez de vir de uma planilha. Se o produto tem cor
@@ -7075,10 +7116,35 @@ function renderVendas(c) {
       <div><div class="section-title">Vendas</div><div class="section-subtitle">Ranking, plataformas e histórico de pedidos</div></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="icon-btn-ghost" id="toggleSkusPendentes" style="${state.vendasSkuPendentes.length > 0 ? 'background:rgba(255,182,39,0.15);border:1.5px solid var(--amber);color:var(--amber);font-weight:700' : ''}">🔗 SKUs pendentes${state.vendasSkuPendentes.length > 0 ? ` (${state.vendasSkuPendentes.length})` : ''}</button>
+        <button class="icon-btn-ghost" id="toggleImportacoesVendas">📜 Ver importações</button>
         <button class="icon-btn-ghost" id="toggleUpload">📤 Importar vendas</button>
         <button class="icon-btn" id="toggleVendaManual">＋ Venda manual</button>
       </div>
     </div>
+
+    ${state.showImportacoesVendas ? `
+      <div class="form-card">
+        <div class="section-title" style="margin-bottom:2px">Últimas importações</div>
+        <div class="section-subtitle" style="margin-bottom:10px">Se algo saiu errado numa importação, desfaz ela aqui — restaura o estoque, apaga os lançamentos e os SKUs pendentes que ela criou, tudo de uma vez. Só dá pra desfazer a <strong>mais recente</strong>: se você já importou de novo depois, a mais antiga não pode mais ser desfeita sozinha, pra não apagar sem querer o que veio depois dela.</div>
+        ${state.importacoesVendas.length === 0 ? `<div class="empty-state">Nenhuma importação registrada ainda.</div>` : (() => {
+          const maisRecenteId = state.importacoesVendas.find((imp) => !imp.desfeita)?.id;
+          return `
+          <div class="tx-list">
+            ${state.importacoesVendas.map((imp) => `
+              <div class="tx-row">
+                <div class="tx-dot" style="background:${imp.desfeita ? 'var(--text-muted)' : 'var(--teal)'}"></div>
+                <div style="flex:1">
+                  <div class="tx-categoria">${esc(imp.nomeArquivo)}${imp.desfeita ? ' (desfeita)' : ''}</div>
+                  <div class="tx-desc">${imp.transacaoIds.length} lançamento(s) · ${new Date(imp.createdAt).toLocaleString('pt-BR')}</div>
+                </div>
+                ${!imp.desfeita && imp.id === maisRecenteId ? `<button class="trash-btn" style="color:var(--red)" data-desfazer-importacao="${imp.id}">↩️ Desfazer</button>` : !imp.desfeita ? `<span style="font-size:11px;color:var(--text-muted)">já tem importação mais nova</span>` : ''}
+              </div>
+            `).join('')}
+          </div>
+        `;
+        })()}
+      </div>
+    ` : ''}
 
     <input type="month" class="month-input" id="vendasMonthSelect" value="${state.selectedMonth}" />
 
@@ -7314,6 +7380,17 @@ function attachVendasHandlers(c) {
 
   const toggleSkusPendentes = document.getElementById('toggleSkusPendentes');
   if (toggleSkusPendentes) toggleSkusPendentes.addEventListener('click', () => { state.showSkusPendentes = !state.showSkusPendentes; render(); });
+
+  const toggleImportacoesVendas = document.getElementById('toggleImportacoesVendas');
+  if (toggleImportacoesVendas) toggleImportacoesVendas.addEventListener('click', () => { state.showImportacoesVendas = !state.showImportacoesVendas; render(); });
+  document.querySelectorAll('[data-desfazer-importacao]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Desfazer essa importação? Isso restaura o estoque, o total vendido e o preço médio de todos os produtos afetados pro que estava antes dessa importação, e apaga os lançamentos, o detalhe de vendas e os SKUs pendentes que ela criou.\n\nAção não pode ser desfeita de novo — confirma?')) return;
+      await desfazerImportacaoVendas(btn.dataset.desfazerImportacao);
+      await loadData();
+      alert('Importação desfeita — estoque restaurado.');
+    });
+  });
   document.querySelectorAll('[data-vincular-sku]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const pendenteId = btn.dataset.vincularSku;
@@ -7347,6 +7424,14 @@ function attachVendasHandlers(c) {
     const plataformaId = document.getElementById('uploadPlataforma')?.value || '';
     const plataforma = state.plataformas.find((p) => p.id === plataformaId);
     const dataArquivo = guessDataFromFilename(file.name);
+
+    // foto de como está tudo ANTES de processar — se algo der errado, dá pra restaurar
+    // exatamente esse estado com o botão de desfazer, sem precisar recalcular nada
+    const snapshotAntes = {
+      produtos: state.produtos.map((p) => ({ id: p.id, estoqueAtual: p.estoqueAtual, totalVendido: p.totalVendido, precoVendaMedio: p.precoVendaMedio })),
+      variantes: state.variantes.map((v) => ({ id: v.id, estoqueAtual: v.estoqueAtual })),
+      insumos: state.insumos.map((i) => ({ id: i.id, quantidadeDisponivel: i.quantidadeDisponivel, custoMedioUnitario: i.custoMedioUnitario })),
+    };
 
     // mapa de SKU (minúsculo, sem espaço nas pontas) -> { produto, variante }
     // cada produto pode ter vários SKUs separados por vírgula (ex: "TOP-JACK, TOP-JACKK"),
@@ -7472,9 +7557,9 @@ function attachVendasHandlers(c) {
       return;
     }
 
-    await addTxBatch(novos);
-    if (detalhesVendas.size) await addVendasDetalheBatch([...detalhesVendas.values()]);
-    if (skusNaoEncontrados.size) await registrarSkusPendentes(skusNaoEncontrados);
+    const transacaoIdsCriadas = await addTxBatch(novos);
+    const vendasDetalheIdsCriadas = detalhesVendas.size ? await addVendasDetalheBatch([...detalhesVendas.values()]) : [];
+    const skuPendenteIdsCriados = skusNaoEncontrados.size ? await registrarSkusPendentes(skusNaoEncontrados) : [];
 
     // aplica baixa de estoque + soma no total vendido + atualiza preço médio de venda
     let unidadesCorAmbigua = 0;
@@ -7529,11 +7614,12 @@ function attachVendasHandlers(c) {
       if (totalParaBaixar > 0) await baixarInsumo(insumo.id, totalParaBaixar);
     }
 
+    await salvarImportacaoVendas(file.name, snapshotAntes, transacaoIdsCriadas, vendasDetalheIdsCriadas, skuPendenteIdsCriados);
     state.showUpload = false;
     await loadData();
 
     const qtdVendas = novos.filter((n) => n.tipo === 'entrada').length;
-    let resumo = `${qtdVendas} venda(s) importada(s).`;
+    let resumo = `${qtdVendas} venda(s) importada(s).\n\n↩️ Se algo saiu errado, vá em "📜 Ver importações" pra desfazer essa importação inteira (restaura o estoque de antes automaticamente).`;
     if (totalTaxas > 0) {
       resumo += `\nTaxas descontadas: ${fmt(totalTaxas)}`;
       const partes = [];
