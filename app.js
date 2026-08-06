@@ -7615,31 +7615,50 @@ function attachVendasHandlers(c) {
         linhasSemPedidoPorPlataforma.set(chavePlataforma, (linhasSemPedidoPorPlataforma.get(chavePlataforma) || 0) + 1);
       }
 
-      novos.push({
-        tipo: 'entrada', valor,
-        categoria: plataformaLinha ? `Venda ${plataformaLinha.nome}` : 'Venda marketplace',
-        descricao: descricaoItem,
-        data: dataLinha,
-        idPedido: idPedidoLinha,
+      // cada linha do relatório pode somar VÁRIAS vendas juntas numa linha só (ex: 39
+      // unidades numa linha) — quebra em lançamentos individuais, um por unidade, pra cada
+      // venda aparecer separada no Financeiro, em vez de um bloco só com tudo somado
+      const criarLancamentosPorUnidade = (valorTotal, qtd, criarLinha) => {
+        let somaParcial = 0;
+        for (let i = 0; i < qtd; i++) {
+          const ultima = i === qtd - 1;
+          const valorUnit = ultima ? Math.round((valorTotal - somaParcial) * 100) / 100 : Math.round((valorTotal / qtd) * 100) / 100;
+          somaParcial += valorUnit;
+          criarLinha(valorUnit);
+        }
+      };
+
+      criarLancamentosPorUnidade(valor, qtdLinha, (valorUnit) => {
+        novos.push({
+          tipo: 'entrada', valor: valorUnit,
+          categoria: plataformaLinha ? `Venda ${plataformaLinha.nome}` : 'Venda marketplace',
+          descricao: descricaoItem,
+          data: dataLinha,
+          idPedido: idPedidoLinha,
+        });
       });
 
       const taxaReal = guessTaxaRealField(row);
       if (taxaReal !== null && taxaReal > 0) {
         totalTaxas += taxaReal;
         totalTaxasReais++;
-        novos.push({
-          tipo: 'saida', valor: Math.round(taxaReal * 100) / 100, categoria: 'Taxas de marketplace', natureza: 'variavel',
-          descricao: `Taxa real${plataformaLinha ? ' ' + plataformaLinha.nome : ''} — ${descricaoItem}`,
-          data: dataLinha,
+        criarLancamentosPorUnidade(taxaReal, qtdLinha, (valorUnit) => {
+          novos.push({
+            tipo: 'saida', valor: valorUnit, categoria: 'Taxas de marketplace', natureza: 'variavel',
+            descricao: `Taxa real${plataformaLinha ? ' ' + plataformaLinha.nome : ''} — ${descricaoItem}`,
+            data: dataLinha,
+          });
         });
       } else if (taxaPctLinha > 0 || taxaFixaLinha > 0) {
         const taxaValor = Math.round((valor * (taxaPctLinha / 100) + taxaFixaLinha * qtdLinha) * 100) / 100;
         totalTaxas += taxaValor;
         totalTaxasEstimadas++;
-        novos.push({
-          tipo: 'saida', valor: taxaValor, categoria: 'Taxas de marketplace', natureza: 'variavel',
-          descricao: `Taxa estimada ${plataformaLinha.nome} (${taxaPctLinha}% + ${fmt(taxaFixaLinha)}${qtdLinha > 1 ? ` × ${qtdLinha}` : ''}) — ${descricaoItem}`,
-          data: dataLinha,
+        criarLancamentosPorUnidade(taxaValor, qtdLinha, (valorUnit) => {
+          novos.push({
+            tipo: 'saida', valor: valorUnit, categoria: 'Taxas de marketplace', natureza: 'variavel',
+            descricao: `Taxa estimada ${plataformaLinha.nome} (${taxaPctLinha}% + ${fmt(taxaFixaLinha)}) — ${descricaoItem}`,
+            data: dataLinha,
+          });
         });
       }
 
