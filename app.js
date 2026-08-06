@@ -185,6 +185,14 @@ function guessQuantidadeField(row) {
   for (const c of candidates) if (row[c]) return Number(row[c]) || 1;
   return 1;
 }
+// número de PEDIDOS por linha — diferente da quantidade de peças, já que um pedido pode
+// ter várias unidades. Relatórios "por variante" costumam trazer os dois separados
+// ("Pedidos Válidos" x "Unidades Vendidas"); sem essa coluna, assume 1 pedido por linha
+function guessPedidosField(row) {
+  const candidates = ['pedidos válidos', 'número de pedidos', 'numero de pedidos', 'pedidos'];
+  for (const c of candidates) if (row[c]) return Number(row[c]) || 1;
+  return 1;
+}
 function guessDataFromFilename(fileName) {
   const m = fileName.match(/(\d{4})(\d{2})(\d{2})-(\d{4})(\d{2})(\d{2})/);
   if (!m) return null;
@@ -485,7 +493,7 @@ async function loadData() {
   state.emprestimoParcelas = (emprestimoParcelas || []).map((p) => ({ id: p.id, emprestimoId: p.emprestimo_id, numero: p.numero, valor: Number(p.valor), dataVencimento: p.data_vencimento, transacaoId: p.transacao_id || null }));
   state.cartoesCredito = (cartoesCredito || []).map((c) => ({ id: c.id, nome: c.nome, limite: Number(c.limite || 0), diaFechamento: c.dia_fechamento, diaVencimento: c.dia_vencimento, ativo: c.ativo !== false }));
   state.vendasSkuPendentes = (vendasSkuPendentes || []).map((v) => ({ id: v.id, sku: v.sku, quantidade: Number(v.quantidade), faturamento: Number(v.faturamento), ultimaData: v.ultima_data, plataformaNome: v.plataforma_nome || null }));
-  state.vendasDetalhe = (vendasDetalhe || []).map((v) => ({ id: v.id, produtoId: v.produto_id, plataformaId: v.plataforma_id, plataformaNome: v.plataforma_nome || null, sku: v.sku || null, quantidade: Number(v.quantidade), valor: Number(v.valor), data: v.data }));
+  state.vendasDetalhe = (vendasDetalhe || []).map((v) => ({ id: v.id, produtoId: v.produto_id, plataformaId: v.plataforma_id, plataformaNome: v.plataforma_nome || null, sku: v.sku || null, quantidade: Number(v.quantidade), valor: Number(v.valor), data: v.data, pedidos: Number(v.pedidos || 1) }));
   state.abonosPonto = (abonosPonto || []).map((a) => ({ id: a.id, funcionariaId: a.funcionaria_id, data: a.data, tipo: a.tipo, motivo: a.motivo || '', horas: a.horas != null ? Number(a.horas) : null }));
   state.holerites = (holerites || []).map((h) => ({ id: h.id, funcionariaId: h.funcionaria_id, mes: h.mes, diasTrabalhados: Number(h.dias_trabalhados), salarioBase: Number(h.salario_base), horasExtras: Number(h.horas_extras), valorHorasExtras: Number(h.valor_horas_extras), horasExtras100: Number(h.horas_extras_100 || 0), valorHorasExtras100: Number(h.valor_horas_extras_100 || 0), modoHorasExtras: h.modo_horas_extras, horasFaltantes: Number(h.horas_faltantes), valorVt: Number(h.valor_vt), valorVr: Number(h.valor_vr), totalPagar: Number(h.total_pagar), assinadoEm: h.assinado_em || null, assinaturaImagem: h.assinatura_imagem || null, createdAt: h.created_at, numeroRecibo: h.numero_recibo || null, emitidoPor: h.emitido_por || null }));
   state.feriados = (feriados || []).map((f) => ({ id: f.id, data: f.data, nome: f.nome || '' }));
@@ -548,7 +556,7 @@ async function addTxBatch(rows) {
 async function addVendasDetalheBatch(rows) {
   if (!rows.length) return [];
   const { data, error } = await sb.from('vendas_detalhe').insert(rows.map((v) => ({
-    produto_id: v.produtoId, plataforma_id: v.plataformaId || null, plataforma_nome: v.plataformaNome || null, sku: v.sku || null, quantidade: v.quantidade, valor: v.valor, data: v.data,
+    produto_id: v.produtoId, plataforma_id: v.plataformaId || null, plataforma_nome: v.plataformaNome || null, sku: v.sku || null, quantidade: v.quantidade, valor: v.valor, data: v.data, pedidos: v.pedidos || 1,
   }))).select('id');
   if (error) { console.error('Erro ao gravar detalhe de vendas: ' + error.message); return []; }
   return (data || []).map((r) => r.id);
@@ -7135,7 +7143,8 @@ function renderVendas(c) {
   const vendasMes = c.txMes.filter((t) => t.tipo === 'entrada' && t.categoria.startsWith('Venda'));
   const faturamentoMes = vendasMes.reduce((a, t) => a + t.valor, 0);
   const pedidosUnicosMes = new Set(vendasMes.filter((t) => t.idPedido).map((t) => t.idPedido.trim().toLowerCase()));
-  const qtdPedidosMes = pedidosUnicosMes.size > 0 ? pedidosUnicosMes.size : vendasMes.length;
+  const pedidosReaisMesTotal = state.vendasDetalhe.filter((v) => v.data && monthKey(v.data) === mesAtual).reduce((a, v) => a + v.pedidos, 0);
+  const qtdPedidosMes = pedidosUnicosMes.size > 0 ? pedidosUnicosMes.size : (pedidosReaisMesTotal || vendasMes.length);
   const ticketMedio = qtdPedidosMes > 0 ? faturamentoMes / qtdPedidosMes : 0;
 
   // comparação entre plataformas, no mês selecionado
@@ -7148,9 +7157,17 @@ function renderVendas(c) {
     if (t.idPedido) atual.pedidos.add(t.idPedido.trim().toLowerCase());
     porPlataforma.set(nome, atual);
   });
+  // pedidos reais (da coluna "Pedidos Válidos" do relatório, quando existe) — muito mais
+  // preciso que contar ID de pedido (nem todo relatório tem) ou contar lançamentos (que
+  // agora podem ser vários por venda, já que cada peça vira seu próprio lançamento)
+  const pedidosRealPorPlataforma = new Map();
+  state.vendasDetalhe.filter((v) => v.data && monthKey(v.data) === mesAtual).forEach((v) => {
+    const nome = (v.plataformaNome || 'Sem plataforma').trim();
+    pedidosRealPorPlataforma.set(nome, (pedidosRealPorPlataforma.get(nome) || 0) + v.pedidos);
+  });
   const comparacaoPlataformas = [...porPlataforma.entries()]
     .map(([nome, info]) => {
-      const pedidos = info.pedidos.size > 0 ? info.pedidos.size : info.linhas;
+      const pedidos = info.pedidos.size > 0 ? info.pedidos.size : (pedidosRealPorPlataforma.get(nome) || info.linhas);
       return { nome, faturamento: info.faturamento, pedidos, ticketMedio: pedidos > 0 ? info.faturamento / pedidos : 0 };
     })
     .sort((a, b) => b.faturamento - a.faturamento);
@@ -7602,6 +7619,7 @@ function attachVendasHandlers(c) {
       // unidades, R$1.403,61) — pra escolher a faixa de taxa certa e cobrar a taxa fixa o
       // número certo de vezes, precisa do preço por unidade, não do total do lote
       const qtdLinha = guessQuantidadeField(row) || 1;
+      const pedidosLinha = guessPedidosField(row) || 1;
       const valorUnitario = qtdLinha > 0 ? valor / qtdLinha : valor;
       const taxaEscolhida = taxaDaPlataformaParaValor(plataformaLinha, valorUnitario);
       const taxaPctLinha = taxaEscolhida.pct;
@@ -7683,10 +7701,11 @@ function attachVendasHandlers(c) {
           const chaveDetalhe = `${produto.id}|${plataformaLinha ? plataformaLinha.id : ''}|${dataLinha}`;
           const atualDetalhe = detalhesVendas.get(chaveDetalhe) || {
             produtoId: produto.id, plataformaId: plataformaLinha ? plataformaLinha.id : null,
-            plataformaNome: plataformaLinha ? plataformaLinha.nome : null, sku: sku.trim(), quantidade: 0, valor: 0, data: dataLinha,
+            plataformaNome: plataformaLinha ? plataformaLinha.nome : null, sku: sku.trim(), quantidade: 0, valor: 0, data: dataLinha, pedidos: 0,
           };
           atualDetalhe.quantidade += qtd;
           atualDetalhe.valor += valor;
+          atualDetalhe.pedidos += pedidosLinha;
           detalhesVendas.set(chaveDetalhe, atualDetalhe);
         } else {
           const atual = skusNaoEncontrados.get(sku) || { qtd: 0, faturamento: 0, ultimaData: dataLinha, plataformaNome: plataformaLinha ? plataformaLinha.nome : null };
