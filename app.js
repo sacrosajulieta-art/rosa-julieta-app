@@ -7598,7 +7598,12 @@ function attachVendasHandlers(c) {
       const descricaoItem = guessDescricaoField(row, file.name);
       const dataLinha = guessDataField(row) || dataArquivo || todayStr();
       const plataformaLinha = guessPlataformaFromRow(row, state.plataformas) || plataforma;
-      const taxaEscolhida = taxaDaPlataformaParaValor(plataformaLinha, valor);
+      // relatórios "por variante" trazem o TOTAL de várias vendas numa linha só (ex: 39
+      // unidades, R$1.403,61) — pra escolher a faixa de taxa certa e cobrar a taxa fixa o
+      // número certo de vezes, precisa do preço por unidade, não do total do lote
+      const qtdLinha = guessQuantidadeField(row) || 1;
+      const valorUnitario = qtdLinha > 0 ? valor / qtdLinha : valor;
+      const taxaEscolhida = taxaDaPlataformaParaValor(plataformaLinha, valorUnitario);
       const taxaPctLinha = taxaEscolhida.pct;
       const taxaFixaLinha = taxaEscolhida.fixa;
       const idPedidoLinha = guessIdPedidoField(row);
@@ -7628,12 +7633,12 @@ function attachVendasHandlers(c) {
           data: dataLinha,
         });
       } else if (taxaPctLinha > 0 || taxaFixaLinha > 0) {
-        const taxaValor = Math.round((valor * (taxaPctLinha / 100) + taxaFixaLinha) * 100) / 100;
+        const taxaValor = Math.round((valor * (taxaPctLinha / 100) + taxaFixaLinha * qtdLinha) * 100) / 100;
         totalTaxas += taxaValor;
         totalTaxasEstimadas++;
         novos.push({
           tipo: 'saida', valor: taxaValor, categoria: 'Taxas de marketplace', natureza: 'variavel',
-          descricao: `Taxa estimada ${plataformaLinha.nome} (${taxaPctLinha}% + ${fmt(taxaFixaLinha)}) — ${descricaoItem}`,
+          descricao: `Taxa estimada ${plataformaLinha.nome} (${taxaPctLinha}% + ${fmt(taxaFixaLinha)}${qtdLinha > 1 ? ` × ${qtdLinha}` : ''}) — ${descricaoItem}`,
           data: dataLinha,
         });
       }
@@ -7642,7 +7647,7 @@ function attachVendasHandlers(c) {
       if (sku) {
         temSku = true;
         const match = skuMap.get(sku.trim().toLowerCase());
-        const qtd = guessQuantidadeField(row);
+        const qtd = qtdLinha;
         if (match) {
           const { produto, variante } = match;
           const atual = deducoes.get(produto.id) || { qtd: 0, ultimaData: dataLinha, faturamento: 0, porVariante: new Map(), semVariante: 0 };
