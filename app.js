@@ -226,6 +226,18 @@ function guessTaxaRealField(row) {
   });
   return achou ? total : null;
 }
+// escolhe a taxa % e fixa certa pra uma plataforma — se ela tiver "taxa por faixa de valor"
+// configurada (ex: TikTok Shop, que cobra diferente pra produtos abaixo/acima de R$50),
+// usa a faixa certa conforme o valor da venda; senão usa a taxa única normal
+function taxaDaPlataformaParaValor(plataforma, valor) {
+  if (!plataforma) return { pct: 0, fixa: 0 };
+  if (plataforma.taxaLimiar > 0) {
+    return valor < plataforma.taxaLimiar
+      ? { pct: plataforma.taxaPercentualAbaixo, fixa: plataforma.taxaFixaAbaixo }
+      : { pct: plataforma.taxaPercentualAcima, fixa: plataforma.taxaFixaAcima };
+  }
+  return { pct: plataforma.taxaPercentual, fixa: plataforma.taxaFixa };
+}
 
 async function parseXLSX(file) {
   const buffer = await file.arrayBuffer();
@@ -448,7 +460,7 @@ async function loadData() {
   if (e29) console.error(e29);
   state.tx = (tx || []).map(mapTxFromDb);
   state.produtos = (produtos || []).map(mapProdutoFromDb);
-  state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0) }));
+  state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0), taxaLimiar: Number(p.taxa_limiar || 0), taxaPercentualAbaixo: Number(p.taxa_percentual_abaixo || 0), taxaFixaAbaixo: Number(p.taxa_fixa_abaixo || 0), taxaPercentualAcima: Number(p.taxa_percentual_acima || 0), taxaFixaAcima: Number(p.taxa_fixa_acima || 0) }));
   state.costureiras = (costureiras || []).map((c) => ({ id: c.id, nome: c.nome, ativa: c.ativa, metaSemanal: c.meta_semanal || 0 }));
   state.producoes = (producoes || []).map((p) => ({ id: p.id, costureiraId: p.costureira_id, produtoId: p.produto_id, quantidade: p.quantidade, data: p.data, pago: p.pago, varianteId: p.variante_id || null }));
   state.variantes = (variantes || []).map((v) => ({ id: v.id, produtoId: v.produto_id, nome: v.nome, estoqueAtual: v.estoque_atual, skuVariante: v.sku_variante }));
@@ -1535,8 +1547,12 @@ async function baixarInsumosProducao(produtoId, quantidadeProduzida, data) {
   }
 }
 
-async function updatePlataformaTaxa(id, taxaPercentual, taxaFixa) {
-  const { error } = await sb.from('plataformas').update({ taxa_percentual: taxaPercentual, taxa_fixa: taxaFixa }).eq('id', id);
+async function updatePlataformaTaxa(id, taxaPercentual, taxaFixa, taxaLimiar, taxaPercentualAbaixo, taxaFixaAbaixo, taxaPercentualAcima, taxaFixaAcima) {
+  const { error } = await sb.from('plataformas').update({
+    taxa_percentual: taxaPercentual, taxa_fixa: taxaFixa,
+    taxa_limiar: taxaLimiar || 0, taxa_percentual_abaixo: taxaPercentualAbaixo || 0, taxa_fixa_abaixo: taxaFixaAbaixo || 0,
+    taxa_percentual_acima: taxaPercentualAcima || 0, taxa_fixa_acima: taxaFixaAcima || 0,
+  }).eq('id', id);
   if (error) alert('Erro ao salvar taxa: ' + error.message);
 }
 async function addPlataforma(nome, taxaPercentual, taxaFixa) {
@@ -4442,6 +4458,22 @@ function renderFinanceiro(c) {
               </div>
               <button class="trash-btn" data-remover-plataforma="${p.id}">🗑</button>
             </div>
+            <div class="form-hint" style="margin-top:6px;margin-bottom:2px">Taxa diferente por faixa de valor? (opcional, ex: TikTok Shop cobra diferente abaixo/acima de R$50 — deixa o limiar em 0 pra não usar faixa)</div>
+            <div class="form-row">
+              <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Limiar (R$)</div><input type="text" id="taxaLimiarInput-${p.id}" value="${p.taxaLimiar || ''}" placeholder="ex: 50" /></div>
+            </div>
+            <div class="form-row">
+              <div style="flex:1">
+                <div class="form-hint" style="margin-bottom:2px">Abaixo do limiar</div>
+                <div class="taxa-input-group"><input type="text" id="taxaPctAbaixoInput-${p.id}" value="${p.taxaPercentualAbaixo || ''}" placeholder="%" /><span>%</span></div>
+                <div class="taxa-input-group" style="margin-top:4px"><span>R$</span><input type="text" id="taxaFixaAbaixoInput-${p.id}" value="${p.taxaFixaAbaixo || ''}" placeholder="0" /></div>
+              </div>
+              <div style="flex:1">
+                <div class="form-hint" style="margin-bottom:2px">A partir do limiar</div>
+                <div class="taxa-input-group"><input type="text" id="taxaPctAcimaInput-${p.id}" value="${p.taxaPercentualAcima || ''}" placeholder="%" /><span>%</span></div>
+                <div class="taxa-input-group" style="margin-top:4px"><span>R$</span><input type="text" id="taxaFixaAcimaInput-${p.id}" value="${p.taxaFixaAcima || ''}" placeholder="0" /></div>
+              </div>
+            </div>
           </div>
         `).join('')}
         <button class="confirm-btn" id="salvarTaxas">Salvar taxas</button>
@@ -6892,7 +6924,15 @@ function attachFinanceiroHandlers(c) {
       const fixaInput = document.getElementById(`taxaFixaInput-${p.id}`);
       const novaPct = parseBRNumber(pctInput.value);
       const novaFixa = parseBRNumber(fixaInput.value);
-      if (novaPct !== p.taxaPercentual || novaFixa !== p.taxaFixa) await updatePlataformaTaxa(p.id, novaPct, novaFixa);
+      const novoLimiar = parseBRNumber(document.getElementById(`taxaLimiarInput-${p.id}`)?.value || '0');
+      const novaPctAbaixo = parseBRNumber(document.getElementById(`taxaPctAbaixoInput-${p.id}`)?.value || '0');
+      const novaFixaAbaixo = parseBRNumber(document.getElementById(`taxaFixaAbaixoInput-${p.id}`)?.value || '0');
+      const novaPctAcima = parseBRNumber(document.getElementById(`taxaPctAcimaInput-${p.id}`)?.value || '0');
+      const novaFixaAcima = parseBRNumber(document.getElementById(`taxaFixaAcimaInput-${p.id}`)?.value || '0');
+      const mudouAlgo = novaPct !== p.taxaPercentual || novaFixa !== p.taxaFixa || novoLimiar !== p.taxaLimiar
+        || novaPctAbaixo !== p.taxaPercentualAbaixo || novaFixaAbaixo !== p.taxaFixaAbaixo
+        || novaPctAcima !== p.taxaPercentualAcima || novaFixaAcima !== p.taxaFixaAcima;
+      if (mudouAlgo) await updatePlataformaTaxa(p.id, novaPct, novaFixa, novoLimiar, novaPctAbaixo, novaFixaAbaixo, novaPctAcima, novaFixaAcima);
     }
     state.showTaxasForm = false;
     await loadData();
@@ -7475,8 +7515,9 @@ function attachVendasHandlers(c) {
       const descricaoItem = guessDescricaoField(row, file.name);
       const dataLinha = guessDataField(row) || dataArquivo || todayStr();
       const plataformaLinha = guessPlataformaFromRow(row, state.plataformas) || plataforma;
-      const taxaPctLinha = plataformaLinha ? plataformaLinha.taxaPercentual : 0;
-      const taxaFixaLinha = plataformaLinha ? plataformaLinha.taxaFixa : 0;
+      const taxaEscolhida = taxaDaPlataformaParaValor(plataformaLinha, valor);
+      const taxaPctLinha = taxaEscolhida.pct;
+      const taxaFixaLinha = taxaEscolhida.fixa;
       const idPedidoLinha = guessIdPedidoField(row);
       const chavePlataforma = plataformaLinha ? plataformaLinha.id : '_sem_plataforma';
       if (idPedidoLinha) {
