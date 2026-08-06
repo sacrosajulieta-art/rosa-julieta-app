@@ -175,6 +175,13 @@ function guessDescricaoField(row, fallback) {
   for (const c of candidates) if (row[c]) return String(row[c]);
   return fallback;
 }
+// texto da variante/cor da planilha (ex: "Preto,Único (36 a 42)") — só pra ajudar a
+// identificar visualmente qual cor é, na hora de vincular um SKU pendente
+function guessVarianteTextoField(row) {
+  const candidates = ['variantes', 'variante', 'variação', 'variacao', 'variation'];
+  for (const c of candidates) if (row[c]) return String(row[c]);
+  return null;
+}
 function guessSkuField(row) {
   const candidates = ['nº de referência do sku principal', 'sku principal', 'número de referência sku', 'sku', 'referência sku', 'referencia sku'];
   for (const c of candidates) if (row[c]) return String(row[c]).trim();
@@ -496,7 +503,7 @@ async function loadData() {
   state.emprestimos = (emprestimos || []).map((e) => ({ id: e.id, descricao: e.descricao, instituicao: e.instituicao || '', valorRecebido: Number(e.valor_recebido), numeroParcelas: e.numero_parcelas, valorParcela: Number(e.valor_parcela), dataRecebimento: e.data_recebimento, dataPrimeiraParcela: e.data_primeira_parcela, transacaoRecebimentoId: e.transacao_recebimento_id || null }));
   state.emprestimoParcelas = (emprestimoParcelas || []).map((p) => ({ id: p.id, emprestimoId: p.emprestimo_id, numero: p.numero, valor: Number(p.valor), dataVencimento: p.data_vencimento, transacaoId: p.transacao_id || null }));
   state.cartoesCredito = (cartoesCredito || []).map((c) => ({ id: c.id, nome: c.nome, limite: Number(c.limite || 0), diaFechamento: c.dia_fechamento, diaVencimento: c.dia_vencimento, ativo: c.ativo !== false }));
-  state.vendasSkuPendentes = (vendasSkuPendentes || []).map((v) => ({ id: v.id, sku: v.sku, quantidade: Number(v.quantidade), faturamento: Number(v.faturamento), ultimaData: v.ultima_data, plataformaNome: v.plataforma_nome || null }));
+  state.vendasSkuPendentes = (vendasSkuPendentes || []).map((v) => ({ id: v.id, sku: v.sku, quantidade: Number(v.quantidade), faturamento: Number(v.faturamento), ultimaData: v.ultima_data, plataformaNome: v.plataforma_nome || null, descricao: v.descricao || null, varianteTexto: v.variante_texto || null }));
   state.vendasDetalhe = (vendasDetalhe || []).map((v) => ({ id: v.id, produtoId: v.produto_id, plataformaId: v.plataforma_id, plataformaNome: v.plataforma_nome || null, sku: v.sku || null, quantidade: Number(v.quantidade), valor: Number(v.valor), data: v.data, pedidos: Number(v.pedidos || 1) }));
   state.abonosPonto = (abonosPonto || []).map((a) => ({ id: a.id, funcionariaId: a.funcionaria_id, data: a.data, tipo: a.tipo, motivo: a.motivo || '', horas: a.horas != null ? Number(a.horas) : null }));
   state.holerites = (holerites || []).map((h) => ({ id: h.id, funcionariaId: h.funcionaria_id, mes: h.mes, diasTrabalhados: Number(h.dias_trabalhados), salarioBase: Number(h.salario_base), horasExtras: Number(h.horas_extras), valorHorasExtras: Number(h.valor_horas_extras), horasExtras100: Number(h.horas_extras_100 || 0), valorHorasExtras100: Number(h.valor_horas_extras_100 || 0), modoHorasExtras: h.modo_horas_extras, horasFaltantes: Number(h.horas_faltantes), valorVt: Number(h.valor_vt), valorVr: Number(h.valor_vr), totalPagar: Number(h.total_pagar), assinadoEm: h.assinado_em || null, assinaturaImagem: h.assinatura_imagem || null, createdAt: h.created_at, numeroRecibo: h.numero_recibo || null, emitidoPor: h.emitido_por || null }));
@@ -1398,6 +1405,7 @@ async function registrarSkusPendentes(pendentesMap) {
     } else {
       const { data, error } = await sb.from('vendas_sku_pendentes').insert({
         sku, quantidade: info.qtd, faturamento: info.faturamento, ultima_data: info.ultimaData, plataforma_nome: info.plataformaNome || null,
+        descricao: info.descricao || null, variante_texto: info.varianteTexto || null,
       }).select('id').single();
       if (error) console.error(error);
       else if (data) novosIds.push(data.id);
@@ -7406,6 +7414,8 @@ function renderVendas(c) {
                   <div class="alert-dot" style="background:var(--amber)"></div>
                   <div style="flex:1">
                     <div class="alert-name">${esc(v.sku)}</div>
+                    ${v.descricao ? `<div style="font-size:12px;color:var(--text)">${esc(v.descricao)}</div>` : ''}
+                    ${v.varianteTexto ? `<div style="font-size:12px;color:var(--teal)">🎨 ${esc(v.varianteTexto)}</div>` : ''}
                     <div class="alert-meta">${v.quantidade} peça(s) vendida(s) · ${fmt(v.faturamento)}${v.plataformaNome ? ` · ${esc(v.plataformaNome)}` : ''} · última venda ${v.ultimaData ? new Date(v.ultimaData + 'T00:00:00').toLocaleDateString('pt-BR') : '—'}</div>
                   </div>
                 </div>
@@ -7790,7 +7800,8 @@ function attachVendasHandlers(c) {
           atualDetalhe.pedidos += pedidosLinha;
           detalhesVendas.set(chaveDetalhe, atualDetalhe);
         } else {
-          const atual = skusNaoEncontrados.get(sku) || { qtd: 0, faturamento: 0, ultimaData: dataLinha, plataformaNome: plataformaLinha ? plataformaLinha.nome : null };
+          const varianteTextoLinha = guessVarianteTextoField(row);
+          const atual = skusNaoEncontrados.get(sku) || { qtd: 0, faturamento: 0, ultimaData: dataLinha, plataformaNome: plataformaLinha ? plataformaLinha.nome : null, descricao: descricaoItem, varianteTexto: varianteTextoLinha };
           atual.qtd += qtd;
           atual.faturamento += valor;
           if (dataLinha > atual.ultimaData) atual.ultimaData = dataLinha;
