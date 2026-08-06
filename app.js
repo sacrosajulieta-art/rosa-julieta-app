@@ -1708,7 +1708,7 @@ async function updatePlataformaTaxa(id, taxaPercentual, taxaFixa, taxaFaixas) {
 // antes da coluna de taxa existir, ou import de um período sem faixa configurada ainda) —
 // usa a config de taxa ATUAL de cada plataforma pra estimar o que devia ter sido cobrado
 async function recalcularTaxasFaltantes() {
-  const semTaxa = state.vendasDetalhe.filter((v) => (!v.taxa || v.taxa === 0) && v.plataformaNome && v.valor > 0);
+  const semTaxa = state.vendasDetalhe.filter((v) => (!v.taxa || v.taxa === 0) && v.plataformaNome && v.valor > 0 && v.quantidade > 0);
   if (semTaxa.length === 0) { alert('Não achei nenhuma venda com taxa zerada — já tá tudo certo.'); return; }
   let corrigidas = 0;
   let semPlataformaConfigurada = 0;
@@ -8308,7 +8308,7 @@ function attachTecidoHandlers(c) {
       const produto = state.produtos.find((p) => p.id === btn.dataset.aplicarCusto);
       if (!produto) return;
       const novoCusto = Number(btn.dataset.custo);
-      await updateProduto(produto.id, { nome: produto.nome, sku: produto.sku, estoqueAtual: produto.estoqueAtual, estoqueMinimo: produto.estoqueMinimo, custoUnitario: novoCusto, valorMaoObra: produto.valorMaoObra });
+      await updateProduto(produto.id, { nome: produto.nome, sku: produto.sku, estoqueAtual: produto.estoqueAtual, estoqueMinimo: produto.estoqueMinimo, custoUnitario: novoCusto, custoEstimado: false, valorMaoObra: produto.valorMaoObra });
       await loadData();
     });
   });
@@ -8646,7 +8646,7 @@ function attachProducaoHandlers(c) {
       if (!input) continue;
       const novoValor = parseBRNumber(input.value);
       if (novoValor !== (p.valorMaoObra || 0)) {
-        await updateProduto(p.id, { nome: p.nome, sku: p.sku, estoqueAtual: p.estoqueAtual, estoqueMinimo: p.estoqueMinimo, custoUnitario: p.custoUnitario, valorMaoObra: novoValor });
+        await updateProduto(p.id, { nome: p.nome, sku: p.sku, estoqueAtual: p.estoqueAtual, estoqueMinimo: p.estoqueMinimo, custoUnitario: p.custoUnitario, custoEstimado: p.custoEstimado, valorMaoObra: novoValor });
       }
     }
     state.showValoresPecaForm = false;
