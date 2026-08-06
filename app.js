@@ -1399,7 +1399,10 @@ async function salvarImportacaoVendas(nomeArquivo, snapshot, transacaoIds, venda
   const { error } = await sb.from('importacoes_vendas').insert({
     nome_arquivo: nomeArquivo, snapshot, transacao_ids: transacaoIds, vendas_detalhe_ids: vendasDetalheIds, sku_pendente_ids: skuPendenteIds,
   });
-  if (error) console.error('Erro ao salvar histórico de importação: ' + error.message);
+  if (error) {
+    console.error('Erro ao salvar histórico de importação: ' + error.message);
+    alert('⚠️ A importação em si funcionou, mas não consegui salvar o histórico pra permitir desfazer depois (erro: ' + error.message + '). Se precisar reverter essa importação, use a ferramenta "Reverter por data" em Vendas.');
+  }
 }
 // desfaz uma importação inteira: restaura estoque/total vendido/preço médio de produtos e
 // variantes, restaura insumos, e apaga tudo que foi criado (lançamentos, detalhe de vendas,
@@ -1422,6 +1425,42 @@ async function desfazerImportacaoVendas(importacaoId) {
   if (importacao.sku_pendente_ids?.length) await sb.from('vendas_sku_pendentes').delete().in('id', importacao.sku_pendente_ids);
   const { error } = await sb.from('importacoes_vendas').update({ desfeita: true }).eq('id', importacaoId);
   if (error) alert('Erro ao marcar importação como desfeita: ' + error.message);
+}
+// pra importações antigas, feitas antes de existir o recurso de desfazer automático (sem
+// snapshot salvo) — reconstrói o que dá pra reverter numa data específica: apaga os
+// lançamentos de venda/taxa e o detalhe de vendas daquele dia, e devolve o estoque exato
+// pra produtos sem cor. Produtos com cor ficam de fora da devolução automática, porque o
+// sistema nunca guardou qual cor específica vendeu — só fica listado pra redistribuir na mão
+function calcularPreviaReversaoPorData(dataStr) {
+  const vendasDoDia = state.vendasDetalhe.filter((v) => v.data === dataStr);
+  const txVendaDoDia = state.tx.filter((t) => t.data === dataStr && t.tipo === 'entrada' && t.categoria.startsWith('Venda'));
+  const txTaxaDoDia = state.tx.filter((t) => t.data === dataStr && t.tipo === 'saida' && t.categoria === 'Taxas de marketplace');
+  const porProduto = {};
+  vendasDoDia.forEach((v) => { porProduto[v.produtoId] = (porProduto[v.produtoId] || 0) + v.quantidade; });
+  const semCor = [];
+  const comCor = [];
+  Object.entries(porProduto).forEach(([produtoId, qtd]) => {
+    const produto = state.produtos.find((p) => p.id === produtoId);
+    const vs = variantesDoProduto(produtoId);
+    (vs.length > 0 ? comCor : semCor).push({ produtoId, nome: produto?.nome || 'Produto removido', qtd });
+  });
+  return { vendasDoDia, txVendaDoDia, txTaxaDoDia, semCor, comCor, totalValor: txVendaDoDia.reduce((a, t) => a + t.valor, 0) };
+}
+async function reverterVendasPorData(dataStr) {
+  const { vendasDoDia, txVendaDoDia, txTaxaDoDia, semCor } = calcularPreviaReversaoPorData(dataStr);
+  for (const item of semCor) {
+    const produto = state.produtos.find((p) => p.id === item.produtoId);
+    if (produto) {
+      await sb.from('produtos').update({
+        estoque_atual: produto.estoqueAtual + item.qtd,
+        total_vendido: Math.max(0, (produto.totalVendido || 0) - item.qtd),
+      }).eq('id', produto.id);
+    }
+  }
+  const idsVenda = vendasDoDia.map((v) => v.id);
+  const idsTx = [...txVendaDoDia, ...txTaxaDoDia].map((t) => t.id);
+  if (idsVenda.length) await sb.from('vendas_detalhe').delete().in('id', idsVenda);
+  if (idsTx.length) await sb.from('transacoes').delete().in('id', idsTx);
 }
 // venda manual (atacado, feira, venda direta etc) — mesma lógica de baixa de estoque
 // do import, só que lançada na mão em vez de vir de uma planilha. Se o produto tem cor
@@ -7183,6 +7222,29 @@ function renderVendas(c) {
           </div>
         `;
         })()}
+
+        <div class="form-hint" style="margin-top:16px;margin-bottom:6px;border-top:1px solid var(--border);padding-top:12px">Importou algo antes desse recurso existir e não tem "Desfazer"? Reverte por data aqui embaixo (funciona pra qualquer venda importada, com ou sem histórico salvo).</div>
+        <input type="date" id="reversaoData" value="${window.__reversaoDataSelecionada || ''}" />
+        <button class="entrada-btn" type="button" id="buscarReversaoData">🔍 Ver o que tem nessa data</button>
+        ${window.__reversaoPrevia ? (() => {
+          const p = window.__reversaoPrevia;
+          return `
+            <div class="entrada-box">
+              ${p.txVendaDoDia.length === 0 ? `<div class="empty-state">Nenhuma venda encontrada nessa data.</div>` : `
+                <div class="form-hint">Vai apagar: ${p.txVendaDoDia.length} venda(s) (${fmt(p.totalValor)}) + ${p.txTaxaDoDia.length} taxa(s) de marketplace.</div>
+                ${p.semCor.length > 0 ? `
+                  <div class="form-hint" style="margin-top:8px;color:var(--teal)">✅ Estoque será devolvido automático (sem cor):</div>
+                  <div class="prod-breakdown">${p.semCor.map((i) => `<div class="prod-breakdown-item"><span>${esc(i.nome)}</span><span>+${i.qtd}</span></div>`).join('')}</div>
+                ` : ''}
+                ${p.comCor.length > 0 ? `
+                  <div class="form-hint" style="margin-top:8px;color:var(--amber)">⚠️ Esses têm cor — o sistema não sabe qual vendeu, você redistribui na mão depois:</div>
+                  <div class="prod-breakdown">${p.comCor.map((i) => `<div class="prod-breakdown-item"><span>${esc(i.nome)}</span><span>${i.qtd} peça(s)</span></div>`).join('')}</div>
+                ` : ''}
+                <button class="confirm-btn" style="margin-top:10px;background:var(--red)" data-confirmar-reversao-data="${p.dataStr}">🗑️ Reverter essa data</button>
+              `}
+            </div>
+          `;
+        })() : ''}
       </div>
     ` : ''}
 
@@ -7431,6 +7493,27 @@ function attachVendasHandlers(c) {
       alert('Importação desfeita — estoque restaurado.');
     });
   });
+
+  const buscarReversaoData = document.getElementById('buscarReversaoData');
+  if (buscarReversaoData) buscarReversaoData.addEventListener('click', () => {
+    const dataStr = document.getElementById('reversaoData').value;
+    if (!dataStr) { alert('Escolha uma data primeiro.'); return; }
+    window.__reversaoDataSelecionada = dataStr;
+    window.__reversaoPrevia = { ...calcularPreviaReversaoPorData(dataStr), dataStr };
+    render();
+  });
+  document.querySelectorAll('[data-confirmar-reversao-data]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const dataStr = btn.dataset.confirmarReversaoData;
+      if (!confirm(`Reverter todas as vendas de ${new Date(dataStr + 'T00:00:00').toLocaleDateString('pt-BR')}?\n\nIsso apaga os lançamentos e o detalhe de vendas dessa data, e devolve o estoque dos produtos sem cor. Produtos com cor você redistribui na mão depois.\n\nConfirma?`)) return;
+      await reverterVendasPorData(dataStr);
+      window.__reversaoPrevia = null;
+      window.__reversaoDataSelecionada = null;
+      await loadData();
+      alert('Revertido! Confere o estoque dos produtos com cor pra redistribuir manualmente.');
+    });
+  });
+
   document.querySelectorAll('[data-vincular-sku]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const pendenteId = btn.dataset.vincularSku;
