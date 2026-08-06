@@ -503,7 +503,7 @@ async function loadData() {
   state.emprestimos = (emprestimos || []).map((e) => ({ id: e.id, descricao: e.descricao, instituicao: e.instituicao || '', valorRecebido: Number(e.valor_recebido), numeroParcelas: e.numero_parcelas, valorParcela: Number(e.valor_parcela), dataRecebimento: e.data_recebimento, dataPrimeiraParcela: e.data_primeira_parcela, transacaoRecebimentoId: e.transacao_recebimento_id || null }));
   state.emprestimoParcelas = (emprestimoParcelas || []).map((p) => ({ id: p.id, emprestimoId: p.emprestimo_id, numero: p.numero, valor: Number(p.valor), dataVencimento: p.data_vencimento, transacaoId: p.transacao_id || null }));
   state.cartoesCredito = (cartoesCredito || []).map((c) => ({ id: c.id, nome: c.nome, limite: Number(c.limite || 0), diaFechamento: c.dia_fechamento, diaVencimento: c.dia_vencimento, ativo: c.ativo !== false }));
-  state.vendasSkuPendentes = (vendasSkuPendentes || []).map((v) => ({ id: v.id, sku: v.sku, quantidade: Number(v.quantidade), faturamento: Number(v.faturamento), ultimaData: v.ultima_data, plataformaNome: v.plataforma_nome || null, descricao: v.descricao || null, varianteTexto: v.variante_texto || null }));
+  state.vendasSkuPendentes = (vendasSkuPendentes || []).map((v) => ({ id: v.id, sku: v.sku, quantidade: Number(v.quantidade), faturamento: Number(v.faturamento), ultimaData: v.ultima_data, plataformaNome: v.plataforma_nome || null, descricao: v.descricao || null, varianteTexto: v.variante_texto || null, pedidos: Number(v.pedidos || v.quantidade || 1) }));
   state.vendasDetalhe = (vendasDetalhe || []).map((v) => ({ id: v.id, produtoId: v.produto_id, plataformaId: v.plataforma_id, plataformaNome: v.plataforma_nome || null, sku: v.sku || null, quantidade: Number(v.quantidade), valor: Number(v.valor), data: v.data, pedidos: Number(v.pedidos || 1) }));
   state.abonosPonto = (abonosPonto || []).map((a) => ({ id: a.id, funcionariaId: a.funcionaria_id, data: a.data, tipo: a.tipo, motivo: a.motivo || '', horas: a.horas != null ? Number(a.horas) : null }));
   state.holerites = (holerites || []).map((h) => ({ id: h.id, funcionariaId: h.funcionaria_id, mes: h.mes, diasTrabalhados: Number(h.dias_trabalhados), salarioBase: Number(h.salario_base), horasExtras: Number(h.horas_extras), valorHorasExtras: Number(h.valor_horas_extras), horasExtras100: Number(h.horas_extras_100 || 0), valorHorasExtras100: Number(h.valor_horas_extras_100 || 0), modoHorasExtras: h.modo_horas_extras, horasFaltantes: Number(h.horas_faltantes), valorVt: Number(h.valor_vt), valorVr: Number(h.valor_vr), totalPagar: Number(h.total_pagar), assinadoEm: h.assinado_em || null, assinaturaImagem: h.assinatura_imagem || null, createdAt: h.created_at, numeroRecibo: h.numero_recibo || null, emitidoPor: h.emitido_por || null }));
@@ -1399,12 +1399,13 @@ async function registrarSkusPendentes(pendentesMap) {
       const { error } = await sb.from('vendas_sku_pendentes').update({
         quantidade: existente.quantidade + info.qtd,
         faturamento: existente.faturamento + info.faturamento,
+        pedidos: (existente.pedidos || 0) + (info.pedidos || info.qtd),
         ultima_data: info.ultimaData > existente.ultimaData ? info.ultimaData : existente.ultimaData,
       }).eq('id', existente.id);
       if (error) console.error(error);
     } else {
       const { data, error } = await sb.from('vendas_sku_pendentes').insert({
-        sku, quantidade: info.qtd, faturamento: info.faturamento, ultima_data: info.ultimaData, plataforma_nome: info.plataformaNome || null,
+        sku, quantidade: info.qtd, faturamento: info.faturamento, pedidos: info.pedidos || info.qtd, ultima_data: info.ultimaData, plataforma_nome: info.plataformaNome || null,
         descricao: info.descricao || null, variante_texto: info.varianteTexto || null,
       }).select('id').single();
       if (error) console.error(error);
@@ -1433,6 +1434,10 @@ async function vincularSkuPendente(pendenteId, produtoId, varianteId) {
     await registrarVendaProduto(produtoId, produto.estoqueAtual, novoTotalVendidoKit, pendente.ultimaData);
     await atualizarPrecoVendaMedio(produtoId, pendente.faturamento, pendente.quantidade);
     await baixarEstoquePorFichaTecnica(produtoId, pendente.quantidade, pendente.ultimaData);
+    await sb.from('vendas_detalhe').insert({
+      produto_id: produtoId, plataforma_nome: pendente.plataformaNome || null, sku: pendente.sku,
+      quantidade: pendente.quantidade, valor: pendente.faturamento, data: pendente.ultimaData, pedidos: pendente.pedidos || pendente.quantidade,
+    });
     await sb.from('vendas_sku_pendentes').delete().eq('id', pendenteId);
     return;
   }
@@ -1459,6 +1464,10 @@ async function vincularSkuPendente(pendenteId, produtoId, varianteId) {
   await registrarVendaProduto(produtoId, novoEstoque, novoTotalVendido, pendente.ultimaData);
   await atualizarPrecoVendaMedio(produtoId, pendente.faturamento, pendente.quantidade);
   await baixarEstoquePorFichaTecnica(produtoId, pendente.quantidade, pendente.ultimaData);
+  await sb.from('vendas_detalhe').insert({
+    produto_id: produtoId, plataforma_nome: pendente.plataformaNome || null, sku: pendente.sku,
+    quantidade: pendente.quantidade, valor: pendente.faturamento, data: pendente.ultimaData, pedidos: pendente.pedidos || pendente.quantidade,
+  });
   const { error } = await sb.from('vendas_sku_pendentes').delete().eq('id', pendenteId);
   if (error) alert('Erro ao remover SKU pendente: ' + error.message);
 }
@@ -7416,7 +7425,7 @@ function renderVendas(c) {
                     <div class="alert-name">${esc(v.sku)}</div>
                     ${v.descricao ? `<div style="font-size:12px;color:var(--text)">${esc(v.descricao)}</div>` : ''}
                     ${v.varianteTexto ? `<div style="font-size:12px;color:var(--teal)">🎨 ${esc(v.varianteTexto)}</div>` : ''}
-                    <div class="alert-meta">${v.quantidade} peça(s) vendida(s) · ${fmt(v.faturamento)}${v.plataformaNome ? ` · ${esc(v.plataformaNome)}` : ''} · última venda ${v.ultimaData ? new Date(v.ultimaData + 'T00:00:00').toLocaleDateString('pt-BR') : '—'}</div>
+                    <div class="alert-meta">${v.quantidade} peça(s) · ${v.pedidos} pedido(s) · ${fmt(v.faturamento)}${v.plataformaNome ? ` · ${esc(v.plataformaNome)}` : ''} · última venda ${v.ultimaData ? new Date(v.ultimaData + 'T00:00:00').toLocaleDateString('pt-BR') : '—'}</div>
                   </div>
                 </div>
                 <div class="form-row" style="margin-top:8px">
@@ -7801,9 +7810,10 @@ function attachVendasHandlers(c) {
           detalhesVendas.set(chaveDetalhe, atualDetalhe);
         } else {
           const varianteTextoLinha = guessVarianteTextoField(row);
-          const atual = skusNaoEncontrados.get(sku) || { qtd: 0, faturamento: 0, ultimaData: dataLinha, plataformaNome: plataformaLinha ? plataformaLinha.nome : null, descricao: descricaoItem, varianteTexto: varianteTextoLinha };
+          const atual = skusNaoEncontrados.get(sku) || { qtd: 0, faturamento: 0, pedidos: 0, ultimaData: dataLinha, plataformaNome: plataformaLinha ? plataformaLinha.nome : null, descricao: descricaoItem, varianteTexto: varianteTextoLinha };
           atual.qtd += qtd;
           atual.faturamento += valor;
+          atual.pedidos += pedidosLinha;
           if (dataLinha > atual.ultimaData) atual.ultimaData = dataLinha;
           skusNaoEncontrados.set(sku, atual);
         }
