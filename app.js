@@ -396,6 +396,8 @@ const state = {
   empresaConfig: { cnpj: '', razaoSocial: '', nomeFantasia: '', endereco: '', telefone: '' },
   showEmpresaConfigForm: false,
   importacoesVendas: [],
+  kitComponentes: [],
+  showKitForm: false,
   showImportacoesVendas: false,
   holeriteMes: null,
   holeriteDataPagamento: null,
@@ -410,7 +412,7 @@ const state = {
 
 // ==================== DATA LAYER ====================
 async function loadData() {
-  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }, { data: feriasTiradas, error: e16 }, { data: solicitacoesPonto, error: e17 }, { data: horasExtrasLiquidadas, error: e18 }, { data: bancoHorasLancamentos, error: e19 }, { data: emprestimos, error: e20 }, { data: emprestimoParcelas, error: e21 }, { data: cartoesCredito, error: e22 }, { data: vendasSkuPendentes, error: e23 }, { data: vendasDetalhe, error: e24 }, { data: abonosPonto, error: e25 }, { data: holerites, error: e26 }, { data: feriados, error: e27 }, { data: empresaConfig, error: e28 }, { data: importacoesVendas, error: e29 }] = await Promise.all([
+  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }, { data: feriasTiradas, error: e16 }, { data: solicitacoesPonto, error: e17 }, { data: horasExtrasLiquidadas, error: e18 }, { data: bancoHorasLancamentos, error: e19 }, { data: emprestimos, error: e20 }, { data: emprestimoParcelas, error: e21 }, { data: cartoesCredito, error: e22 }, { data: vendasSkuPendentes, error: e23 }, { data: vendasDetalhe, error: e24 }, { data: abonosPonto, error: e25 }, { data: holerites, error: e26 }, { data: feriados, error: e27 }, { data: empresaConfig, error: e28 }, { data: importacoesVendas, error: e29 }, { data: kitComponentes, error: e30 }] = await Promise.all([
     sb.from('transacoes').select('*').order('data', { ascending: false }),
     sb.from('produtos').select('*').order('created_at', { ascending: false }),
     sb.from('plataformas').select('*').order('nome', { ascending: true }),
@@ -440,6 +442,7 @@ async function loadData() {
     sb.from('feriados').select('*').order('data', { ascending: true }),
     sb.from('empresa_config').select('*').eq('id', 1).maybeSingle(),
     sb.from('importacoes_vendas').select('id, nome_arquivo, transacao_ids, vendas_detalhe_ids, sku_pendente_ids, desfeita, created_at').order('created_at', { ascending: false }).limit(10),
+    sb.from('kit_componentes').select('*'),
   ]);
   if (e1) console.error(e1);
   if (e2) console.error(e2);
@@ -470,6 +473,7 @@ async function loadData() {
   if (e27) console.error(e27);
   if (e28) console.error(e28);
   if (e29) console.error(e29);
+  if (e30) console.error(e30);
   state.tx = (tx || []).map(mapTxFromDb);
   state.produtos = (produtos || []).map(mapProdutoFromDb);
   state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0), taxaFaixas: Array.isArray(p.taxa_faixas) ? p.taxa_faixas : [] }));
@@ -499,6 +503,7 @@ async function loadData() {
   state.feriados = (feriados || []).map((f) => ({ id: f.id, data: f.data, nome: f.nome || '' }));
   state.empresaConfig = { cnpj: empresaConfig?.cnpj || '', razaoSocial: empresaConfig?.razao_social || '', nomeFantasia: empresaConfig?.nome_fantasia || '', endereco: empresaConfig?.endereco || '', telefone: empresaConfig?.telefone || '' };
   state.importacoesVendas = (importacoesVendas || []).map((i) => ({ id: i.id, nomeArquivo: i.nome_arquivo || 'Importação', transacaoIds: i.transacao_ids || [], vendasDetalheIds: i.vendas_detalhe_ids || [], skuPendenteIds: i.sku_pendente_ids || [], desfeita: i.desfeita, createdAt: i.created_at }));
+  state.kitComponentes = (kitComponentes || []).map((k) => ({ id: k.id, produtoKitId: k.produto_kit_id, componenteProdutoId: k.componente_produto_id, componenteVarianteId: k.componente_variante_id || null, quantidade: Number(k.quantidade) }));
   state.loading = false;
   render();
 }
@@ -518,7 +523,7 @@ function mapTxFromDb(row) {
   return { id: row.id, tipo: row.tipo, valor: Number(row.valor), categoria: row.categoria, natureza: row.natureza, descricao: row.descricao, data: row.data, recorrente: !!row.recorrente, recorrenteOrigemId: row.recorrente_origem_id || null, idPedido: row.id_pedido || null, conciliado: !!row.conciliado, pago: row.pago !== false, cartaoId: row.cartao_id || null };
 }
 function mapProdutoFromDb(row) {
-  return { id: row.id, nome: row.nome, sku: row.sku, estoqueAtual: row.estoque_atual, estoqueMinimo: row.estoque_minimo, custoUnitario: Number(row.custo_unitario), totalVendido: row.total_vendido || 0, ultimaVenda: row.ultima_venda || null, valorMaoObra: Number(row.valor_mao_obra || 0), tipo: row.tipo || 'unitario', precoVendaMedio: Number(row.preco_venda_medio || 0), ativo: row.ativo !== false };
+  return { id: row.id, nome: row.nome, sku: row.sku, estoqueAtual: row.estoque_atual, estoqueMinimo: row.estoque_minimo, custoUnitario: Number(row.custo_unitario), totalVendido: row.total_vendido || 0, ultimaVenda: row.ultima_venda || null, valorMaoObra: Number(row.valor_mao_obra || 0), tipo: row.tipo || 'unitario', precoVendaMedio: Number(row.preco_venda_medio || 0), ativo: row.ativo !== false, ehKit: !!row.eh_kit };
 }
 
 async function addTx(tx) {
@@ -1317,6 +1322,43 @@ async function updateProdutoEstoque(id, novoEstoque) {
   const { error } = await sb.from('produtos').update({ estoque_atual: novoEstoque }).eq('id', id);
   if (error) alert('Erro ao atualizar estoque: ' + error.message);
 }
+// desconta estoque de uma venda — se o produto for um kit (composto por outros produtos,
+// ex: "Kit 2 Top Joy" = 2x Top Joy), desconta dos componentes de verdade, multiplicado pela
+// quantidade de cada componente × quantidade vendida do kit, em vez de tentar descontar de
+// um estoque próprio que o kit nem tem
+async function baixarEstoqueVenda(produto, varianteId, quantidadeVendida) {
+  if (produto.ehKit) {
+    const componentes = state.kitComponentes.filter((k) => k.produtoKitId === produto.id);
+    for (const comp of componentes) {
+      const qtdBaixar = comp.quantidade * quantidadeVendida;
+      if (comp.componenteVarianteId) {
+        const variante = state.variantes.find((v) => v.id === comp.componenteVarianteId);
+        if (variante) await updateVarianteEstoque(variante.id, variante.estoqueAtual - qtdBaixar);
+      } else {
+        const componenteProduto = state.produtos.find((p) => p.id === comp.componenteProdutoId);
+        if (componenteProduto) await updateProdutoEstoque(componenteProduto.id, componenteProduto.estoqueAtual - qtdBaixar);
+      }
+    }
+  } else if (varianteId) {
+    const variante = state.variantes.find((v) => v.id === varianteId);
+    if (variante) await updateVarianteEstoque(variante.id, variante.estoqueAtual - quantidadeVendida);
+  } else {
+    await updateProdutoEstoque(produto.id, produto.estoqueAtual - quantidadeVendida);
+  }
+}
+// salva os componentes de um kit — apaga os antigos e grava os novos de uma vez, e marca o
+// produto como kit (ou desmarca, se a lista vier vazia)
+async function salvarComponentesKit(produtoKitId, componentes) {
+  await sb.from('kit_componentes').delete().eq('produto_kit_id', produtoKitId);
+  if (componentes.length > 0) {
+    const { error } = await sb.from('kit_componentes').insert(componentes.map((c) => ({
+      produto_kit_id: produtoKitId, componente_produto_id: c.produtoId, componente_variante_id: c.varianteId || null, quantidade: c.quantidade,
+    })));
+    if (error) { alert('Erro ao salvar componentes do kit: ' + error.message); return; }
+  }
+  const { error: errProduto } = await sb.from('produtos').update({ eh_kit: componentes.length > 0 }).eq('id', produtoKitId);
+  if (errProduto) alert('Erro ao marcar produto como kit: ' + errProduto.message);
+}
 async function registrarVendaProduto(id, novoEstoque, novoTotalVendido, dataVenda) {
   const { error } = await sb.from('produtos').update({ estoque_atual: novoEstoque, total_vendido: novoTotalVendido, ultima_venda: dataVenda }).eq('id', id);
   if (error) alert('Erro ao registrar venda: ' + error.message);
@@ -1370,6 +1412,22 @@ async function vincularSkuPendente(pendenteId, produtoId, varianteId) {
   const pendente = state.vendasSkuPendentes.find((v) => v.id === pendenteId);
   const produto = state.produtos.find((p) => p.id === produtoId);
   if (!pendente || !produto) return;
+  if (produto.ehKit) {
+    // kit não guarda estoque próprio — desconta direto dos componentes, multiplicado pela
+    // quantidade de cada um
+    const skusAtuais = (produto.sku || '').split(',').map((s) => s.trim()).filter(Boolean);
+    if (!skusAtuais.some((s) => s.toLowerCase() === pendente.sku.trim().toLowerCase())) {
+      skusAtuais.push(pendente.sku.trim());
+      await updateProduto(produtoId, { ...produto, sku: skusAtuais.join(', ') });
+    }
+    await baixarEstoqueVenda(produto, null, pendente.quantidade);
+    const novoTotalVendidoKit = (produto.totalVendido || 0) + pendente.quantidade;
+    await registrarVendaProduto(produtoId, produto.estoqueAtual, novoTotalVendidoKit, pendente.ultimaData);
+    await atualizarPrecoVendaMedio(produtoId, pendente.faturamento, pendente.quantidade);
+    await baixarEstoquePorFichaTecnica(produtoId, pendente.quantidade, pendente.ultimaData);
+    await sb.from('vendas_sku_pendentes').delete().eq('id', pendenteId);
+    return;
+  }
   if (varianteId) {
     const variante = state.variantes.find((v) => v.id === varianteId);
     if (variante) {
@@ -6420,7 +6478,31 @@ function renderEstoque(c) {
                 </div>
                 <input type="text" id="editPCusto-${p.id}" placeholder="Custo por unidade" value="${p.custoUnitario.toFixed(2).replace('.', ',')}" />
                 <input type="text" id="editPMaoObra-${p.id}" placeholder="Valor de mão de obra por peça" value="${(p.valorMaoObra || 0).toFixed(2).replace('.', ',')}" />
-                <div class="form-row">
+                <div class="form-hint" style="margin-top:10px;margin-bottom:2px">🎁 Esse produto desconta estoque de OUTROS produtos quando vendido? (ex: "Kit 2 Top Joy" desconta 2x Top Joy do estoque, não guarda estoque próprio)</div>
+                <label class="checkbox-label"><input type="checkbox" id="editPEhKit-${p.id}" ${(window.__editProdutoEhKit?.[p.id] ?? p.ehKit) ? 'checked' : ''} data-toggle-eh-kit="${p.id}" /> Sim, é um kit — descontar dos componentes abaixo</label>
+                ${(window.__editProdutoEhKit?.[p.id] ?? p.ehKit) ? (() => {
+                  const componentesExistentes = state.kitComponentes.filter((k) => k.produtoKitId === p.id);
+                  return Array.from({ length: 4 }, (_, i) => {
+                    const comp = componentesExistentes[i];
+                    const valorAtual = comp ? `${comp.componenteProdutoId}|${comp.componenteVarianteId || ''}` : '';
+                    return `
+                      <div class="form-row" style="margin-top:4px">
+                        <select id="editKitComp-${p.id}-${i}">
+                          <option value="">Componente (opcional)</option>
+                          ${state.produtos.filter((prod) => prod.id !== p.id && !prod.ehKit).map((prod) => {
+                            const vs = variantesDoProduto(prod.id);
+                            if (vs.length > 0) {
+                              return vs.map((v) => `<option value="${prod.id}|${v.id}" ${valorAtual === `${prod.id}|${v.id}` ? 'selected' : ''}>${esc(prod.nome)} — ${esc(v.cor)}</option>`).join('');
+                            }
+                            return `<option value="${prod.id}|" ${valorAtual === `${prod.id}|` ? 'selected' : ''}>${esc(prod.nome)}</option>`;
+                          }).join('')}
+                        </select>
+                        <input type="text" id="editKitCompQtd-${p.id}-${i}" placeholder="Qtd" value="${comp ? comp.quantidade : ''}" style="max-width:70px" inputmode="numeric" />
+                      </div>
+                    `;
+                  }).join('');
+                })() : ''}
+                <div class="form-row" style="margin-top:10px">
                   <button class="confirm-btn" data-salvar-edit-produto="${p.id}">Salvar</button>
                   <button class="toggle-btn" data-cancelar-edit-produto="${p.id}">Cancelar</button>
                 </div>
@@ -7733,6 +7815,14 @@ function attachVendasHandlers(c) {
     for (const [produtoId, info] of deducoes.entries()) {
       const produto = state.produtos.find((p) => p.id === produtoId);
       if (!produto) continue;
+      if (produto.ehKit) {
+        // kit não guarda estoque próprio — desconta direto dos componentes
+        await baixarEstoqueVenda(produto, null, info.qtd);
+        const novoTotalVendidoKit = (produto.totalVendido || 0) + info.qtd;
+        await registrarVendaProduto(produtoId, produto.estoqueAtual, novoTotalVendidoKit, info.ultimaData);
+        await atualizarPrecoVendaMedio(produtoId, info.faturamento, info.qtd);
+        continue;
+      }
       const vs = variantesDoProduto(produtoId);
       // baixa de cada cor identificada pelo SKU
       for (const [varianteId, qtdCor] of info.porVariante.entries()) {
@@ -8713,6 +8803,13 @@ function attachEstoqueHandlers(c) {
   document.querySelectorAll('[data-edit-produto-tipo]').forEach((btn) => {
     btn.addEventListener('click', () => { window.__editProdutoTipo = btn.dataset.editProdutoTipo; render(); });
   });
+  document.querySelectorAll('[data-toggle-eh-kit]').forEach((chk) => {
+    chk.addEventListener('change', (e) => {
+      window.__editProdutoEhKit = window.__editProdutoEhKit || {};
+      window.__editProdutoEhKit[chk.dataset.toggleEhKit] = e.target.checked;
+      render();
+    });
+  });
   document.querySelectorAll('[data-salvar-edit-produto]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const id = btn.dataset.salvarEditProduto;
@@ -8726,8 +8823,27 @@ function attachEstoqueHandlers(c) {
       const tipo = window.__editProdutoTipo || produtoOriginal?.tipo || 'unitario';
       if (!nome) { alert('Informe o nome do produto.'); return; }
       await updateProduto(id, { nome, sku, estoqueAtual, estoqueMinimo, custoUnitario, valorMaoObra, tipo });
+
+      const ehKit = window.__editProdutoEhKit?.[id] ?? produtoOriginal?.ehKit;
+      if (ehKit) {
+        const componentes = [];
+        for (let i = 0; i < 4; i++) {
+          const valor = document.getElementById(`editKitComp-${id}-${i}`)?.value;
+          const qtd = Number(document.getElementById(`editKitCompQtd-${id}-${i}`)?.value) || 0;
+          if (valor && qtd > 0) {
+            const [produtoId, varianteId] = valor.split('|');
+            componentes.push({ produtoId, varianteId: varianteId || null, quantidade: qtd });
+          }
+        }
+        if (componentes.length === 0) { alert('Marcou como kit mas não escolheu nenhum componente — configure pelo menos um componente com quantidade.'); return; }
+        await salvarComponentesKit(id, componentes);
+      } else if (produtoOriginal?.ehKit) {
+        await salvarComponentesKit(id, []);
+      }
+
       state.editingProdutoId = null;
       window.__editProdutoTipo = null;
+      if (window.__editProdutoEhKit) delete window.__editProdutoEhKit[id];
       await loadData();
     });
   });
