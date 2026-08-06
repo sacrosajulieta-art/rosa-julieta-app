@@ -533,7 +533,7 @@ function mapTxFromDb(row) {
   return { id: row.id, tipo: row.tipo, valor: Number(row.valor), categoria: row.categoria, natureza: row.natureza, descricao: row.descricao, data: row.data, recorrente: !!row.recorrente, recorrenteOrigemId: row.recorrente_origem_id || null, idPedido: row.id_pedido || null, conciliado: !!row.conciliado, pago: row.pago !== false, cartaoId: row.cartao_id || null };
 }
 function mapProdutoFromDb(row) {
-  return { id: row.id, nome: row.nome, sku: row.sku, estoqueAtual: row.estoque_atual, estoqueMinimo: row.estoque_minimo, custoUnitario: Number(row.custo_unitario), totalVendido: row.total_vendido || 0, ultimaVenda: row.ultima_venda || null, valorMaoObra: Number(row.valor_mao_obra || 0), tipo: row.tipo || 'unitario', precoVendaMedio: Number(row.preco_venda_medio || 0), ativo: row.ativo !== false, ehKit: !!row.eh_kit };
+  return { id: row.id, nome: row.nome, sku: row.sku, estoqueAtual: row.estoque_atual, estoqueMinimo: row.estoque_minimo, custoUnitario: Number(row.custo_unitario), custoEstimado: !!row.custo_estimado, totalVendido: row.total_vendido || 0, ultimaVenda: row.ultima_venda || null, valorMaoObra: Number(row.valor_mao_obra || 0), tipo: row.tipo || 'unitario', precoVendaMedio: Number(row.preco_venda_medio || 0), ativo: row.ativo !== false, ehKit: !!row.eh_kit };
 }
 
 async function addTx(tx) {
@@ -1323,7 +1323,7 @@ async function updateTx(id, tx) {
 
 async function addProduto(p) {
   const { data, error } = await sb.from('produtos').insert({
-    nome: p.nome, sku: p.sku || null, estoque_atual: p.estoqueAtual, estoque_minimo: p.estoqueMinimo, custo_unitario: p.custoUnitario, valor_mao_obra: p.valorMaoObra || 0, tipo: p.tipo || 'unitario',
+    nome: p.nome, sku: p.sku || null, estoque_atual: p.estoqueAtual, estoque_minimo: p.estoqueMinimo, custo_unitario: p.custoUnitario, custo_estimado: !!p.custoEstimado, valor_mao_obra: p.valorMaoObra || 0, tipo: p.tipo || 'unitario',
   }).select().single();
   if (error) { alert('Erro ao salvar produto: ' + error.message); return null; }
   return data;
@@ -1618,7 +1618,7 @@ async function lancarVendaManual({ produtoId, quantidade, valor, frete, canal, d
 }
 async function updateProduto(id, p) {
   const { error } = await sb.from('produtos').update({
-    nome: p.nome, sku: p.sku || null, estoque_atual: p.estoqueAtual, estoque_minimo: p.estoqueMinimo, custo_unitario: p.custoUnitario, valor_mao_obra: p.valorMaoObra || 0, tipo: p.tipo || 'unitario',
+    nome: p.nome, sku: p.sku || null, estoque_atual: p.estoqueAtual, estoque_minimo: p.estoqueMinimo, custo_unitario: p.custoUnitario, custo_estimado: !!p.custoEstimado, valor_mao_obra: p.valorMaoObra || 0, tipo: p.tipo || 'unitario',
   }).eq('id', id);
   if (error) alert('Erro ao atualizar produto: ' + error.message);
 }
@@ -6484,6 +6484,7 @@ function renderEstoque(c) {
           <input type="text" id="pEstoqueMinimo" placeholder="Estoque mínimo" />
         </div>
         <input type="text" id="pCusto" placeholder="Custo de produção por unidade (ex: 18,50)" />
+        <label class="checkbox-label"><input type="checkbox" id="pCustoEstimado" /> ≈ Esse é um custo estimado (não sei o valor real do tecido/corte ainda)</label>
         <input type="text" id="pMaoObra" placeholder="Valor de mão de obra por peça (ex: 5,00)" />
 
         <div class="form-hint">🎨 Esse produto tem cores? Cadastre já aqui (opcional). Se preencher, o estoque de cada cor começa zerado — o "Estoque atual" acima é ignorado e você ajusta cor por cor depois de salvar.</div>
@@ -6519,6 +6520,7 @@ function renderEstoque(c) {
                   <input type="text" id="editPEstoqueMinimo-${p.id}" placeholder="Estoque mínimo" value="${p.estoqueMinimo}" />
                 </div>
                 <input type="text" id="editPCusto-${p.id}" placeholder="Custo por unidade" value="${p.custoUnitario.toFixed(2).replace('.', ',')}" />
+                <label class="checkbox-label"><input type="checkbox" id="editPCustoEstimado-${p.id}" ${p.custoEstimado ? 'checked' : ''} /> ≈ Esse é um custo estimado (não sei o valor real do tecido/corte ainda)</label>
                 <input type="text" id="editPMaoObra-${p.id}" placeholder="Valor de mão de obra por peça" value="${(p.valorMaoObra || 0).toFixed(2).replace('.', ',')}" />
                 <div class="form-hint" style="margin-top:10px;margin-bottom:2px">🎁 Esse produto desconta estoque de OUTROS produtos quando vendido? (ex: "Kit 2 Top Joy" desconta 2x Top Joy do estoque, não guarda estoque próprio)</div>
                 <label class="checkbox-label"><input type="checkbox" id="editPEhKit-${p.id}" ${(window.__editProdutoEhKit?.[p.id] ?? p.ehKit) ? 'checked' : ''} data-toggle-eh-kit="${p.id}" /> Sim, é um kit — descontar dos componentes abaixo</label>
@@ -6582,14 +6584,14 @@ function renderEstoque(c) {
                       <button class="trash-btn" data-remover-variante="${v.id}">🗑</button>
                     </div>
                   `).join('')}
-                  <div class="produto-meta" style="margin-top:6px">Total: ${p.estoqueAtual} un · mín. ${p.estoqueMinimo} · ${fmt(p.custoTotalUnitario)}/un</div>
+                  <div class="produto-meta" style="margin-top:6px">Total: ${p.estoqueAtual} un · mín. ${p.estoqueMinimo} · ${p.custoEstimado ? '≈ ' : ''}${fmt(p.custoTotalUnitario)}/un${p.custoEstimado ? ' <span style="color:var(--amber)">(estimado)</span>' : ''}</div>
                 </div>
               ` : `
                 <div class="produto-stock-row">
                   <button class="step-btn" data-step="-1" data-produto="${p.id}" data-atual="${p.estoqueAtual}">-</button>
                   <input type="text" class="stock-value-input" inputmode="numeric" value="${p.estoqueAtual}" data-produto-editar="${p.id}" data-atual="${p.estoqueAtual}" placeholder="ex: +63" style="width:64px;text-align:center;font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600" />
                   <button class="step-btn" data-step="1" data-produto="${p.id}" data-atual="${p.estoqueAtual}">+</button>
-                  <div class="produto-meta">mín. ${p.estoqueMinimo} · ${fmt(p.custoTotalUnitario)}/un</div>
+                  <div class="produto-meta">mín. ${p.estoqueMinimo} · ${p.custoEstimado ? '≈ ' : ''}${fmt(p.custoTotalUnitario)}/un${p.custoEstimado ? ' <span style="color:var(--amber)">(estimado)</span>' : ''}</div>
                 </div>
               `}
 
@@ -8695,7 +8697,7 @@ function attachEstoqueHandlers(c) {
       const produto = state.produtos.find((p) => p.id === btn.dataset.aplicarUltimoCorte);
       if (!produto) return;
       const novoCusto = Number(btn.dataset.valor);
-      await updateProduto(produto.id, { nome: produto.nome, sku: produto.sku, estoqueAtual: produto.estoqueAtual, estoqueMinimo: produto.estoqueMinimo, custoUnitario: novoCusto, valorMaoObra: produto.valorMaoObra });
+      await updateProduto(produto.id, { nome: produto.nome, sku: produto.sku, estoqueAtual: produto.estoqueAtual, estoqueMinimo: produto.estoqueMinimo, custoUnitario: novoCusto, custoEstimado: false, valorMaoObra: produto.valorMaoObra });
       await loadData();
     });
   });
@@ -8752,6 +8754,7 @@ function attachEstoqueHandlers(c) {
     const estoqueAtual = Number(document.getElementById('pEstoqueAtual').value) || 0;
     const estoqueMinimo = Number(document.getElementById('pEstoqueMinimo').value) || 0;
     const custoUnitario = parseBRNumber(document.getElementById('pCusto').value);
+    const custoEstimado = document.getElementById('pCustoEstimado')?.checked || false;
     const valorMaoObra = parseBRNumber(document.getElementById('pMaoObra').value);
     const tipo = window.__novoProdutoTipo || 'unitario';
     if (!nome) { alert('Informe o nome do produto.'); return; }
@@ -8763,7 +8766,7 @@ function attachEstoqueHandlers(c) {
       if (corNome) cores.push({ nome: corNome, sku: corSku });
     }
 
-    const produtoCriado = await addProduto({ nome, sku, estoqueAtual: cores.length ? 0 : estoqueAtual, estoqueMinimo, custoUnitario, valorMaoObra, tipo });
+    const produtoCriado = await addProduto({ nome, sku, estoqueAtual: cores.length ? 0 : estoqueAtual, estoqueMinimo, custoUnitario, custoEstimado, valorMaoObra, tipo });
     if (produtoCriado) {
       for (const cor of cores) await addVariante(produtoCriado.id, cor.nome, cor.sku);
     }
@@ -8884,11 +8887,12 @@ function attachEstoqueHandlers(c) {
       const estoqueAtual = Number(document.getElementById(`editPEstoqueAtual-${id}`).value) || 0;
       const estoqueMinimo = Number(document.getElementById(`editPEstoqueMinimo-${id}`).value) || 0;
       const custoUnitario = parseBRNumber(document.getElementById(`editPCusto-${id}`).value);
+      const custoEstimado = document.getElementById(`editPCustoEstimado-${id}`)?.checked || false;
       const valorMaoObra = parseBRNumber(document.getElementById(`editPMaoObra-${id}`).value);
       const produtoOriginal = state.produtos.find((p) => p.id === id);
       const tipo = window.__editProdutoTipo || produtoOriginal?.tipo || 'unitario';
       if (!nome) { alert('Informe o nome do produto.'); return; }
-      await updateProduto(id, { nome, sku, estoqueAtual, estoqueMinimo, custoUnitario, valorMaoObra, tipo });
+      await updateProduto(id, { nome, sku, estoqueAtual, estoqueMinimo, custoUnitario, custoEstimado, valorMaoObra, tipo });
 
       const ehKit = window.__editProdutoEhKit?.[id] ?? produtoOriginal?.ehKit;
       if (ehKit) {
