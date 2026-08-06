@@ -419,7 +419,7 @@ const state = {
 
 // ==================== DATA LAYER ====================
 async function loadData() {
-  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }, { data: feriasTiradas, error: e16 }, { data: solicitacoesPonto, error: e17 }, { data: horasExtrasLiquidadas, error: e18 }, { data: bancoHorasLancamentos, error: e19 }, { data: emprestimos, error: e20 }, { data: emprestimoParcelas, error: e21 }, { data: cartoesCredito, error: e22 }, { data: vendasSkuPendentes, error: e23 }, { data: vendasDetalhe, error: e24 }, { data: abonosPonto, error: e25 }, { data: holerites, error: e26 }, { data: feriados, error: e27 }, { data: empresaConfig, error: e28 }, { data: importacoesVendas, error: e29 }, { data: kitComponentes, error: e30 }] = await Promise.all([
+  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }, { data: feriasTiradas, error: e16 }, { data: solicitacoesPonto, error: e17 }, { data: horasExtrasLiquidadas, error: e18 }, { data: bancoHorasLancamentos, error: e19 }, { data: emprestimos, error: e20 }, { data: emprestimoParcelas, error: e21 }, { data: cartoesCredito, error: e22 }, { data: vendasSkuPendentes, error: e23 }, { data: vendasDetalhe, error: e24 }, { data: abonosPonto, error: e25 }, { data: holerites, error: e26 }, { data: feriados, error: e27 }, { data: empresaConfig, error: e28 }, { data: importacoesVendas, error: e29 }, { data: kitComponentes, error: e30 }, { data: vendasResumoDiario, error: e31 }] = await Promise.all([
     sb.from('transacoes').select('*').order('data', { ascending: false }),
     sb.from('produtos').select('*').order('created_at', { ascending: false }),
     sb.from('plataformas').select('*').order('nome', { ascending: true }),
@@ -450,6 +450,7 @@ async function loadData() {
     sb.from('empresa_config').select('*').eq('id', 1).maybeSingle(),
     sb.from('importacoes_vendas').select('id, nome_arquivo, transacao_ids, vendas_detalhe_ids, sku_pendente_ids, desfeita, created_at').order('created_at', { ascending: false }).limit(10),
     sb.from('kit_componentes').select('*'),
+    sb.from('vendas_resumo_diario').select('*'),
   ]);
   if (e1) console.error(e1);
   if (e2) console.error(e2);
@@ -481,6 +482,7 @@ async function loadData() {
   if (e28) console.error(e28);
   if (e29) console.error(e29);
   if (e30) console.error(e30);
+  if (e31) console.error(e31);
   state.tx = (tx || []).map(mapTxFromDb);
   state.produtos = (produtos || []).map(mapProdutoFromDb);
   state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0), taxaFaixas: Array.isArray(p.taxa_faixas) ? p.taxa_faixas : [] }));
@@ -511,6 +513,7 @@ async function loadData() {
   state.empresaConfig = { cnpj: empresaConfig?.cnpj || '', razaoSocial: empresaConfig?.razao_social || '', nomeFantasia: empresaConfig?.nome_fantasia || '', endereco: empresaConfig?.endereco || '', telefone: empresaConfig?.telefone || '' };
   state.importacoesVendas = (importacoesVendas || []).map((i) => ({ id: i.id, nomeArquivo: i.nome_arquivo || 'Importação', transacaoIds: i.transacao_ids || [], vendasDetalheIds: i.vendas_detalhe_ids || [], skuPendenteIds: i.sku_pendente_ids || [], desfeita: i.desfeita, createdAt: i.created_at }));
   state.kitComponentes = (kitComponentes || []).map((k) => ({ id: k.id, produtoKitId: k.produto_kit_id, componenteProdutoId: k.componente_produto_id, componenteVarianteId: k.componente_variante_id || null, quantidade: Number(k.quantidade) }));
+  state.vendasResumoDiario = (vendasResumoDiario || []).map((r) => ({ id: r.id, plataformaNome: r.plataforma_nome || null, data: r.data, pedidos: Number(r.pedidos), unidades: Number(r.unidades), faturamento: Number(r.faturamento) }));
   state.loading = false;
   render();
 }
@@ -1366,6 +1369,26 @@ async function salvarComponentesKit(produtoKitId, componentes) {
   const { error: errProduto } = await sb.from('produtos').update({ eh_kit: componentes.length > 0 }).eq('id', produtoKitId);
   if (errProduto) alert('Erro ao marcar produto como kit: ' + errProduto.message);
 }
+// acumula pedidos/unidades/faturamento por plataforma+dia, de TODA venda importada — não
+// depende de o SKU já estar vinculado a um produto, pra "pedidos" e "ticket médio" ficarem
+// certos desde a hora da importação, sem esperar vincular nada
+async function acumularResumoDiario(mapaResumo) {
+  for (const [chave, info] of mapaResumo.entries()) {
+    const [plataformaNome, data] = chave.split('|');
+    const { data: existente } = await sb.from('vendas_resumo_diario').select('*').eq('plataforma_nome', plataformaNome || '').eq('data', data).maybeSingle();
+    if (existente) {
+      await sb.from('vendas_resumo_diario').update({
+        pedidos: Number(existente.pedidos) + info.pedidos,
+        unidades: Number(existente.unidades) + info.unidades,
+        faturamento: Number(existente.faturamento) + info.faturamento,
+      }).eq('id', existente.id);
+    } else {
+      await sb.from('vendas_resumo_diario').insert({
+        plataforma_nome: plataformaNome || null, data, pedidos: info.pedidos, unidades: info.unidades, faturamento: info.faturamento,
+      });
+    }
+  }
+}
 async function registrarVendaProduto(id, novoEstoque, novoTotalVendido, dataVenda) {
   const { error } = await sb.from('produtos').update({ estoque_atual: novoEstoque, total_vendido: novoTotalVendido, ultima_venda: dataVenda }).eq('id', id);
   if (error) alert('Erro ao registrar venda: ' + error.message);
@@ -1544,6 +1567,7 @@ async function reverterVendasPorData(dataStr) {
   const idsTx = [...txVendaDoDia, ...txTaxaDoDia].map((t) => t.id);
   if (idsVenda.length) await sb.from('vendas_detalhe').delete().in('id', idsVenda);
   if (idsTx.length) await sb.from('transacoes').delete().in('id', idsTx);
+  await sb.from('vendas_resumo_diario').delete().eq('data', dataStr);
 }
 // venda manual (atacado, feira, venda direta etc) — mesma lógica de baixa de estoque
 // do import, só que lançada na mão em vez de vir de uma planilha. Se o produto tem cor
@@ -7242,8 +7266,9 @@ function renderVendas(c) {
   const vendasMes = c.txMes.filter((t) => t.tipo === 'entrada' && t.categoria.startsWith('Venda'));
   const faturamentoMes = vendasMes.reduce((a, t) => a + t.valor, 0);
   const pedidosUnicosMes = new Set(vendasMes.filter((t) => t.idPedido).map((t) => t.idPedido.trim().toLowerCase()));
-  const pedidosReaisMesTotal = state.vendasDetalhe.filter((v) => v.data && monthKey(v.data) === mesAtual).reduce((a, v) => a + v.pedidos, 0);
-  const qtdPedidosMes = pedidosUnicosMes.size > 0 ? pedidosUnicosMes.size : (pedidosReaisMesTotal || vendasMes.length);
+  const resumoDiarioMes = state.vendasResumoDiario.filter((r) => r.data && monthKey(r.data) === mesAtual);
+  const pedidosResumoMesTotal = resumoDiarioMes.reduce((a, r) => a + r.pedidos, 0);
+  const qtdPedidosMes = pedidosUnicosMes.size > 0 ? pedidosUnicosMes.size : (pedidosResumoMesTotal || vendasMes.length);
   const ticketMedio = qtdPedidosMes > 0 ? faturamentoMes / qtdPedidosMes : 0;
 
   // comparação entre plataformas, no mês selecionado
@@ -7256,13 +7281,13 @@ function renderVendas(c) {
     if (t.idPedido) atual.pedidos.add(t.idPedido.trim().toLowerCase());
     porPlataforma.set(nome, atual);
   });
-  // pedidos reais (da coluna "Pedidos Válidos" do relatório, quando existe) — muito mais
-  // preciso que contar ID de pedido (nem todo relatório tem) ou contar lançamentos (que
-  // agora podem ser vários por venda, já que cada peça vira seu próprio lançamento)
+  // pedidos reais (resumo diário, montado na importação a partir da coluna "Pedidos
+  // Válidos" quando existe) — cobre 100% das vendas, vinculadas ou não a um produto, então
+  // fica consistente com o faturamento (que também é de 100% das vendas)
   const pedidosRealPorPlataforma = new Map();
-  state.vendasDetalhe.filter((v) => v.data && monthKey(v.data) === mesAtual).forEach((v) => {
-    const nome = (v.plataformaNome || 'Sem plataforma').trim();
-    pedidosRealPorPlataforma.set(nome, (pedidosRealPorPlataforma.get(nome) || 0) + v.pedidos);
+  resumoDiarioMes.forEach((r) => {
+    const nome = (r.plataformaNome || 'Sem plataforma').trim();
+    pedidosRealPorPlataforma.set(nome, (pedidosRealPorPlataforma.get(nome) || 0) + r.pedidos);
   });
   const comparacaoPlataformas = [...porPlataforma.entries()]
     .map(([nome, info]) => {
@@ -7702,6 +7727,9 @@ function attachVendasHandlers(c) {
     const skusNaoEncontrados = new Map(); // sku -> { qtd, faturamento, ultimaData, plataformaNome }
     const pedidosPorPlataforma = new Map(); // plataformaId (ou '_sem_plataforma') -> Set de pedidos
     const linhasSemPedidoPorPlataforma = new Map(); // fallback quando a linha não tem ID do pedido
+    // resumo diário por plataforma, de TODA linha — independente de o SKU já estar vinculado
+    // ou não, pra "pedidos"/"ticket médio" ficarem certos desde já
+    const resumoDiarioMap = new Map(); // "plataformaNome|data" -> { pedidos, unidades, faturamento }
     let temSku = false;
     let totalTaxas = 0;
     let totalTaxasReais = 0;
@@ -7727,6 +7755,13 @@ function attachVendasHandlers(c) {
       const taxaFixaLinha = taxaEscolhida.fixa;
       const idPedidoLinha = guessIdPedidoField(row);
       const chavePlataforma = plataformaLinha ? plataformaLinha.id : '_sem_plataforma';
+
+      const chaveResumo = `${plataformaLinha ? plataformaLinha.nome : ''}|${dataLinha}`;
+      const atualResumo = resumoDiarioMap.get(chaveResumo) || { pedidos: 0, unidades: 0, faturamento: 0 };
+      atualResumo.pedidos += pedidosLinha;
+      atualResumo.unidades += qtdLinha;
+      atualResumo.faturamento += valor;
+      resumoDiarioMap.set(chaveResumo, atualResumo);
       if (idPedidoLinha) {
         if (!pedidosPorPlataforma.has(chavePlataforma)) pedidosPorPlataforma.set(chavePlataforma, new Set());
         pedidosPorPlataforma.get(chavePlataforma).add(idPedidoLinha.trim().toLowerCase());
@@ -7892,6 +7927,7 @@ function attachVendasHandlers(c) {
       if (totalParaBaixar > 0) await baixarInsumo(insumo.id, totalParaBaixar);
     }
 
+    await acumularResumoDiario(resumoDiarioMap);
     await salvarImportacaoVendas(file.name, snapshotAntes, transacaoIdsCriadas, vendasDetalheIdsCriadas, skuPendenteIdsCriados);
     state.showUpload = false;
     await loadData();
