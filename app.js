@@ -229,12 +229,16 @@ function guessTaxaRealField(row) {
 // escolhe a taxa % e fixa certa pra uma plataforma — se ela tiver "taxa por faixa de valor"
 // configurada (ex: TikTok Shop, que cobra diferente pra produtos abaixo/acima de R$50),
 // usa a faixa certa conforme o valor da venda; senão usa a taxa única normal
+// escolhe a taxa % e fixa certa pra uma plataforma — se ela tiver "faixas por valor"
+// configuradas (ex: Shopee com 3+ faixas, TikTok Shop com 2), usa a faixa certa conforme
+// o valor da venda; senão usa a taxa única normal. As faixas são [{ate, pct, fixa}], e a
+// última faixa (sem "ate", ou o maior "ate") cobre "esse valor pra cima"
 function taxaDaPlataformaParaValor(plataforma, valor) {
   if (!plataforma) return { pct: 0, fixa: 0 };
-  if (plataforma.taxaLimiar > 0) {
-    return valor < plataforma.taxaLimiar
-      ? { pct: plataforma.taxaPercentualAbaixo, fixa: plataforma.taxaFixaAbaixo }
-      : { pct: plataforma.taxaPercentualAcima, fixa: plataforma.taxaFixaAcima };
+  if (plataforma.taxaFaixas && plataforma.taxaFaixas.length > 0) {
+    const ordenadas = [...plataforma.taxaFaixas].sort((a, b) => (a.ate ?? Infinity) - (b.ate ?? Infinity));
+    const faixa = ordenadas.find((f) => f.ate == null || valor <= f.ate) || ordenadas[ordenadas.length - 1];
+    return { pct: faixa.pct, fixa: faixa.fixa };
   }
   return { pct: plataforma.taxaPercentual, fixa: plataforma.taxaFixa };
 }
@@ -460,7 +464,7 @@ async function loadData() {
   if (e29) console.error(e29);
   state.tx = (tx || []).map(mapTxFromDb);
   state.produtos = (produtos || []).map(mapProdutoFromDb);
-  state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0), taxaLimiar: Number(p.taxa_limiar || 0), taxaPercentualAbaixo: Number(p.taxa_percentual_abaixo || 0), taxaFixaAbaixo: Number(p.taxa_fixa_abaixo || 0), taxaPercentualAcima: Number(p.taxa_percentual_acima || 0), taxaFixaAcima: Number(p.taxa_fixa_acima || 0) }));
+  state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0), taxaFaixas: Array.isArray(p.taxa_faixas) ? p.taxa_faixas : [] }));
   state.costureiras = (costureiras || []).map((c) => ({ id: c.id, nome: c.nome, ativa: c.ativa, metaSemanal: c.meta_semanal || 0 }));
   state.producoes = (producoes || []).map((p) => ({ id: p.id, costureiraId: p.costureira_id, produtoId: p.produto_id, quantidade: p.quantidade, data: p.data, pago: p.pago, varianteId: p.variante_id || null }));
   state.variantes = (variantes || []).map((v) => ({ id: v.id, produtoId: v.produto_id, nome: v.nome, estoqueAtual: v.estoque_atual, skuVariante: v.sku_variante }));
@@ -1547,11 +1551,9 @@ async function baixarInsumosProducao(produtoId, quantidadeProduzida, data) {
   }
 }
 
-async function updatePlataformaTaxa(id, taxaPercentual, taxaFixa, taxaLimiar, taxaPercentualAbaixo, taxaFixaAbaixo, taxaPercentualAcima, taxaFixaAcima) {
+async function updatePlataformaTaxa(id, taxaPercentual, taxaFixa, taxaFaixas) {
   const { error } = await sb.from('plataformas').update({
-    taxa_percentual: taxaPercentual, taxa_fixa: taxaFixa,
-    taxa_limiar: taxaLimiar || 0, taxa_percentual_abaixo: taxaPercentualAbaixo || 0, taxa_fixa_abaixo: taxaFixaAbaixo || 0,
-    taxa_percentual_acima: taxaPercentualAcima || 0, taxa_fixa_acima: taxaFixaAcima || 0,
+    taxa_percentual: taxaPercentual, taxa_fixa: taxaFixa, taxa_faixas: taxaFaixas || [],
   }).eq('id', id);
   if (error) alert('Erro ao salvar taxa: ' + error.message);
 }
@@ -4443,7 +4445,7 @@ function renderFinanceiro(c) {
 
     ${state.showTaxasForm ? `
       <div class="form-card">
-        <div class="form-hint">Defina a taxa de cada plataforma: % sobre o valor da venda e/ou um valor fixo em R$ por transação (ex: Shopee costuma cobrar um fixo além da %). Usadas só como estimativa quando o relatório importado não trouxer o valor real da taxa.</div>
+        <div class="form-hint">Defina a taxa de cada plataforma: % sobre o valor da venda e/ou um valor fixo em R$ por transação. Usadas só como estimativa quando o relatório importado não trouxer o valor real da taxa.</div>
         ${state.plataformas.map((p) => `
           <div class="taxa-row">
             <div class="taxa-row-nome">${esc(p.nome)}</div>
@@ -4458,22 +4460,17 @@ function renderFinanceiro(c) {
               </div>
               <button class="trash-btn" data-remover-plataforma="${p.id}">🗑</button>
             </div>
-            <div class="form-hint" style="margin-top:6px;margin-bottom:2px">Taxa diferente por faixa de valor? (opcional, ex: TikTok Shop cobra diferente abaixo/acima de R$50 — deixa o limiar em 0 pra não usar faixa)</div>
-            <div class="form-row">
-              <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Limiar (R$)</div><input type="text" id="taxaLimiarInput-${p.id}" value="${p.taxaLimiar || ''}" placeholder="ex: 50" /></div>
-            </div>
-            <div class="form-row">
-              <div style="flex:1">
-                <div class="form-hint" style="margin-bottom:2px">Abaixo do limiar</div>
-                <div class="taxa-input-group"><input type="text" id="taxaPctAbaixoInput-${p.id}" value="${p.taxaPercentualAbaixo || ''}" placeholder="%" /><span>%</span></div>
-                <div class="taxa-input-group" style="margin-top:4px"><span>R$</span><input type="text" id="taxaFixaAbaixoInput-${p.id}" value="${p.taxaFixaAbaixo || ''}" placeholder="0" /></div>
-              </div>
-              <div style="flex:1">
-                <div class="form-hint" style="margin-bottom:2px">A partir do limiar</div>
-                <div class="taxa-input-group"><input type="text" id="taxaPctAcimaInput-${p.id}" value="${p.taxaPercentualAcima || ''}" placeholder="%" /><span>%</span></div>
-                <div class="taxa-input-group" style="margin-top:4px"><span>R$</span><input type="text" id="taxaFixaAcimaInput-${p.id}" value="${p.taxaFixaAcima || ''}" placeholder="0" /></div>
-              </div>
-            </div>
+            <div class="form-hint" style="margin-top:8px;margin-bottom:2px">Taxa diferente por faixa de valor? (opcional — se preencher qualquer faixa abaixo, ela passa a valer no lugar da taxa única acima. Deixa "Até R$" em branco na última faixa que usar, pra cobrir "esse valor pra cima")</div>
+            ${Array.from({ length: 5 }, (_, i) => {
+              const faixa = (p.taxaFaixas || [])[i] || {};
+              return `
+                <div class="form-row" style="margin-top:4px">
+                  <input type="text" id="taxaFaixaAte-${p.id}-${i}" placeholder="Até R$ (em branco = sem limite)" value="${faixa.ate != null ? faixa.ate : ''}" style="flex:1.4" />
+                  <div class="taxa-input-group" style="flex:1"><input type="text" id="taxaFaixaPct-${p.id}-${i}" value="${faixa.pct || ''}" placeholder="%" /><span>%</span></div>
+                  <div class="taxa-input-group" style="flex:1"><span>R$</span><input type="text" id="taxaFaixaFixa-${p.id}-${i}" value="${faixa.fixa || ''}" placeholder="0" /></div>
+                </div>
+              `;
+            }).join('')}
           </div>
         `).join('')}
         <button class="confirm-btn" id="salvarTaxas">Salvar taxas</button>
@@ -6924,15 +6921,18 @@ function attachFinanceiroHandlers(c) {
       const fixaInput = document.getElementById(`taxaFixaInput-${p.id}`);
       const novaPct = parseBRNumber(pctInput.value);
       const novaFixa = parseBRNumber(fixaInput.value);
-      const novoLimiar = parseBRNumber(document.getElementById(`taxaLimiarInput-${p.id}`)?.value || '0');
-      const novaPctAbaixo = parseBRNumber(document.getElementById(`taxaPctAbaixoInput-${p.id}`)?.value || '0');
-      const novaFixaAbaixo = parseBRNumber(document.getElementById(`taxaFixaAbaixoInput-${p.id}`)?.value || '0');
-      const novaPctAcima = parseBRNumber(document.getElementById(`taxaPctAcimaInput-${p.id}`)?.value || '0');
-      const novaFixaAcima = parseBRNumber(document.getElementById(`taxaFixaAcimaInput-${p.id}`)?.value || '0');
-      const mudouAlgo = novaPct !== p.taxaPercentual || novaFixa !== p.taxaFixa || novoLimiar !== p.taxaLimiar
-        || novaPctAbaixo !== p.taxaPercentualAbaixo || novaFixaAbaixo !== p.taxaFixaAbaixo
-        || novaPctAcima !== p.taxaPercentualAcima || novaFixaAcima !== p.taxaFixaAcima;
-      if (mudouAlgo) await updatePlataformaTaxa(p.id, novaPct, novaFixa, novoLimiar, novaPctAbaixo, novaFixaAbaixo, novaPctAcima, novaFixaAcima);
+      const novasFaixas = [];
+      for (let i = 0; i < 5; i++) {
+        const ateStr = document.getElementById(`taxaFaixaAte-${p.id}-${i}`)?.value?.trim();
+        const pctFaixa = parseBRNumber(document.getElementById(`taxaFaixaPct-${p.id}-${i}`)?.value || '0');
+        const fixaFaixa = parseBRNumber(document.getElementById(`taxaFaixaFixa-${p.id}-${i}`)?.value || '0');
+        if (pctFaixa > 0 || fixaFaixa > 0) {
+          novasFaixas.push({ ate: ateStr ? parseBRNumber(ateStr) : null, pct: pctFaixa, fixa: fixaFaixa });
+        }
+      }
+      const mudouTaxaSimples = novaPct !== p.taxaPercentual || novaFixa !== p.taxaFixa;
+      const mudouFaixas = JSON.stringify(novasFaixas) !== JSON.stringify(p.taxaFaixas || []);
+      if (mudouTaxaSimples || mudouFaixas) await updatePlataformaTaxa(p.id, novaPct, novaFixa, novasFaixas);
     }
     state.showTaxasForm = false;
     await loadData();
