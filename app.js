@@ -4786,7 +4786,12 @@ function renderFichaTecnica(c) {
                 <div class="produto-header">
                   <div><div class="produto-nome">${esc(p.nome)}${p.tipo === 'kit' ? ' 🎁' : ''}</div></div>
                 </div>
-                <div class="form-hint">Insumos usados (bojo, etiqueta, embalagem...)</div>
+                <div class="form-hint">🧵 Custo de tecido/corte</div>
+                <input type="text" id="ftCusto-${p.id}" placeholder="Custo por unidade" value="${p.custoUnitario.toFixed(2).replace('.', ',')}" />
+                <label class="checkbox-label"><input type="checkbox" id="ftCustoEstimado-${p.id}" ${p.custoEstimado ? 'checked' : ''} /> ≈ Esse é um custo estimado (não sei o valor real do tecido/corte ainda)</label>
+                <div class="form-hint" style="margin-top:10px">✂️ Mão de obra por peça <span style="color:var(--text-muted);font-size:11px">(mesmo valor usado na aba Produção pra pagar a costureira — mudar aqui atualiza lá também)</span></div>
+                <input type="text" id="ftMaoObra-${p.id}" placeholder="Valor de mão de obra por peça" value="${(p.valorMaoObra || 0).toFixed(2).replace('.', ',')}" />
+                <div class="form-hint" style="margin-top:12px">Insumos usados (bojo, etiqueta, embalagem...)</div>
                 ${Array.from({ length: numInsumo }, (_, i) => {
                   const atual = insumoValores[i] || { ref: '', qtd: '', momento: 'venda' };
                   return `
@@ -4960,6 +4965,15 @@ function attachFichaTecnicaHandlers(c) {
       const produtoId = btn.dataset.salvarFicha;
       const numInsumo = Number(btn.dataset.numInsumo);
       const numComponente = Number(btn.dataset.numComponente);
+      const produtoOriginal = state.produtos.find((p) => p.id === produtoId);
+      const custoEl = document.getElementById(`ftCusto-${produtoId}`);
+      const maoObraEl = document.getElementById(`ftMaoObra-${produtoId}`);
+      if (custoEl && maoObraEl && produtoOriginal) {
+        const custoUnitario = parseBRNumber(custoEl.value);
+        const custoEstimado = document.getElementById(`ftCustoEstimado-${produtoId}`)?.checked || false;
+        const valorMaoObra = parseBRNumber(maoObraEl.value);
+        await updateProduto(produtoId, { nome: produtoOriginal.nome, sku: produtoOriginal.sku, estoqueAtual: produtoOriginal.estoqueAtual, estoqueMinimo: produtoOriginal.estoqueMinimo, custoUnitario, custoEstimado, valorMaoObra, tipo: produtoOriginal.tipo });
+      }
       const itens = [];
       for (let i = 0; i < numInsumo; i++) {
         const insumoId = document.getElementById(`ftInsumo-${produtoId}-${i}`)?.value;
@@ -6486,6 +6500,7 @@ function renderEstoque(c) {
         <input type="text" id="pCusto" placeholder="Custo de produção por unidade (ex: 18,50)" />
         <label class="checkbox-label"><input type="checkbox" id="pCustoEstimado" /> ≈ Esse é um custo estimado (não sei o valor real do tecido/corte ainda)</label>
         <input type="text" id="pMaoObra" placeholder="Valor de mão de obra por peça (ex: 5,00)" />
+        <div class="form-hint" style="margin-top:-4px">Esse valor é o mesmo usado na aba Produção pra pagar a costureira — dá pra ajustar aqui ou lá, os dois ficam sincronizados.</div>
 
         <div class="form-hint">🎨 Esse produto tem cores? Cadastre já aqui (opcional). Se preencher, o estoque de cada cor começa zerado — o "Estoque atual" acima é ignorado e você ajusta cor por cor depois de salvar.</div>
         ${Array.from({ length: window.__numCoresNovoProduto || 5 }, (_, i) => `
@@ -6522,6 +6537,7 @@ function renderEstoque(c) {
                 <input type="text" id="editPCusto-${p.id}" placeholder="Custo por unidade" value="${p.custoUnitario.toFixed(2).replace('.', ',')}" />
                 <label class="checkbox-label"><input type="checkbox" id="editPCustoEstimado-${p.id}" ${p.custoEstimado ? 'checked' : ''} /> ≈ Esse é um custo estimado (não sei o valor real do tecido/corte ainda)</label>
                 <input type="text" id="editPMaoObra-${p.id}" placeholder="Valor de mão de obra por peça" value="${(p.valorMaoObra || 0).toFixed(2).replace('.', ',')}" />
+                <div class="form-hint" style="margin-top:-4px">Esse valor é o mesmo usado na aba Produção pra pagar a costureira — dá pra ajustar aqui ou lá, os dois ficam sincronizados.</div>
                 <div class="form-hint" style="margin-top:10px;margin-bottom:2px">🎁 Esse produto desconta estoque de OUTROS produtos quando vendido? (ex: "Kit 2 Top Joy" desconta 2x Top Joy do estoque, não guarda estoque próprio)</div>
                 <label class="checkbox-label"><input type="checkbox" id="editPEhKit-${p.id}" ${(window.__editProdutoEhKit?.[p.id] ?? p.ehKit) ? 'checked' : ''} data-toggle-eh-kit="${p.id}" /> Sim, é um kit — descontar dos componentes abaixo</label>
                 ${(window.__editProdutoEhKit?.[p.id] ?? p.ehKit) ? (() => {
