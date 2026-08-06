@@ -1704,6 +1704,28 @@ async function updatePlataformaTaxa(id, taxaPercentual, taxaFixa, taxaFaixas) {
   }).eq('id', id);
   if (error) alert('Erro ao salvar taxa: ' + error.message);
 }
+// corrige retroativamente vendas que ficaram com taxa zerada (ex: SKU vinculado manualmente
+// antes da coluna de taxa existir, ou import de um período sem faixa configurada ainda) —
+// usa a config de taxa ATUAL de cada plataforma pra estimar o que devia ter sido cobrado
+async function recalcularTaxasFaltantes() {
+  const semTaxa = state.vendasDetalhe.filter((v) => (!v.taxa || v.taxa === 0) && v.plataformaNome && v.valor > 0);
+  if (semTaxa.length === 0) { alert('Não achei nenhuma venda com taxa zerada — já tá tudo certo.'); return; }
+  let corrigidas = 0;
+  let semPlataformaConfigurada = 0;
+  for (const v of semTaxa) {
+    const plataforma = state.plataformas.find((p) => p.nome.trim().toLowerCase() === v.plataformaNome.trim().toLowerCase());
+    if (!plataforma) { semPlataformaConfigurada++; continue; }
+    const valorUnitario = v.valor / v.quantidade;
+    const { pct, fixa } = taxaDaPlataformaParaValor(plataforma, valorUnitario);
+    if (pct <= 0 && fixa <= 0) { semPlataformaConfigurada++; continue; }
+    const taxaEstimada = Math.round((v.valor * (pct / 100) + fixa * v.quantidade) * 100) / 100;
+    if (taxaEstimada <= 0) continue;
+    const { error } = await sb.from('vendas_detalhe').update({ taxa: taxaEstimada }).eq('id', v.id);
+    if (!error) corrigidas++;
+  }
+  alert(`Pronto! ${corrigidas} venda(s) corrigida(s) com a taxa estimada pela faixa atual da plataforma.${semPlataformaConfigurada > 0 ? `\n\n${semPlataformaConfigurada} venda(s) não deu pra corrigir — plataforma sem taxa cadastrada ou nome da plataforma não bate com nenhuma cadastrada (confere em Financeiro → ⚙️ Taxas).` : ''}`);
+  await loadData();
+}
 async function addPlataforma(nome, taxaPercentual, taxaFixa) {
   const { error } = await sb.from('plataformas').insert({ nome, taxa_percentual: taxaPercentual, taxa_fixa: taxaFixa });
   if (error) alert('Erro ao adicionar plataforma: ' + error.message);
@@ -7358,6 +7380,7 @@ function renderVendas(c) {
       <div><div class="section-title">Vendas</div><div class="section-subtitle">Ranking, plataformas e histórico de pedidos</div></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="icon-btn-ghost" id="toggleSkusPendentes" style="${state.vendasSkuPendentes.length > 0 ? 'background:rgba(255,182,39,0.15);border:1.5px solid var(--amber);color:var(--amber);font-weight:700' : ''}">🔗 SKUs pendentes${state.vendasSkuPendentes.length > 0 ? ` (${state.vendasSkuPendentes.length})` : ''}</button>
+        <button class="icon-btn-ghost" id="recalcularTaxas" title="Corrige vendas antigas que ficaram com taxa de plataforma zerada">🔧 Recalcular taxas faltantes</button>
         <button class="icon-btn-ghost" id="toggleImportacoesVendas">📜 Ver importações</button>
         <button class="icon-btn-ghost" id="toggleUpload">📤 Importar vendas</button>
         <button class="icon-btn" id="toggleVendaManual">＋ Venda manual</button>
@@ -7647,6 +7670,12 @@ function attachVendasHandlers(c) {
 
   const toggleSkusPendentes = document.getElementById('toggleSkusPendentes');
   if (toggleSkusPendentes) toggleSkusPendentes.addEventListener('click', () => { state.showSkusPendentes = !state.showSkusPendentes; render(); });
+
+  const recalcularTaxasBtn = document.getElementById('recalcularTaxas');
+  if (recalcularTaxasBtn) recalcularTaxasBtn.addEventListener('click', async () => {
+    if (!confirm('Isso vai corrigir a taxa de todas as vendas com taxa zerada, usando a faixa de taxa CADASTRADA HOJE em cada plataforma. Continuar?')) return;
+    await recalcularTaxasFaltantes();
+  });
 
   const toggleImportacoesVendas = document.getElementById('toggleImportacoesVendas');
   if (toggleImportacoesVendas) toggleImportacoesVendas.addEventListener('click', () => { state.showImportacoesVendas = !state.showImportacoesVendas; render(); });
