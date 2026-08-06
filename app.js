@@ -505,8 +505,8 @@ async function loadData() {
   state.emprestimos = (emprestimos || []).map((e) => ({ id: e.id, descricao: e.descricao, instituicao: e.instituicao || '', valorRecebido: Number(e.valor_recebido), numeroParcelas: e.numero_parcelas, valorParcela: Number(e.valor_parcela), dataRecebimento: e.data_recebimento, dataPrimeiraParcela: e.data_primeira_parcela, transacaoRecebimentoId: e.transacao_recebimento_id || null }));
   state.emprestimoParcelas = (emprestimoParcelas || []).map((p) => ({ id: p.id, emprestimoId: p.emprestimo_id, numero: p.numero, valor: Number(p.valor), dataVencimento: p.data_vencimento, transacaoId: p.transacao_id || null }));
   state.cartoesCredito = (cartoesCredito || []).map((c) => ({ id: c.id, nome: c.nome, limite: Number(c.limite || 0), diaFechamento: c.dia_fechamento, diaVencimento: c.dia_vencimento, ativo: c.ativo !== false }));
-  state.vendasSkuPendentes = (vendasSkuPendentes || []).map((v) => ({ id: v.id, sku: v.sku, quantidade: Number(v.quantidade), faturamento: Number(v.faturamento), ultimaData: v.ultima_data, plataformaNome: v.plataforma_nome || null, descricao: v.descricao || null, varianteTexto: v.variante_texto || null, pedidos: Number(v.pedidos || v.quantidade || 1) }));
-  state.vendasDetalhe = (vendasDetalhe || []).map((v) => ({ id: v.id, produtoId: v.produto_id, plataformaId: v.plataforma_id, plataformaNome: v.plataforma_nome || null, sku: v.sku || null, quantidade: Number(v.quantidade), valor: Number(v.valor), data: v.data, pedidos: Number(v.pedidos || 1) }));
+  state.vendasSkuPendentes = (vendasSkuPendentes || []).map((v) => ({ id: v.id, sku: v.sku, quantidade: Number(v.quantidade), faturamento: Number(v.faturamento), ultimaData: v.ultima_data, plataformaNome: v.plataforma_nome || null, descricao: v.descricao || null, varianteTexto: v.variante_texto || null, pedidos: Number(v.pedidos || v.quantidade || 1), taxa: Number(v.taxa || 0) }));
+  state.vendasDetalhe = (vendasDetalhe || []).map((v) => ({ id: v.id, produtoId: v.produto_id, plataformaId: v.plataforma_id, plataformaNome: v.plataforma_nome || null, sku: v.sku || null, quantidade: Number(v.quantidade), valor: Number(v.valor), data: v.data, pedidos: Number(v.pedidos || 1), taxa: Number(v.taxa || 0) }));
   state.abonosPonto = (abonosPonto || []).map((a) => ({ id: a.id, funcionariaId: a.funcionaria_id, data: a.data, tipo: a.tipo, motivo: a.motivo || '', horas: a.horas != null ? Number(a.horas) : null }));
   state.holerites = (holerites || []).map((h) => ({ id: h.id, funcionariaId: h.funcionaria_id, mes: h.mes, diasTrabalhados: Number(h.dias_trabalhados), salarioBase: Number(h.salario_base), horasExtras: Number(h.horas_extras), valorHorasExtras: Number(h.valor_horas_extras), horasExtras100: Number(h.horas_extras_100 || 0), valorHorasExtras100: Number(h.valor_horas_extras_100 || 0), modoHorasExtras: h.modo_horas_extras, horasFaltantes: Number(h.horas_faltantes), valorVt: Number(h.valor_vt), valorVr: Number(h.valor_vr), totalPagar: Number(h.total_pagar), assinadoEm: h.assinado_em || null, assinaturaImagem: h.assinatura_imagem || null, createdAt: h.created_at, numeroRecibo: h.numero_recibo || null, emitidoPor: h.emitido_por || null }));
   state.feriados = (feriados || []).map((f) => ({ id: f.id, data: f.data, nome: f.nome || '' }));
@@ -571,7 +571,7 @@ async function addTxBatch(rows) {
 async function addVendasDetalheBatch(rows) {
   if (!rows.length) return [];
   const { data, error } = await sb.from('vendas_detalhe').insert(rows.map((v) => ({
-    produto_id: v.produtoId, plataforma_id: v.plataformaId || null, plataforma_nome: v.plataformaNome || null, sku: v.sku || null, quantidade: v.quantidade, valor: v.valor, data: v.data, pedidos: v.pedidos || 1,
+    produto_id: v.produtoId, plataforma_id: v.plataformaId || null, plataforma_nome: v.plataformaNome || null, sku: v.sku || null, quantidade: v.quantidade, valor: v.valor, data: v.data, pedidos: v.pedidos || 1, taxa: v.taxa || 0,
   }))).select('id');
   if (error) { console.error('Erro ao gravar detalhe de vendas: ' + error.message); return []; }
   return (data || []).map((r) => r.id);
@@ -1423,12 +1423,13 @@ async function registrarSkusPendentes(pendentesMap) {
         quantidade: existente.quantidade + info.qtd,
         faturamento: existente.faturamento + info.faturamento,
         pedidos: (existente.pedidos || 0) + (info.pedidos || info.qtd),
+        taxa: (existente.taxa || 0) + (info.taxa || 0),
         ultima_data: info.ultimaData > existente.ultimaData ? info.ultimaData : existente.ultimaData,
       }).eq('id', existente.id);
       if (error) console.error(error);
     } else {
       const { data, error } = await sb.from('vendas_sku_pendentes').insert({
-        sku, quantidade: info.qtd, faturamento: info.faturamento, pedidos: info.pedidos || info.qtd, ultima_data: info.ultimaData, plataforma_nome: info.plataformaNome || null,
+        sku, quantidade: info.qtd, faturamento: info.faturamento, pedidos: info.pedidos || info.qtd, taxa: info.taxa || 0, ultima_data: info.ultimaData, plataforma_nome: info.plataformaNome || null,
         descricao: info.descricao || null, variante_texto: info.varianteTexto || null,
       }).select('id').single();
       if (error) console.error(error);
@@ -1459,7 +1460,7 @@ async function vincularSkuPendente(pendenteId, produtoId, varianteId) {
     await baixarEstoquePorFichaTecnica(produtoId, pendente.quantidade, pendente.ultimaData);
     await sb.from('vendas_detalhe').insert({
       produto_id: produtoId, plataforma_nome: pendente.plataformaNome || null, sku: pendente.sku,
-      quantidade: pendente.quantidade, valor: pendente.faturamento, data: pendente.ultimaData, pedidos: pendente.pedidos || pendente.quantidade,
+      quantidade: pendente.quantidade, valor: pendente.faturamento, data: pendente.ultimaData, pedidos: pendente.pedidos || pendente.quantidade, taxa: pendente.taxa || 0,
     });
     await sb.from('vendas_sku_pendentes').delete().eq('id', pendenteId);
     return;
@@ -1489,7 +1490,7 @@ async function vincularSkuPendente(pendenteId, produtoId, varianteId) {
   await baixarEstoquePorFichaTecnica(produtoId, pendente.quantidade, pendente.ultimaData);
   await sb.from('vendas_detalhe').insert({
     produto_id: produtoId, plataforma_nome: pendente.plataformaNome || null, sku: pendente.sku,
-    quantidade: pendente.quantidade, valor: pendente.faturamento, data: pendente.ultimaData, pedidos: pendente.pedidos || pendente.quantidade,
+    quantidade: pendente.quantidade, valor: pendente.faturamento, data: pendente.ultimaData, pedidos: pendente.pedidos || pendente.quantidade, taxa: pendente.taxa || 0,
   });
   const { error } = await sb.from('vendas_sku_pendentes').delete().eq('id', pendenteId);
   if (error) alert('Erro ao remover SKU pendente: ' + error.message);
@@ -7305,15 +7306,18 @@ function renderVendas(c) {
     const produto = state.produtos.find((p) => p.id === v.produtoId);
     const nome = produto ? produto.nome : '(produto removido)';
     const custoUnit = produto ? calcularCustoTotalProduto(produto.id) : 0;
-    const atual = porProduto.get(v.produtoId) || { nome, quantidade: 0, valor: 0, custo: 0 };
+    const atual = porProduto.get(v.produtoId) || { nome, quantidade: 0, valor: 0, custo: 0, taxa: 0 };
     atual.quantidade += v.quantidade;
     atual.valor += v.valor;
     atual.custo += custoUnit * v.quantidade;
+    atual.taxa += v.taxa || 0;
     porProduto.set(v.produtoId, atual);
   });
-  const rankingProdutos = [...porProduto.values()].map((p) => ({ ...p, lucro: p.valor - p.custo })).sort((a, b) => b.quantidade - a.quantidade).slice(0, 15);
+  // lucro líquido de verdade: venda - custo de produção (tecido, corte, mão de obra,
+  // insumos) - taxa da plataforma. É esse número que diz se o preço de venda está bom
+  const rankingProdutos = [...porProduto.values()].map((p) => ({ ...p, lucro: p.valor - p.custo - p.taxa })).sort((a, b) => b.quantidade - a.quantidade).slice(0, 15);
   const maiorQtdRanking = Math.max(1, ...rankingProdutos.map((p) => p.quantidade));
-  const lucroMes = [...porProduto.values()].reduce((a, p) => a + (p.valor - p.custo), 0);
+  const lucroMes = [...porProduto.values()].reduce((a, p) => a + (p.valor - p.custo - p.taxa), 0);
   const temDadosDeLucro = detalheMes.length > 0;
 
   // lucro líquido = lucro bruto menos os custos fixos do mês (aluguel, ferramentas, etc.),
@@ -7501,7 +7505,7 @@ function renderVendas(c) {
         <div class="stat-value" style="color:${lucroLiquidoMes >= 0 ? 'var(--teal)' : 'var(--red)'}">${fmt(lucroLiquidoMes)}</div>
       </div>
     </div>
-    <div class="section-subtitle" style="margin-top:-8px;margin-bottom:8px">Lucro bruto = venda − custo direto da peça (tecido, corte, mão de obra, insumos). Lucro líquido = lucro bruto − custos fixos do mês (${fmt(custosFixosMes)}, ex: aluguel, ferramentas).${!temDadosDeLucro ? ' * Só considera vendas com produto identificado.' : ''}</div>
+    <div class="section-subtitle" style="margin-top:-8px;margin-bottom:8px">Lucro bruto = venda − custo direto da peça (tecido, corte, mão de obra, insumos) − taxa da plataforma. Lucro líquido = lucro bruto − custos fixos do mês (${fmt(custosFixosMes)}, ex: aluguel, ferramentas).${!temDadosDeLucro ? ' * Só considera vendas com produto identificado.' : ''}</div>
 
     <div class="section-title-wrap" style="margin-top:24px">
       <div><div class="section-title">Evolução — últimos 6 meses</div><div class="section-subtitle">Faturamento total de vendas por mês</div></div>
@@ -7793,9 +7797,11 @@ function attachVendasHandlers(c) {
       });
 
       const taxaReal = guessTaxaRealField(row);
+      let taxaTotalLinha = 0;
       if (taxaReal !== null && taxaReal > 0) {
         totalTaxas += taxaReal;
         totalTaxasReais++;
+        taxaTotalLinha = taxaReal;
         criarLancamentosPorUnidade(taxaReal, qtdLinha, (valorUnit) => {
           novos.push({
             tipo: 'saida', valor: valorUnit, categoria: 'Taxas de marketplace', natureza: 'variavel',
@@ -7807,6 +7813,7 @@ function attachVendasHandlers(c) {
         const taxaValor = Math.round((valor * (taxaPctLinha / 100) + taxaFixaLinha * qtdLinha) * 100) / 100;
         totalTaxas += taxaValor;
         totalTaxasEstimadas++;
+        taxaTotalLinha = taxaValor;
         criarLancamentosPorUnidade(taxaValor, qtdLinha, (valorUnit) => {
           novos.push({
             tipo: 'saida', valor: valorUnit, categoria: 'Taxas de marketplace', natureza: 'variavel',
@@ -7837,18 +7844,20 @@ function attachVendasHandlers(c) {
           const chaveDetalhe = `${produto.id}|${plataformaLinha ? plataformaLinha.id : ''}|${dataLinha}`;
           const atualDetalhe = detalhesVendas.get(chaveDetalhe) || {
             produtoId: produto.id, plataformaId: plataformaLinha ? plataformaLinha.id : null,
-            plataformaNome: plataformaLinha ? plataformaLinha.nome : null, sku: sku.trim(), quantidade: 0, valor: 0, data: dataLinha, pedidos: 0,
+            plataformaNome: plataformaLinha ? plataformaLinha.nome : null, sku: sku.trim(), quantidade: 0, valor: 0, data: dataLinha, pedidos: 0, taxa: 0,
           };
           atualDetalhe.quantidade += qtd;
           atualDetalhe.valor += valor;
           atualDetalhe.pedidos += pedidosLinha;
+          atualDetalhe.taxa += taxaTotalLinha;
           detalhesVendas.set(chaveDetalhe, atualDetalhe);
         } else {
           const varianteTextoLinha = guessVarianteTextoField(row);
-          const atual = skusNaoEncontrados.get(sku) || { qtd: 0, faturamento: 0, pedidos: 0, ultimaData: dataLinha, plataformaNome: plataformaLinha ? plataformaLinha.nome : null, descricao: descricaoItem, varianteTexto: varianteTextoLinha };
+          const atual = skusNaoEncontrados.get(sku) || { qtd: 0, faturamento: 0, pedidos: 0, taxa: 0, ultimaData: dataLinha, plataformaNome: plataformaLinha ? plataformaLinha.nome : null, descricao: descricaoItem, varianteTexto: varianteTextoLinha };
           atual.qtd += qtd;
           atual.faturamento += valor;
           atual.pedidos += pedidosLinha;
+          atual.taxa += taxaTotalLinha;
           if (dataLinha > atual.ultimaData) atual.ultimaData = dataLinha;
           skusNaoEncontrados.set(sku, atual);
         }
