@@ -2372,6 +2372,7 @@ async function marcarProducaoPaga(ids) {
 }
 async function removeProducao(id) {
   const p = state.producoes.find((x) => x.id === id);
+  let avisoManual = false;
   if (p) {
     if (p.varianteId) {
       const variante = state.variantes.find((v) => v.id === p.varianteId);
@@ -2382,41 +2383,62 @@ async function removeProducao(id) {
     }
     // devolve a peça pra fila de "em mãos" da costureira (desfaz o abate feito no lançamento) —
     // usa a variante que foi abatida de verdade (pode ser diferente da variante da peça, se veio
-    // de uma leva de cor mista); pra lançamentos antigos, sem essa info salva, assume a mesma cor
-    const varianteAbatida = p.abateVarianteId !== undefined ? p.abateVarianteId : p.varianteId;
-    if (p.quantidade !== 0) await restaurarDistribuicoesLIFO(p.costureiraId, p.produtoId, varianteAbatida, Math.abs(p.quantidade));
+    // de uma leva de cor mista). Lançamentos de ANTES dessa coluna existir não têm essa info
+    // salva — em vez de adivinhar (arriscado, pode devolver pra leva errada), a gente pula o
+    // ajuste automático e avisa pra conferir na mão
+    if (p.abateVarianteId === undefined) {
+      avisoManual = true;
+    } else if (p.quantidade !== 0) {
+      await restaurarDistribuicoesLIFO(p.costureiraId, p.produtoId, p.abateVarianteId, Math.abs(p.quantidade));
+    }
   }
   const { error } = await sb.from('producoes').delete().eq('id', id);
-  if (error) alert('Erro ao remover lançamento: ' + error.message);
+  if (error) { alert('Erro ao remover lançamento: ' + error.message); return; }
+  if (avisoManual) {
+    const produto = state.produtos.find((x) => x.id === p.produtoId);
+    alert(`Lançamento removido e estoque do produto desfeito. Mas esse lançamento é de antes de eu conseguir salvar de qual leva ele veio, então NÃO mexi na fila de "peças em mãos" — pra não arriscar devolver pra leva errada.\n\nSe esse lançamento tinha sido abatido de uma leva de cor mista, confere e ajusta na mão em Produção → ${produto?.nome || 'esse produto'} → "Peças em mãos" (✏️ do lado da leva certa).`);
+  }
 }
 async function updateProducao(id, novo) {
   const antigo = state.producoes.find((p) => p.id === id);
   if (!antigo) return;
   const { error } = await sb.from('producoes').update({ produto_id: novo.produtoId, quantidade: novo.quantidade, data: novo.data }).eq('id', id);
   if (error) { alert('Erro ao editar lançamento: ' + error.message); return; }
-  const varianteAbatida = antigo.abateVarianteId !== undefined ? antigo.abateVarianteId : antigo.varianteId;
+  // lançamento de antes da coluna abate_variante_id existir: não dá pra saber com certeza de
+  // qual leva ele tirou, então não mexe na fila de "em mãos" pra não arriscar bagunçar a leva
+  // errada — só avisa pra conferir na mão
+  if (antigo.abateVarianteId === undefined) {
+    if (novo.quantidade !== antigo.quantidade) {
+      alert('Quantidade atualizada, mas esse lançamento é de antes de eu conseguir salvar de qual leva ele veio — não mexi na fila de "peças em mãos" pra não arriscar. Confere e ajusta na mão se precisar.');
+    }
+  } else {
+    const varianteAbatida = antigo.abateVarianteId;
+    if (antigo.produtoId === novo.produtoId) {
+      // mesma "chave" de distribuição (produto + variante abatida não muda) — só ajusta a diferença
+      const delta = novo.quantidade - antigo.quantidade;
+      if (delta > 0) await baixarDistribuicoesFIFO(antigo.costureiraId, antigo.produtoId, varianteAbatida, delta);
+      else if (delta < 0) await restaurarDistribuicoesLIFO(antigo.costureiraId, antigo.produtoId, varianteAbatida, Math.abs(delta));
+    } else {
+      // trocou de produto: desfaz tudo do produto antigo e refaz no novo (só produtos sem cor
+      // trocam de produto na edição, então não tem variante abatida específica pra manter)
+      if (antigo.quantidade !== 0) await restaurarDistribuicoesLIFO(antigo.costureiraId, antigo.produtoId, varianteAbatida, Math.abs(antigo.quantidade));
+      if (novo.quantidade !== 0) await baixarDistribuicoesFIFO(antigo.costureiraId, novo.produtoId, null, Math.abs(novo.quantidade));
+    }
+  }
   // lançamentos com cor (variante) não trocam de produto na edição — só ajusta a quantidade na mesma cor
   if (antigo.varianteId) {
     const variante = state.variantes.find((v) => v.id === antigo.varianteId);
     if (variante) await updateVarianteEstoque(variante.id, Math.max(0, variante.estoqueAtual + (novo.quantidade - antigo.quantidade)));
-    const delta = novo.quantidade - antigo.quantidade;
-    if (delta > 0) await baixarDistribuicoesFIFO(antigo.costureiraId, antigo.produtoId, varianteAbatida, delta);
-    else if (delta < 0) await restaurarDistribuicoesLIFO(antigo.costureiraId, antigo.produtoId, varianteAbatida, Math.abs(delta));
     return;
   }
   if (antigo.produtoId === novo.produtoId) {
     const produto = state.produtos.find((p) => p.id === novo.produtoId);
     if (produto) await updateProdutoEstoque(produto.id, Math.max(0, produto.estoqueAtual + (novo.quantidade - antigo.quantidade)));
-    const delta = novo.quantidade - antigo.quantidade;
-    if (delta > 0) await baixarDistribuicoesFIFO(antigo.costureiraId, antigo.produtoId, varianteAbatida, delta);
-    else if (delta < 0) await restaurarDistribuicoesLIFO(antigo.costureiraId, antigo.produtoId, varianteAbatida, Math.abs(delta));
   } else {
     const produtoAntigo = state.produtos.find((p) => p.id === antigo.produtoId);
     if (produtoAntigo) await updateProdutoEstoque(produtoAntigo.id, Math.max(0, produtoAntigo.estoqueAtual - antigo.quantidade));
     const produtoNovo = state.produtos.find((p) => p.id === novo.produtoId);
     if (produtoNovo) await updateProdutoEstoque(produtoNovo.id, produtoNovo.estoqueAtual + novo.quantidade);
-    if (antigo.quantidade !== 0) await restaurarDistribuicoesLIFO(antigo.costureiraId, antigo.produtoId, varianteAbatida, Math.abs(antigo.quantidade));
-    if (novo.quantidade !== 0) await baixarDistribuicoesFIFO(antigo.costureiraId, novo.produtoId, antigo.varianteId, Math.abs(novo.quantidade));
   }
 }
 
@@ -2739,7 +2761,8 @@ function renderProducaoDono(c) {
               <div class="prod-breakdown">
                 ${produtosLista.map(([nome, dados]) => `<div class="prod-breakdown-item"><span>${esc(nome)}</span><span>${dados.qtd} peças · ${fmt(dados.valor)}</span></div>`).join('')}
               </div>
-              <button class="confirm-btn" style="margin-top:10px" data-pagar-costureira="${costureiraId}" data-ids="${info.ids.join(',')}" data-valor="${info.valor}" data-nome="${esc(costureira?.nome || '')}">✅ Pagar ${fmt(info.valor)}</button>
+              <input type="text" id="descontoVale-${costureiraId}" placeholder="Desconto de vale (opcional)" style="margin-top:10px" />
+              <button class="confirm-btn" style="margin-top:6px" data-pagar-costureira="${costureiraId}" data-ids="${info.ids.join(',')}" data-valor="${info.valor}" data-nome="${esc(costureira?.nome || '')}">✅ Pagar ${fmt(info.valor)}</button>
             </div>
           `;
         }).join('')}
@@ -8988,13 +9011,19 @@ function attachProducaoHandlers(c) {
   document.querySelectorAll('[data-pagar-costureira]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const ids = btn.dataset.ids.split(',');
-      const valor = Number(btn.dataset.valor);
+      const valorProducao = Number(btn.dataset.valor);
       const nome = btn.dataset.nome;
-      if (!confirm(`Confirmar pagamento de ${fmt(valor)} pra ${nome}?`)) return;
+      const costureiraId = btn.dataset.pagarCostureira;
+      const desconto = parseBRNumber(document.getElementById(`descontoVale-${costureiraId}`)?.value || '0');
+      const valorReal = Math.max(0, valorProducao - desconto);
+      const mensagem = desconto > 0
+        ? `Confirmar pagamento de ${nome}?\n\nProdução da semana: ${fmt(valorProducao)}\nDesconto de vale: -${fmt(desconto)}\nValor que sai da conta: ${fmt(valorReal)}\n\nIsso marca toda a produção como paga (não vai mais acumular com a próxima semana), mas só lança ${fmt(valorReal)} no Financeiro.`
+        : `Confirmar pagamento de ${fmt(valorProducao)} pra ${nome}?`;
+      if (!confirm(mensagem)) return;
       await marcarProducaoPaga(ids);
       await addTx({
-        tipo: 'saida', valor, categoria: 'Mão de obra — produção', natureza: 'variavel',
-        descricao: `Produção — ${nome}`, data: todayStr(),
+        tipo: 'saida', valor: valorReal, categoria: 'Mão de obra — produção', natureza: 'variavel',
+        descricao: desconto > 0 ? `Produção — ${nome} (${fmt(valorProducao)} produzido, ${fmt(desconto)} descontado de vale)` : `Produção — ${nome}`, data: todayStr(),
       });
       await loadData();
     });
