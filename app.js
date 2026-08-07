@@ -2612,11 +2612,11 @@ function renderProducaoDono(c) {
     const nomeProduto = produto?.nome || 'Produto removido';
     const valorItem = valorProducaoItem(p);
     if (!porCostureira[p.costureiraId]) porCostureira[p.costureiraId] = { qtd: 0, valor: 0, ids: [], porProduto: {} };
-    porCostureira[p.costureiraId].qtd += p.quantidade;
+    porCostureira[p.costureiraId].qtd += Math.max(0, p.quantidade);
     porCostureira[p.costureiraId].valor += valorItem;
     porCostureira[p.costureiraId].ids.push(p.id);
     if (!porCostureira[p.costureiraId].porProduto[nomeProduto]) porCostureira[p.costureiraId].porProduto[nomeProduto] = { qtd: 0, valor: 0 };
-    porCostureira[p.costureiraId].porProduto[nomeProduto].qtd += p.quantidade;
+    porCostureira[p.costureiraId].porProduto[nomeProduto].qtd += Math.max(0, p.quantidade);
     porCostureira[p.costureiraId].porProduto[nomeProduto].valor += valorItem;
   });
 
@@ -2822,7 +2822,9 @@ function renderCostureiraDetalhe(costureiraId) {
   const entradas = state.producoes.filter((p) => p.costureiraId === costureiraId).sort((a, b) => b.data.localeCompare(a.data));
   const totalPago = entradas.filter((p) => p.pago).reduce((acc, p) => acc + valorProducaoItem(p), 0);
   const pendentes = entradas.filter((p) => !p.pago);
-  const totalPendenteQtd = pendentes.reduce((a, p) => a + p.quantidade, 0);
+  // conta só peças BOAS aqui — defeito já tem sua própria contagem separada (não faz sentido
+  // "peças pendentes" cair quando registra um defeito, são duas coisas diferentes)
+  const totalPendenteQtd = pendentes.reduce((a, p) => a + Math.max(0, p.quantidade), 0);
   const totalPendenteValor = pendentes.reduce((acc, p) => acc + valorProducaoItem(p), 0);
 
   // resumo agrupado por produto, só do que ainda está pendente (a semana em aberto)
@@ -2831,7 +2833,7 @@ function renderCostureiraDetalhe(costureiraId) {
     const produto = state.produtos.find((x) => x.id === p.produtoId);
     const nome = produto?.nome || 'Produto removido';
     if (!porProdutoPendente[nome]) porProdutoPendente[nome] = { qtd: 0, valor: 0 };
-    porProdutoPendente[nome].qtd += p.quantidade;
+    porProdutoPendente[nome].qtd += Math.max(0, p.quantidade);
     porProdutoPendente[nome].valor += valorProducaoItem(p);
   });
   const resumoProdutos = Object.entries(porProdutoPendente).sort((a, b) => b[1].qtd - a[1].qtd);
@@ -3536,7 +3538,7 @@ function renderModoSupervisora(app) {
       alert('Selecione a costureira, o produto e informe a quantidade.');
       return;
     }
-    if (varianteSelect && !varianteId) { alert('Selecione a cor.'); return; }
+    if ((window.__prodSupTipo || 'producao') === 'producao' && varianteSelect && !varianteId) { alert('Selecione a cor.'); return; }
     if ((window.__prodSupTipo || 'producao') === 'defeito') quantidade = -quantidade;
     await registrarProducao(costureiraId, produtoId, quantidade, data, varianteId || null);
     window.__prodSupTipo = 'producao';
@@ -8940,7 +8942,9 @@ function attachProducaoHandlers(c) {
       const origemValor = origemSelect ? origemSelect.value : '';
       const origemVarianteId = origemValor === '__sem_cor__' ? null : (origemValor || undefined);
       if (!produtoId || !quantidade || quantidade <= 0) { alert('Selecione o produto e informe a quantidade.'); return; }
-      if (varianteSelect && !varianteId) { alert('Selecione a cor.'); return; }
+      // pra peça boa precisa saber a cor (vai somar estoque dela). Pra defeito não precisa —
+      // não mexe em estoque de cor nenhuma, e às vezes nem dá pra saber qual cor deu defeito
+      if (tipo === 'producao' && varianteSelect && !varianteId) { alert('Selecione a cor.'); return; }
       let motivoDefeito = null;
       let valorAjuste = null;
       if (tipo === 'defeito') {
