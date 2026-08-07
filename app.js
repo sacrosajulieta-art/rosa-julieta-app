@@ -396,6 +396,7 @@ const state = {
   showLancamentosCartaoId: null,
   vendasSkuPendentes: [],
   vendasDetalhe: [],
+  filtroHistoricoCanal: 'todos',
   abonosPonto: [],
   holerites: [],
   feriados: [],
@@ -7374,6 +7375,10 @@ function renderVendas(c) {
   const maiorFaturamentoMes = Math.max(1, ...faturamentoPorMes.map((m) => m.total));
 
   const historicoOrdenado = [...vendasMes].sort((a, b) => b.data.localeCompare(a.data));
+  const canaisHistorico = [...new Set(vendasMes.map((t) => t.categoria.replace(/^Venda\s*/, '').trim()).filter(Boolean))].sort();
+  const historicoFiltrado = state.filtroHistoricoCanal && state.filtroHistoricoCanal !== 'todos'
+    ? historicoOrdenado.filter((t) => t.categoria.replace(/^Venda\s*/, '').trim() === state.filtroHistoricoCanal)
+    : historicoOrdenado;
 
   return `
     <div class="section-title-wrap">
@@ -7609,10 +7614,16 @@ function renderVendas(c) {
 
     <div class="section-title-wrap">
       <div><div class="section-title">Histórico de pedidos</div><div class="section-subtitle">Vendas importadas no mês selecionado</div></div>
+      ${canaisHistorico.length > 1 ? `
+        <select id="filtroHistoricoCanal" style="width:auto">
+          <option value="todos" ${(!state.filtroHistoricoCanal || state.filtroHistoricoCanal === 'todos') ? 'selected' : ''}>Todos os canais</option>
+          ${canaisHistorico.map((c) => `<option value="${esc(c)}" ${state.filtroHistoricoCanal === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}
+        </select>
+      ` : ''}
     </div>
-    ${historicoOrdenado.length === 0 ? `<div class="empty-state">Nenhuma venda nesse mês ainda.</div>` : `
+    ${historicoFiltrado.length === 0 ? `<div class="empty-state">${historicoOrdenado.length === 0 ? 'Nenhuma venda nesse mês ainda.' : 'Nenhuma venda desse canal nesse mês.'}</div>` : `
       <div class="tx-list">
-        ${historicoOrdenado.map((t) => renderTxRow(t)).join('')}
+        ${historicoFiltrado.map((t) => renderTxRow(t)).join('')}
       </div>
     `}
   `;
@@ -7676,6 +7687,9 @@ function attachVendasHandlers(c) {
     if (!confirm('Isso vai corrigir a taxa de todas as vendas com taxa zerada, usando a faixa de taxa CADASTRADA HOJE em cada plataforma. Continuar?')) return;
     await recalcularTaxasFaltantes();
   });
+
+  const filtroHistoricoCanal = document.getElementById('filtroHistoricoCanal');
+  if (filtroHistoricoCanal) filtroHistoricoCanal.addEventListener('change', (e) => { state.filtroHistoricoCanal = e.target.value; render(); });
 
   const toggleImportacoesVendas = document.getElementById('toggleImportacoesVendas');
   if (toggleImportacoesVendas) toggleImportacoesVendas.addEventListener('click', () => { state.showImportacoesVendas = !state.showImportacoesVendas; render(); });
