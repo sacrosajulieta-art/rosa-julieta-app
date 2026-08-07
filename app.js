@@ -2761,7 +2761,10 @@ function renderProducaoDono(c) {
               <div class="prod-breakdown">
                 ${produtosLista.map(([nome, dados]) => `<div class="prod-breakdown-item"><span>${esc(nome)}</span><span>${dados.qtd} peças · ${fmt(dados.valor)}</span></div>`).join('')}
               </div>
-              <input type="text" id="descontoVale-${costureiraId}" placeholder="Desconto de vale (opcional)" style="margin-top:10px" />
+              <div class="form-row" style="margin-top:10px">
+                <input type="text" id="descontoVale-${costureiraId}" placeholder="Desconto de vale (opcional)" />
+                <input type="date" id="dataPagamento-${costureiraId}" value="${todayStr()}" style="max-width:150px" />
+              </div>
               <button class="confirm-btn" style="margin-top:6px" data-pagar-costureira="${costureiraId}" data-ids="${info.ids.join(',')}" data-valor="${info.valor}" data-nome="${esc(costureira?.nome || '')}">✅ Pagar ${fmt(info.valor)}</button>
             </div>
           `;
@@ -9015,15 +9018,16 @@ function attachProducaoHandlers(c) {
       const nome = btn.dataset.nome;
       const costureiraId = btn.dataset.pagarCostureira;
       const desconto = parseBRNumber(document.getElementById(`descontoVale-${costureiraId}`)?.value || '0');
+      const dataPagamento = document.getElementById(`dataPagamento-${costureiraId}`)?.value || todayStr();
       const valorReal = Math.max(0, valorProducao - desconto);
       const mensagem = desconto > 0
-        ? `Confirmar pagamento de ${nome}?\n\nProdução da semana: ${fmt(valorProducao)}\nDesconto de vale: -${fmt(desconto)}\nValor que sai da conta: ${fmt(valorReal)}\n\nIsso marca toda a produção como paga (não vai mais acumular com a próxima semana), mas só lança ${fmt(valorReal)} no Financeiro.`
-        : `Confirmar pagamento de ${fmt(valorProducao)} pra ${nome}?`;
+        ? `Confirmar pagamento de ${nome}?\n\nProdução da semana: ${fmt(valorProducao)}\nDesconto de vale: -${fmt(desconto)}\nValor que sai da conta: ${fmt(valorReal)}\nData no Financeiro: ${new Date(dataPagamento + 'T00:00:00').toLocaleDateString('pt-BR')}\n\nIsso marca toda a produção como paga (não vai mais acumular com a próxima semana), mas só lança ${fmt(valorReal)} no Financeiro.`
+        : `Confirmar pagamento de ${fmt(valorProducao)} pra ${nome}, com data de ${new Date(dataPagamento + 'T00:00:00').toLocaleDateString('pt-BR')} no Financeiro?`;
       if (!confirm(mensagem)) return;
       await marcarProducaoPaga(ids);
       await addTx({
         tipo: 'saida', valor: valorReal, categoria: 'Mão de obra — produção', natureza: 'variavel',
-        descricao: desconto > 0 ? `Produção — ${nome} (${fmt(valorProducao)} produzido, ${fmt(desconto)} descontado de vale)` : `Produção — ${nome}`, data: todayStr(),
+        descricao: desconto > 0 ? `Produção — ${nome} (${fmt(valorProducao)} produzido, ${fmt(desconto)} descontado de vale)` : `Produção — ${nome}`, data: dataPagamento,
       });
       await loadData();
     });
