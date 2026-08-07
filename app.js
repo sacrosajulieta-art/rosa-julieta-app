@@ -7360,6 +7360,9 @@ function renderVendas(c) {
   const maiorQtdRanking = Math.max(1, ...rankingProdutos.map((p) => p.quantidade));
   const lucroMes = [...porProduto.values()].reduce((a, p) => a + (p.valor - p.custo - p.taxa), 0);
   const temDadosDeLucro = detalheMes.length > 0;
+  const valorVinculadoMes = detalheMes.reduce((a, v) => a + v.valor, 0);
+  const pctVinculadoMes = faturamentoMes > 0 ? (valorVinculadoMes / faturamentoMes) * 100 : 100;
+  const faturamentoNaoVinculadoMes = Math.max(0, faturamentoMes - valorVinculadoMes);
 
   // lucro líquido = lucro bruto menos os custos fixos do mês (aluguel, ferramentas, etc.),
   // sem dividir por produto — dá o número "não tem erro" pra saber se fechou no azul de verdade
@@ -7551,7 +7554,18 @@ function renderVendas(c) {
         <div class="stat-value" style="color:${lucroLiquidoMes >= 0 ? 'var(--teal)' : 'var(--red)'}">${fmt(lucroLiquidoMes)}</div>
       </div>
     </div>
-    <div class="section-subtitle" style="margin-top:-8px;margin-bottom:8px">Lucro bruto = venda − custo direto da peça (tecido, corte, mão de obra, insumos) − taxa da plataforma. Lucro líquido = lucro bruto − custos fixos do mês (${fmt(custosFixosMes)}, ex: aluguel, ferramentas).${!temDadosDeLucro ? ' * Só considera vendas com produto identificado.' : ''}</div>
+    ${faturamentoNaoVinculadoMes > 1 && pctVinculadoMes < 95 ? `
+      <div class="alert-card" style="border-color:var(--amber)55;margin-top:10px">
+        <div class="alert-card-row">
+          <div class="alert-dot" style="background:var(--amber)"></div>
+          <div style="flex:1">
+            <div class="alert-name" style="color:var(--amber)">⚠️ Lucro bruto incompleto: só ${pctVinculadoMes.toFixed(0)}% do faturamento desse mês entrou na conta</div>
+            <div class="alert-status">${fmt(faturamentoNaoVinculadoMes)} em vendas ainda estão com SKU pendente (não vinculado a produto) e por isso não contam nem receita, nem custo, nem lucro aqui — o Lucro bruto real deve ser bem maior que o mostrado. Vincula os SKUs pendentes acima pra corrigir.</div>
+          </div>
+        </div>
+      </div>
+    ` : ''}
+    <div class="section-subtitle" style="margin-top:${faturamentoNaoVinculadoMes > 1 && pctVinculadoMes < 95 ? '10px' : '-8px'};margin-bottom:8px">Lucro bruto = venda − custo direto da peça (tecido, corte, mão de obra, insumos) − taxa da plataforma. Lucro líquido = lucro bruto − custos fixos do mês (${fmt(custosFixosMes)}, ex: aluguel, ferramentas).${!temDadosDeLucro ? ' * Só considera vendas com produto identificado.' : ''}</div>
 
     <div class="section-title-wrap" style="margin-top:24px">
       <div><div class="section-title">Evolução — últimos 6 meses</div><div class="section-subtitle">Faturamento total de vendas por mês</div></div>
