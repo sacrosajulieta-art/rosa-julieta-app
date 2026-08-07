@@ -496,7 +496,7 @@ async function loadData() {
   state.produtos = (produtos || []).map(mapProdutoFromDb);
   state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0), taxaFaixas: Array.isArray(p.taxa_faixas) ? p.taxa_faixas : [] }));
   state.costureiras = (costureiras || []).map((c) => ({ id: c.id, nome: c.nome, ativa: c.ativa, metaSemanal: c.meta_semanal || 0 }));
-  state.producoes = (producoes || []).map((p) => ({ id: p.id, costureiraId: p.costureira_id, produtoId: p.produto_id, quantidade: p.quantidade, data: p.data, pago: p.pago, varianteId: p.variante_id || null }));
+  state.producoes = (producoes || []).map((p) => ({ id: p.id, costureiraId: p.costureira_id, produtoId: p.produto_id, quantidade: p.quantidade, data: p.data, pago: p.pago, varianteId: p.variante_id || null, abateVarianteId: 'abate_variante_id' in p ? p.abate_variante_id : undefined }));
   state.variantes = (variantes || []).map((v) => ({ id: v.id, produtoId: v.produto_id, nome: v.nome, estoqueAtual: v.estoque_atual, skuVariante: v.sku_variante }));
   state.materiaPrima = (materiaPrima || []).map((m) => ({ id: m.id, cor: m.cor, rolosDisponiveis: m.rolos_disponiveis, custoMedioRolo: Number(m.custo_medio_rolo || 0) }));
   state.ordensCorte = (ordensCorte || []).map((o) => ({ id: o.id, cor: o.cor, quantidadeRolos: o.quantidade_rolos, valorTecido: Number(o.valor_tecido), dataEnvio: o.data_envio, status: o.status, dataConclusao: o.data_conclusao, tipo: o.tipo || 'principal', valorCorte: Number(o.valor_corte || 0), transacaoCorteId: o.transacao_corte_id || null, grupoId: o.grupo_id || null }));
@@ -2352,7 +2352,8 @@ async function removeCostureira(id) {
 // LEVA em mãos (diferente da cor da peça em si), e o abate da fila de "em mãos" usa essa —
 // null explícito = abater da leva "sem cor" (produto sem variante)
 async function registrarProducao(costureiraId, produtoId, quantidade, data, varianteId, jaPago, origemVarianteId) {
-  const { error } = await sb.from('producoes').insert({ costureira_id: costureiraId, produto_id: produtoId, quantidade, data, pago: !!jaPago, variante_id: varianteId || null });
+  const varianteParaAbater = origemVarianteId !== undefined ? origemVarianteId : varianteId;
+  const { error } = await sb.from('producoes').insert({ costureira_id: costureiraId, produto_id: produtoId, quantidade, data, pago: !!jaPago, variante_id: varianteId || null, abate_variante_id: varianteParaAbater || null });
   if (error) { alert('Erro ao registrar produção: ' + error.message); return; }
   if (varianteId) {
     const variante = state.variantes.find((v) => v.id === varianteId);
@@ -2361,7 +2362,6 @@ async function registrarProducao(costureiraId, produtoId, quantidade, data, vari
     const produto = state.produtos.find((p) => p.id === produtoId);
     if (produto) await updateProdutoEstoque(produtoId, produto.estoqueAtual + quantidade);
   }
-  const varianteParaAbater = origemVarianteId !== undefined ? origemVarianteId : varianteId;
   if (quantidade !== 0) await baixarDistribuicoesFIFO(costureiraId, produtoId, varianteParaAbater, Math.abs(quantidade));
   // peças de verdade entregues (não defeito) já consomem os insumos de "produção" da ficha técnica, tipo etiqueta
   if (quantidade > 0) await baixarInsumosProducao(produtoId, quantidade, data);
@@ -2380,6 +2380,11 @@ async function removeProducao(id) {
       const produto = state.produtos.find((x) => x.id === p.produtoId);
       if (produto) await updateProdutoEstoque(produto.id, Math.max(0, produto.estoqueAtual - p.quantidade));
     }
+    // devolve a peça pra fila de "em mãos" da costureira (desfaz o abate feito no lançamento) —
+    // usa a variante que foi abatida de verdade (pode ser diferente da variante da peça, se veio
+    // de uma leva de cor mista); pra lançamentos antigos, sem essa info salva, assume a mesma cor
+    const varianteAbatida = p.abateVarianteId !== undefined ? p.abateVarianteId : p.varianteId;
+    if (p.quantidade !== 0) await restaurarDistribuicoesLIFO(p.costureiraId, p.produtoId, varianteAbatida, Math.abs(p.quantidade));
   }
   const { error } = await sb.from('producoes').delete().eq('id', id);
   if (error) alert('Erro ao remover lançamento: ' + error.message);
@@ -2389,20 +2394,29 @@ async function updateProducao(id, novo) {
   if (!antigo) return;
   const { error } = await sb.from('producoes').update({ produto_id: novo.produtoId, quantidade: novo.quantidade, data: novo.data }).eq('id', id);
   if (error) { alert('Erro ao editar lançamento: ' + error.message); return; }
+  const varianteAbatida = antigo.abateVarianteId !== undefined ? antigo.abateVarianteId : antigo.varianteId;
   // lançamentos com cor (variante) não trocam de produto na edição — só ajusta a quantidade na mesma cor
   if (antigo.varianteId) {
     const variante = state.variantes.find((v) => v.id === antigo.varianteId);
     if (variante) await updateVarianteEstoque(variante.id, Math.max(0, variante.estoqueAtual + (novo.quantidade - antigo.quantidade)));
+    const delta = novo.quantidade - antigo.quantidade;
+    if (delta > 0) await baixarDistribuicoesFIFO(antigo.costureiraId, antigo.produtoId, varianteAbatida, delta);
+    else if (delta < 0) await restaurarDistribuicoesLIFO(antigo.costureiraId, antigo.produtoId, varianteAbatida, Math.abs(delta));
     return;
   }
   if (antigo.produtoId === novo.produtoId) {
     const produto = state.produtos.find((p) => p.id === novo.produtoId);
     if (produto) await updateProdutoEstoque(produto.id, Math.max(0, produto.estoqueAtual + (novo.quantidade - antigo.quantidade)));
+    const delta = novo.quantidade - antigo.quantidade;
+    if (delta > 0) await baixarDistribuicoesFIFO(antigo.costureiraId, antigo.produtoId, varianteAbatida, delta);
+    else if (delta < 0) await restaurarDistribuicoesLIFO(antigo.costureiraId, antigo.produtoId, varianteAbatida, Math.abs(delta));
   } else {
     const produtoAntigo = state.produtos.find((p) => p.id === antigo.produtoId);
     if (produtoAntigo) await updateProdutoEstoque(produtoAntigo.id, Math.max(0, produtoAntigo.estoqueAtual - antigo.quantidade));
     const produtoNovo = state.produtos.find((p) => p.id === novo.produtoId);
     if (produtoNovo) await updateProdutoEstoque(produtoNovo.id, produtoNovo.estoqueAtual + novo.quantidade);
+    if (antigo.quantidade !== 0) await restaurarDistribuicoesLIFO(antigo.costureiraId, antigo.produtoId, varianteAbatida, Math.abs(antigo.quantidade));
+    if (novo.quantidade !== 0) await baixarDistribuicoesFIFO(antigo.costureiraId, novo.produtoId, antigo.varianteId, Math.abs(novo.quantidade));
   }
 }
 
