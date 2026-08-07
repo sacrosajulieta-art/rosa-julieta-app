@@ -1685,7 +1685,12 @@ function fichaTecnicaDoProduto(produtoId) {
 function calcularCustoTotalProduto(produtoId, visitados) {
   visitados = visitados || new Set();
   if (visitados.has(produtoId)) return 0; // evita loop infinito se alguém criar uma referência circular
-  visitados.add(produtoId);
+  // cada chamada recursiva recebe sua PRÓPRIA cópia do caminho percorrido (visitados + esse
+  // produto) — assim, quando um kit repete o mesmo produto base em vários slots (ex: 4 cores
+  // do mesmo "Top Joy"), cada slot consegue contar o custo dele, em vez do 2º em diante ser
+  // barrado por engano como se fosse referência circular
+  const proximoVisitados = new Set(visitados);
+  proximoVisitados.add(produtoId);
   const produto = state.produtos.find((p) => p.id === produtoId);
   if (!produto) return 0;
   let total = (produto.custoUnitario || 0) + (produto.valorMaoObra || 0);
@@ -1694,12 +1699,12 @@ function calcularCustoTotalProduto(produtoId, visitados) {
       const insumo = state.insumos.find((i) => i.id === item.insumoId);
       if (insumo) total += insumo.custoMedioUnitario * item.quantidade;
     } else if (item.tipoItem === 'produto' && produto.tipo !== 'kit') {
-      total += calcularCustoTotalProduto(item.componenteProdutoId, visitados) * item.quantidade;
+      total += calcularCustoTotalProduto(item.componenteProdutoId, proximoVisitados) * item.quantidade;
     }
   });
   if (produto.tipo === 'kit') {
     state.kitComponentes.filter((k) => k.produtoKitId === produtoId).forEach((k) => {
-      total += calcularCustoTotalProduto(k.componenteProdutoId, visitados) * k.quantidade;
+      total += calcularCustoTotalProduto(k.componenteProdutoId, proximoVisitados) * k.quantidade;
     });
   }
   return total;
