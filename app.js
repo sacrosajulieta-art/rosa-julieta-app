@@ -396,6 +396,7 @@ const state = {
   showLancamentosCartaoId: null,
   vendasSkuPendentes: [],
   pendenteKitAtivo: {},
+  pendenteSelecaoAtual: {},
   vendasDetalhe: [],
   filtroHistoricoCanal: 'todos',
   abonosPonto: [],
@@ -7625,9 +7626,9 @@ function renderVendas(c) {
                     ${state.produtos.map((p) => {
                       const vs = variantesDoProduto(p.id);
                       if (vs.length > 0) {
-                        return vs.map((variante) => `<option value="${p.id}|${variante.id}">${esc(p.nome)} — ${esc(variante.nome)}</option>`).join('');
+                        return vs.map((variante) => `<option value="${p.id}|${variante.id}" ${state.pendenteSelecaoAtual[v.id] === `${p.id}|${variante.id}` ? 'selected' : ''}>${esc(p.nome)} — ${esc(variante.nome)}</option>`).join('');
                       }
-                      return `<option value="${p.id}" ${state.pendenteKitAtivo[v.id] === p.id ? 'selected' : ''}>${esc(p.nome)}${p.sku ? ' — ' + esc(p.sku) : ''}${p.ehKit ? ' 🎁' : ''}</option>`;
+                      return `<option value="${p.id}" ${(state.pendenteSelecaoAtual[v.id] || state.pendenteKitAtivo[v.id]) === p.id ? 'selected' : ''}>${esc(p.nome)}${p.sku ? ' — ' + esc(p.sku) : ''}${p.ehKit ? ' 🎁' : ''}</option>`;
                     }).join('')}
                   </select>
                   <button class="confirm-btn" data-vincular-sku="${v.id}">Vincular</button>
@@ -7880,14 +7881,16 @@ function attachVendasHandlers(c) {
     sel.addEventListener('change', () => {
       const pendenteId = sel.dataset.pendenteProdutoSelect;
       const valorSelecionado = sel.value;
+      state.pendenteSelecaoAtual[pendenteId] = valorSelecionado;
       const [produtoId] = valorSelecionado.split('|');
       const produto = state.produtos.find((p) => p.id === produtoId);
       if (produto?.ehKit) {
         state.pendenteKitAtivo[pendenteId] = produtoId;
-      } else {
+        render();
+      } else if (state.pendenteKitAtivo[pendenteId]) {
         delete state.pendenteKitAtivo[pendenteId];
+        render();
       }
-      render();
     });
   });
 
@@ -7913,6 +7916,7 @@ function attachVendasHandlers(c) {
       }
       await vincularSkuPendente(pendenteId, produtoId, varianteId || null);
       delete state.pendenteKitAtivo[pendenteId];
+      delete state.pendenteSelecaoAtual[pendenteId];
       await loadData();
     });
   });
