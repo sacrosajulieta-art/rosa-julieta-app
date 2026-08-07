@@ -1417,8 +1417,10 @@ async function removeProduto(id) {
 // fica pendente até a Daniela vincular manualmente ao produto certo, em Estoque
 async function registrarSkusPendentes(pendentesMap) {
   const novosIds = [];
-  for (const [sku, info] of pendentesMap.entries()) {
-    const existente = state.vendasSkuPendentes.find((v) => v.sku.trim().toLowerCase() === sku.trim().toLowerCase());
+  for (const [, info] of pendentesMap.entries()) {
+    const sku = info.sku;
+    const varianteNorm = (info.varianteTexto || '').trim().toLowerCase();
+    const existente = state.vendasSkuPendentes.find((v) => v.sku.trim().toLowerCase() === sku.trim().toLowerCase() && (v.varianteTexto || '').trim().toLowerCase() === varianteNorm);
     if (existente) {
       const { error } = await sb.from('vendas_sku_pendentes').update({
         quantidade: existente.quantidade + info.qtd,
@@ -7803,7 +7805,7 @@ function attachVendasHandlers(c) {
     const novos = [];
     const deducoes = new Map(); // produtoId -> { qtd, ultimaData, faturamento } (total do import, usado pra baixar estoque)
     const detalhesVendas = new Map(); // produtoId|plataformaId|data -> { produtoId, plataformaId, plataformaNome, sku, quantidade, valor, data } (granular, pra ranking/comparação por período)
-    const skusNaoEncontrados = new Map(); // sku -> { qtd, faturamento, ultimaData, plataformaNome }
+    const skusNaoEncontrados = new Map(); // "sku||variante" -> { sku, qtd, faturamento, ultimaData, plataformaNome, varianteTexto } — separado por variação pra não misturar cores diferentes que usam o mesmo SKU base
     const pedidosPorPlataforma = new Map(); // plataformaId (ou '_sem_plataforma') -> Set de pedidos
     const linhasSemPedidoPorPlataforma = new Map(); // fallback quando a linha não tem ID do pedido
     // resumo diário por plataforma, de TODA linha — independente de o SKU já estar vinculado
@@ -7928,13 +7930,14 @@ function attachVendasHandlers(c) {
           detalhesVendas.set(chaveDetalhe, atualDetalhe);
         } else {
           const varianteTextoLinha = guessVarianteTextoField(row);
-          const atual = skusNaoEncontrados.get(sku) || { qtd: 0, faturamento: 0, pedidos: 0, taxa: 0, ultimaData: dataLinha, plataformaNome: plataformaLinha ? plataformaLinha.nome : null, descricao: descricaoItem, varianteTexto: varianteTextoLinha };
+          const chavePendente = sku.trim().toLowerCase() + '||' + (varianteTextoLinha ? varianteTextoLinha.trim().toLowerCase() : '');
+          const atual = skusNaoEncontrados.get(chavePendente) || { sku: sku.trim(), qtd: 0, faturamento: 0, pedidos: 0, taxa: 0, ultimaData: dataLinha, plataformaNome: plataformaLinha ? plataformaLinha.nome : null, descricao: descricaoItem, varianteTexto: varianteTextoLinha };
           atual.qtd += qtd;
           atual.faturamento += valor;
           atual.pedidos += pedidosLinha;
           atual.taxa += taxaTotalLinha;
           if (dataLinha > atual.ultimaData) atual.ultimaData = dataLinha;
-          skusNaoEncontrados.set(sku, atual);
+          skusNaoEncontrados.set(chavePendente, atual);
         }
       }
     });
