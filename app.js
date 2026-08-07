@@ -1520,22 +1520,37 @@ async function salvarImportacaoVendas(nomeArquivo, snapshot, transacaoIds, venda
 // skus pendentes) — usa o snapshot gravado no momento da importação, não recalcula nada
 async function desfazerImportacaoVendas(importacaoId) {
   const { data: importacao, error: errBusca } = await sb.from('importacoes_vendas').select('*').eq('id', importacaoId).single();
-  if (errBusca || !importacao) { alert('Erro ao buscar a importação: ' + (errBusca?.message || 'não encontrada')); return; }
+  if (errBusca || !importacao) { alert('Erro ao buscar a importação: ' + (errBusca?.message || 'não encontrada')); return false; }
   const snap = importacao.snapshot;
   for (const p of snap.produtos || []) {
-    await sb.from('produtos').update({ estoque_atual: p.estoqueAtual, total_vendido: p.totalVendido, preco_venda_medio: p.precoVendaMedio }).eq('id', p.id);
+    const { error: errP } = await sb.from('produtos').update({ estoque_atual: p.estoqueAtual, total_vendido: p.totalVendido, preco_venda_medio: p.precoVendaMedio }).eq('id', p.id);
+    if (errP) { alert('Erro ao restaurar estoque de produto: ' + errP.message); return false; }
   }
   for (const v of snap.variantes || []) {
-    await sb.from('variantes').update({ estoque_atual: v.estoqueAtual }).eq('id', v.id);
+    const { error: errV } = await sb.from('variantes').update({ estoque_atual: v.estoqueAtual }).eq('id', v.id);
+    if (errV) { alert('Erro ao restaurar estoque de variante: ' + errV.message); return false; }
   }
   for (const i of snap.insumos || []) {
-    await sb.from('insumos').update({ quantidade_disponivel: i.quantidadeDisponivel, custo_medio_unitario: i.custoMedioUnitario }).eq('id', i.id);
+    const { error: errI } = await sb.from('insumos').update({ quantidade_disponivel: i.quantidadeDisponivel, custo_medio_unitario: i.custoMedioUnitario }).eq('id', i.id);
+    if (errI) { alert('Erro ao restaurar insumo: ' + errI.message); return false; }
   }
-  if (importacao.transacao_ids?.length) await sb.from('transacoes').delete().in('id', importacao.transacao_ids);
-  if (importacao.vendas_detalhe_ids?.length) await sb.from('vendas_detalhe').delete().in('id', importacao.vendas_detalhe_ids);
-  if (importacao.sku_pendente_ids?.length) await sb.from('vendas_sku_pendentes').delete().in('id', importacao.sku_pendente_ids);
+  if (importacao.transacao_ids?.length) {
+    const { error: errTx, count } = await sb.from('transacoes').delete({ count: 'exact' }).in('id', importacao.transacao_ids);
+    if (errTx) { alert('Erro ao apagar lançamentos dessa importação: ' + errTx.message); return false; }
+    if (count !== importacao.transacao_ids.length) alert(`Aviso: tentei apagar ${importacao.transacao_ids.length} lançamento(s) dessa importação, mas só ${count ?? 0} foram removidos de fato.`);
+  }
+  if (importacao.vendas_detalhe_ids?.length) {
+    const { error: errVd, count: countVd } = await sb.from('vendas_detalhe').delete({ count: 'exact' }).in('id', importacao.vendas_detalhe_ids);
+    if (errVd) { alert('Erro ao apagar detalhe de vendas dessa importação: ' + errVd.message); return false; }
+    if (countVd !== importacao.vendas_detalhe_ids.length) alert(`Aviso: tentei apagar ${importacao.vendas_detalhe_ids.length} detalhe(s) de venda dessa importação, mas só ${countVd ?? 0} foram removidos de fato.`);
+  }
+  if (importacao.sku_pendente_ids?.length) {
+    const { error: errSp } = await sb.from('vendas_sku_pendentes').delete().in('id', importacao.sku_pendente_ids);
+    if (errSp) { alert('Erro ao apagar SKUs pendentes dessa importação: ' + errSp.message); return false; }
+  }
   const { error } = await sb.from('importacoes_vendas').update({ desfeita: true }).eq('id', importacaoId);
-  if (error) alert('Erro ao marcar importação como desfeita: ' + error.message);
+  if (error) { alert('Erro ao marcar importação como desfeita: ' + error.message); return false; }
+  return true;
 }
 // pra importações antigas, feitas antes de existir o recurso de desfazer automático (sem
 // snapshot salvo) — reconstrói o que dá pra reverter numa data específica: apaga os
@@ -1563,20 +1578,31 @@ async function reverterVendasPorData(dataStr, apagarPendentesTambem) {
   for (const item of semCor) {
     const produto = state.produtos.find((p) => p.id === item.produtoId);
     if (produto) {
-      await sb.from('produtos').update({
+      const { error: errEstoque } = await sb.from('produtos').update({
         estoque_atual: produto.estoqueAtual + item.qtd,
         total_vendido: Math.max(0, (produto.totalVendido || 0) - item.qtd),
       }).eq('id', produto.id);
+      if (errEstoque) { alert(`Erro ao devolver estoque de "${item.nome}": ${errEstoque.message}`); return false; }
     }
   }
   const idsVenda = vendasDoDia.map((v) => v.id);
   const idsTx = [...txVendaDoDia, ...txTaxaDoDia].map((t) => t.id);
-  if (idsVenda.length) await sb.from('vendas_detalhe').delete().in('id', idsVenda);
-  if (idsTx.length) await sb.from('transacoes').delete().in('id', idsTx);
+  if (idsVenda.length) {
+    const { error: errVenda, count } = await sb.from('vendas_detalhe').delete({ count: 'exact' }).in('id', idsVenda);
+    if (errVenda) { alert('Erro ao apagar detalhe de vendas: ' + errVenda.message); return false; }
+    if (count !== idsVenda.length) { alert(`Aviso: tentei apagar ${idsVenda.length} registro(s) de detalhe de vendas, mas só ${count ?? 0} foram removidos de fato. Pode ter alguma permissão bloqueando — confere no Supabase.`); }
+  }
+  if (idsTx.length) {
+    const { error: errTx, count: countTx } = await sb.from('transacoes').delete({ count: 'exact' }).in('id', idsTx);
+    if (errTx) { alert('Erro ao apagar lançamentos: ' + errTx.message); return false; }
+    if (countTx !== idsTx.length) { alert(`Aviso: tentei apagar ${idsTx.length} lançamento(s), mas só ${countTx ?? 0} foram removidos de fato. Pode ter alguma permissão bloqueando — confere no Supabase.`); }
+  }
   await sb.from('vendas_resumo_diario').delete().eq('data', dataStr);
   if (apagarPendentesTambem && pendentesDoDia.length) {
-    await sb.from('vendas_sku_pendentes').delete().in('id', pendentesDoDia.map((v) => v.id));
+    const { error: errPendentes } = await sb.from('vendas_sku_pendentes').delete().in('id', pendentesDoDia.map((v) => v.id));
+    if (errPendentes) { alert('Erro ao apagar SKUs pendentes: ' + errPendentes.message); return false; }
   }
+  return true;
 }
 // venda manual (atacado, feira, venda direta etc) — mesma lógica de baixa de estoque
 // do import, só que lançada na mão em vez de vir de uma planilha. Se o produto tem cor
@@ -7748,9 +7774,9 @@ function attachVendasHandlers(c) {
   document.querySelectorAll('[data-desfazer-importacao]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       if (!confirm('Desfazer essa importação? Isso restaura o estoque, o total vendido e o preço médio de todos os produtos afetados pro que estava antes dessa importação, e apaga os lançamentos, o detalhe de vendas e os SKUs pendentes que ela criou.\n\nAção não pode ser desfeita de novo — confirma?')) return;
-      await desfazerImportacaoVendas(btn.dataset.desfazerImportacao);
+      const sucesso = await desfazerImportacaoVendas(btn.dataset.desfazerImportacao);
       await loadData();
-      alert('Importação desfeita — estoque restaurado.');
+      if (sucesso) alert('Importação desfeita — estoque restaurado.');
     });
   });
 
@@ -7767,11 +7793,11 @@ function attachVendasHandlers(c) {
       const dataStr = btn.dataset.confirmarReversaoData;
       if (!confirm(`Reverter todas as vendas de ${new Date(dataStr + 'T00:00:00').toLocaleDateString('pt-BR')}?\n\nIsso apaga os lançamentos e o detalhe de vendas dessa data, e devolve o estoque dos produtos sem cor. Produtos com cor você redistribui na mão depois.\n\nConfirma?`)) return;
       const apagarPendentes = document.getElementById('reversaoApagarPendentes')?.checked || false;
-      await reverterVendasPorData(dataStr, apagarPendentes);
+      const sucesso = await reverterVendasPorData(dataStr, apagarPendentes);
       window.__reversaoPrevia = null;
       window.__reversaoDataSelecionada = null;
       await loadData();
-      alert('Revertido! Confere o estoque dos produtos com cor pra redistribuir manualmente.');
+      if (sucesso) alert('Revertido! Confere o estoque dos produtos com cor pra redistribuir manualmente.');
     });
   });
 
