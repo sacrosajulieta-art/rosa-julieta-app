@@ -395,6 +395,7 @@ const state = {
   showCompraCartaoId: null,
   showLancamentosCartaoId: null,
   vendasSkuPendentes: [],
+  pendenteKitAtivo: {},
   vendasDetalhe: [],
   filtroHistoricoCanal: 'todos',
   abonosPonto: [],
@@ -6577,7 +6578,7 @@ function renderEstoque(c) {
                           ${state.produtos.filter((prod) => prod.id !== p.id && !prod.ehKit).map((prod) => {
                             const vs = variantesDoProduto(prod.id);
                             if (vs.length > 0) {
-                              return vs.map((v) => `<option value="${prod.id}|${v.id}" ${valorAtual === `${prod.id}|${v.id}` ? 'selected' : ''}>${esc(prod.nome)} — ${esc(v.cor)}</option>`).join('');
+                              return vs.map((v) => `<option value="${prod.id}|${v.id}" ${valorAtual === `${prod.id}|${v.id}` ? 'selected' : ''}>${esc(prod.nome)} — ${esc(v.nome)}</option>`).join('');
                             }
                             return `<option value="${prod.id}|" ${valorAtual === `${prod.id}|` ? 'selected' : ''}>${esc(prod.nome)}</option>`;
                           }).join('')}
@@ -7509,19 +7510,45 @@ function renderVendas(c) {
                   </div>
                 </div>
                 <div class="form-row" style="margin-top:8px">
-                  <select id="vincularSkuProduto-${v.id}" style="flex:1">
+                  <select id="vincularSkuProduto-${v.id}" data-pendente-produto-select="${v.id}" style="flex:1">
                     <option value="">Selecione o produto (e a cor, se tiver)...</option>
                     ${state.produtos.map((p) => {
                       const vs = variantesDoProduto(p.id);
                       if (vs.length > 0) {
                         return vs.map((variante) => `<option value="${p.id}|${variante.id}">${esc(p.nome)} — ${esc(variante.nome)}</option>`).join('');
                       }
-                      return `<option value="${p.id}">${esc(p.nome)}${p.sku ? ' — ' + esc(p.sku) : ''}</option>`;
+                      return `<option value="${p.id}" ${state.pendenteKitAtivo[v.id] === p.id ? 'selected' : ''}>${esc(p.nome)}${p.sku ? ' — ' + esc(p.sku) : ''}${p.ehKit ? ' 🎁' : ''}</option>`;
                     }).join('')}
                   </select>
                   <button class="confirm-btn" data-vincular-sku="${v.id}">Vincular</button>
                   <button class="trash-btn" data-remover-sku-pendente="${v.id}" title="Ignorar esse SKU">🗑</button>
                 </div>
+                ${state.pendenteKitAtivo[v.id] ? (() => {
+                  const kitProdutoId = state.pendenteKitAtivo[v.id];
+                  const componentesExistentes = state.kitComponentes.filter((k) => k.produtoKitId === kitProdutoId);
+                  return `
+                    <div class="form-hint" style="margin-top:10px;margin-bottom:2px">🎁 Esse produto é um kit — escolhe a cor de cada peça que compõe ele (vale pra essa baixa retroativa E fica valendo como padrão pros próximos imports desse SKU, sem precisar escolher de novo)</div>
+                    ${Array.from({ length: 4 }, (_, i) => {
+                      const comp = componentesExistentes[i];
+                      const valorAtual = comp ? `${comp.componenteProdutoId}|${comp.componenteVarianteId || ''}` : '';
+                      return `
+                        <div class="form-row" style="margin-top:4px">
+                          <select id="pendenteKitComp-${v.id}-${i}" style="flex:1">
+                            <option value="">Componente (opcional)</option>
+                            ${state.produtos.filter((prod) => prod.id !== kitProdutoId && !prod.ehKit).map((prod) => {
+                              const vsComp = variantesDoProduto(prod.id);
+                              if (vsComp.length > 0) {
+                                return vsComp.map((vc) => `<option value="${prod.id}|${vc.id}" ${valorAtual === `${prod.id}|${vc.id}` ? 'selected' : ''}>${esc(prod.nome)} — ${esc(vc.nome)}</option>`).join('');
+                              }
+                              return `<option value="${prod.id}|" ${valorAtual === `${prod.id}|` ? 'selected' : ''}>${esc(prod.nome)}</option>`;
+                            }).join('')}
+                          </select>
+                          <input type="text" id="pendenteKitCompQtd-${v.id}-${i}" placeholder="Qtd" value="${comp ? comp.quantidade : '1'}" style="max-width:70px" inputmode="numeric" />
+                        </div>
+                      `;
+                    }).join('')}
+                  `;
+                })() : ''}
               </div>
             `).join('')}
           </div>
@@ -7738,13 +7765,44 @@ function attachVendasHandlers(c) {
     });
   });
 
+  document.querySelectorAll('[data-pendente-produto-select]').forEach((sel) => {
+    sel.addEventListener('change', () => {
+      const pendenteId = sel.dataset.pendenteProdutoSelect;
+      const valorSelecionado = sel.value;
+      const [produtoId] = valorSelecionado.split('|');
+      const produto = state.produtos.find((p) => p.id === produtoId);
+      if (produto?.ehKit) {
+        state.pendenteKitAtivo[pendenteId] = produtoId;
+      } else {
+        delete state.pendenteKitAtivo[pendenteId];
+      }
+      render();
+    });
+  });
+
   document.querySelectorAll('[data-vincular-sku]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const pendenteId = btn.dataset.vincularSku;
       const valorSelecionado = document.getElementById(`vincularSkuProduto-${pendenteId}`).value;
       if (!valorSelecionado) { alert('Selecione o produto antes de vincular.'); return; }
       const [produtoId, varianteId] = valorSelecionado.split('|');
+      if (state.pendenteKitAtivo[pendenteId] === produtoId) {
+        const componentes = [];
+        for (let i = 0; i < 4; i++) {
+          const selComp = document.getElementById(`pendenteKitComp-${pendenteId}-${i}`);
+          const inputQtd = document.getElementById(`pendenteKitCompQtd-${pendenteId}-${i}`);
+          if (!selComp || !selComp.value) continue;
+          const [compProdutoId, compVarianteId] = selComp.value.split('|');
+          const qtd = Number(inputQtd?.value) || 1;
+          if (compProdutoId && qtd > 0) componentes.push({ produtoId: compProdutoId, varianteId: compVarianteId || null, quantidade: qtd });
+        }
+        if (componentes.length === 0) { alert('Escolhe pelo menos uma cor/componente do kit antes de vincular.'); return; }
+        await salvarComponentesKit(produtoId, componentes);
+        await loadData();
+      }
       await vincularSkuPendente(pendenteId, produtoId, varianteId || null);
+      delete state.pendenteKitAtivo[pendenteId];
+      await loadData();
     });
   });
   document.querySelectorAll('[data-remover-sku-pendente]').forEach((btn) => {
