@@ -496,7 +496,7 @@ async function loadData() {
   state.produtos = (produtos || []).map(mapProdutoFromDb);
   state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0), taxaFaixas: Array.isArray(p.taxa_faixas) ? p.taxa_faixas : [] }));
   state.costureiras = (costureiras || []).map((c) => ({ id: c.id, nome: c.nome, ativa: c.ativa, metaSemanal: c.meta_semanal || 0 }));
-  state.producoes = (producoes || []).map((p) => ({ id: p.id, costureiraId: p.costureira_id, produtoId: p.produto_id, quantidade: p.quantidade, data: p.data, pago: p.pago, varianteId: p.variante_id || null, abateVarianteId: 'abate_variante_id' in p ? p.abate_variante_id : undefined }));
+  state.producoes = (producoes || []).map((p) => ({ id: p.id, costureiraId: p.costureira_id, produtoId: p.produto_id, quantidade: p.quantidade, data: p.data, pago: p.pago, varianteId: p.variante_id || null, abateVarianteId: 'abate_variante_id' in p ? p.abate_variante_id : undefined, motivoDefeito: p.motivo_defeito || null, valorAjuste: p.valor_ajuste != null ? Number(p.valor_ajuste) : null }));
   state.variantes = (variantes || []).map((v) => ({ id: v.id, produtoId: v.produto_id, nome: v.nome, estoqueAtual: v.estoque_atual, skuVariante: v.sku_variante }));
   state.materiaPrima = (materiaPrima || []).map((m) => ({ id: m.id, cor: m.cor, rolosDisponiveis: m.rolos_disponiveis, custoMedioRolo: Number(m.custo_medio_rolo || 0) }));
   state.ordensCorte = (ordensCorte || []).map((o) => ({ id: o.id, cor: o.cor, quantidadeRolos: o.quantidade_rolos, valorTecido: Number(o.valor_tecido), dataEnvio: o.data_envio, status: o.status, dataConclusao: o.data_conclusao, tipo: o.tipo || 'principal', valorCorte: Number(o.valor_corte || 0), transacaoCorteId: o.transacao_corte_id || null, grupoId: o.grupo_id || null }));
@@ -2368,9 +2368,9 @@ async function removeCostureira(id) {
 // veio de um corte de cor mista (ex: "Preto + Marrom" cortado junto), dá pra passar a cor da
 // LEVA em mãos (diferente da cor da peça em si), e o abate da fila de "em mãos" usa essa —
 // null explícito = abater da leva "sem cor" (produto sem variante)
-async function registrarProducao(costureiraId, produtoId, quantidade, data, varianteId, jaPago, origemVarianteId) {
+async function registrarProducao(costureiraId, produtoId, quantidade, data, varianteId, jaPago, origemVarianteId, motivoDefeito, valorAjuste) {
   const varianteParaAbater = origemVarianteId !== undefined ? origemVarianteId : varianteId;
-  const { error } = await sb.from('producoes').insert({ costureira_id: costureiraId, produto_id: produtoId, quantidade, data, pago: !!jaPago, variante_id: varianteId || null, abate_variante_id: varianteParaAbater || null });
+  const { error } = await sb.from('producoes').insert({ costureira_id: costureiraId, produto_id: produtoId, quantidade, data, pago: !!jaPago, variante_id: varianteId || null, abate_variante_id: varianteParaAbater || null, motivo_defeito: motivoDefeito || null, valor_ajuste: valorAjuste !== undefined ? valorAjuste : null });
   if (error) { alert('Erro ao registrar produção: ' + error.message); return; }
   if (varianteId) {
     const variante = state.variantes.find((v) => v.id === varianteId);
@@ -2579,6 +2579,15 @@ function getComputed() {
 }
 
 // ==================== RENDER ====================
+// valor que uma peça (produção ou defeito) conta pro que se deve à costureira — normalmente é
+// quantidade × valor da peça, mas defeitos podem ter um valor customizado (valorAjuste): pode
+// ser 0 (defeito não é culpa dela, não desconta nada) ou um valor maior que o normal (ela
+// estragou o tecido, desconta o prejuízo, não só a mão de obra daquela peça)
+function valorProducaoItem(p) {
+  if (p.valorAjuste !== null && p.valorAjuste !== undefined) return p.valorAjuste;
+  const produto = state.produtos.find((x) => x.id === p.produtoId);
+  return p.quantidade * (produto ? produto.valorMaoObra : 0);
+}
 // ---- Produção (visão do dono) ----
 function renderProducaoDono(c) {
   if (state.costureiraDetalheId) return renderCostureiraDetalhe(state.costureiraDetalheId);
@@ -2588,8 +2597,7 @@ function renderProducaoDono(c) {
   naoPagas.forEach((p) => {
     const produto = state.produtos.find((x) => x.id === p.produtoId);
     const nomeProduto = produto?.nome || 'Produto removido';
-    const valorUnit = produto ? produto.valorMaoObra : 0;
-    const valorItem = p.quantidade * valorUnit;
+    const valorItem = valorProducaoItem(p);
     if (!porCostureira[p.costureiraId]) porCostureira[p.costureiraId] = { qtd: 0, valor: 0, ids: [], porProduto: {} };
     porCostureira[p.costureiraId].qtd += p.quantidade;
     porCostureira[p.costureiraId].valor += valorItem;
@@ -2799,16 +2807,10 @@ function renderProducaoDono(c) {
 function renderCostureiraDetalhe(costureiraId) {
   const cost = state.costureiras.find((c) => c.id === costureiraId);
   const entradas = state.producoes.filter((p) => p.costureiraId === costureiraId).sort((a, b) => b.data.localeCompare(a.data));
-  const totalPago = entradas.filter((p) => p.pago).reduce((acc, p) => {
-    const produto = state.produtos.find((x) => x.id === p.produtoId);
-    return acc + p.quantidade * (produto ? produto.valorMaoObra : 0);
-  }, 0);
+  const totalPago = entradas.filter((p) => p.pago).reduce((acc, p) => acc + valorProducaoItem(p), 0);
   const pendentes = entradas.filter((p) => !p.pago);
   const totalPendenteQtd = pendentes.reduce((a, p) => a + p.quantidade, 0);
-  const totalPendenteValor = pendentes.reduce((acc, p) => {
-    const produto = state.produtos.find((x) => x.id === p.produtoId);
-    return acc + p.quantidade * (produto ? produto.valorMaoObra : 0);
-  }, 0);
+  const totalPendenteValor = pendentes.reduce((acc, p) => acc + valorProducaoItem(p), 0);
 
   // resumo agrupado por produto, só do que ainda está pendente (a semana em aberto)
   const porProdutoPendente = {};
@@ -2817,7 +2819,7 @@ function renderCostureiraDetalhe(costureiraId) {
     const nome = produto?.nome || 'Produto removido';
     if (!porProdutoPendente[nome]) porProdutoPendente[nome] = { qtd: 0, valor: 0 };
     porProdutoPendente[nome].qtd += p.quantidade;
-    porProdutoPendente[nome].valor += p.quantidade * (produto ? produto.valorMaoObra : 0);
+    porProdutoPendente[nome].valor += valorProducaoItem(p);
   });
   const resumoProdutos = Object.entries(porProdutoPendente).sort((a, b) => b[1].qtd - a[1].qtd);
 
@@ -2831,7 +2833,7 @@ function renderCostureiraDetalhe(costureiraId) {
   const porDiaFiltrado = {};
   entradasFiltradas.forEach((p) => {
     const produto = state.produtos.find((x) => x.id === p.produtoId);
-    const valorItem = p.quantidade * (produto ? produto.valorMaoObra : 0);
+    const valorItem = valorProducaoItem(p);
     if (!porDiaFiltrado[p.data]) porDiaFiltrado[p.data] = { qtd: 0, valor: 0 };
     porDiaFiltrado[p.data].qtd += p.quantidade;
     porDiaFiltrado[p.data].valor += valorItem;
@@ -2864,6 +2866,16 @@ function renderCostureiraDetalhe(costureiraId) {
     porProdutoDefeito[nome] = (porProdutoDefeito[nome] || 0) + Math.abs(p.quantidade);
   });
   const resumoDefeitos = Object.entries(porProdutoDefeito).sort((a, b) => b[1] - a[1]);
+
+  const LABELS_MOTIVO_DEFEITO = { costureira: '🧵 Erro da costureira', corte: '✂️ Erro de corte/tecido', outro: '❓ Outro motivo', null: '— Sem motivo registrado (lançamento antigo)' };
+  const porMotivoDefeito = {};
+  defeitos.forEach((p) => {
+    const chave = p.motivoDefeito || 'null';
+    if (!porMotivoDefeito[chave]) porMotivoDefeito[chave] = { qtd: 0, descontado: 0 };
+    porMotivoDefeito[chave].qtd += Math.abs(p.quantidade);
+    porMotivoDefeito[chave].descontado += Math.abs(Math.min(0, valorProducaoItem(p)));
+  });
+  const resumoMotivoDefeitos = Object.entries(porMotivoDefeito).sort((a, b) => b[1].qtd - a[1].qtd);
 
   const tipo = window.__prodDetalheTipo || 'producao';
 
@@ -2941,6 +2953,21 @@ function renderCostureiraDetalhe(costureiraId) {
       </div>
     ` : ''}
 
+    ${resumoMotivoDefeitos.length > 0 ? `
+      <div class="section-title-wrap">
+        <div><div class="section-title">Defeitos por motivo</div><div class="section-subtitle">Pra mapear se o problema é dela, do corte, ou outra coisa</div></div>
+      </div>
+      <div class="tx-list" style="margin-bottom:28px">
+        ${resumoMotivoDefeitos.map(([chave, info]) => `
+          <div class="tx-row">
+            <div class="tx-dot" style="background:var(--red)"></div>
+            <div style="flex:1"><div class="tx-categoria">${esc(LABELS_MOTIVO_DEFEITO[chave] || chave)}</div></div>
+            <div class="tx-valor" style="color:var(--red)">${info.qtd} peças${info.descontado > 0 ? ` · ${fmt(info.descontado)} descontado` : ' · sem desconto'}</div>
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
+
     <div class="section-title-wrap">
       <div><div class="section-title">Resumo da semana (pendente)</div><div class="section-subtitle">Total por modelo, pronto pro fechamento de sexta</div></div>
     </div>
@@ -2990,6 +3017,18 @@ function renderCostureiraDetalhe(costureiraId) {
           `;
         })()}
         <input type="text" id="detalheQuantidade" placeholder="Quantidade de peças" inputmode="numeric" />
+        ${tipo === 'defeito' ? `
+          <select id="detalheMotivoDefeito">
+            <option value="">Selecione o motivo do defeito</option>
+            <option value="costureira" ${window.__prodFormMotivoDefeito === 'costureira' ? 'selected' : ''}>🧵 Erro da costureira (desconta dela)</option>
+            <option value="corte" ${window.__prodFormMotivoDefeito === 'corte' ? 'selected' : ''}>✂️ Erro de corte/tecido danificado (NÃO desconta dela)</option>
+            <option value="outro" ${window.__prodFormMotivoDefeito === 'outro' ? 'selected' : ''}>❓ Outro motivo (NÃO desconta dela)</option>
+          </select>
+          ${window.__prodFormMotivoDefeito === 'costureira' ? `
+            <input type="text" id="detalheValorDesconto" placeholder="Valor a descontar (em branco = valor normal da peça)" />
+            <div class="form-hint" style="margin-top:-4px">Pode colocar um valor maior que o normal da peça, se quiser cobrar o tecido estragado também.</div>
+          ` : ''}
+        ` : ''}
         <input type="date" id="detalheData" value="${todayStr()}" />
         <label class="checkbox-label"><input type="checkbox" id="detalheJaPago" /> 💰 Já foi pago antes (não lançar no financeiro)</label>
         <button class="confirm-btn" id="salvarDetalheProducao" data-costureira="${costureiraId}">${tipo === 'defeito' ? 'Registrar defeito' : 'Registrar produção'}</button>
@@ -3030,7 +3069,7 @@ function renderCostureiraDetalhe(costureiraId) {
       <div class="tx-list">
         ${entradasFiltradas.map((p) => {
           const produto = state.produtos.find((x) => x.id === p.produtoId);
-          const valor = p.quantidade * (produto ? produto.valorMaoObra : 0);
+          const valor = valorProducaoItem(p);
           const ehDefeito = p.quantidade < 0;
 
           if (state.editingProducaoId === p.id) {
@@ -3058,7 +3097,7 @@ function renderCostureiraDetalhe(costureiraId) {
             <div class="tx-row">
               <div class="tx-dot" style="background:${ehDefeito ? 'var(--red)' : p.pago ? 'var(--teal)' : 'var(--amber)'}"></div>
               <div style="flex:1">
-                <div class="tx-categoria">${esc(produto?.nome || 'Produto removido')}${p.varianteId ? ` — ${esc(state.variantes.find((v) => v.id === p.varianteId)?.nome || '')}` : ''}${ehDefeito ? ' ⚠️ Defeito' : ''}</div>
+                <div class="tx-categoria">${esc(produto?.nome || 'Produto removido')}${p.varianteId ? ` — ${esc(state.variantes.find((v) => v.id === p.varianteId)?.nome || '')}` : ''}${ehDefeito ? ` ⚠️ Defeito${p.motivoDefeito ? ` (${esc(LABELS_MOTIVO_DEFEITO[p.motivoDefeito] || p.motivoDefeito)})` : ''}` : ''}</div>
                 <div class="tx-desc">${p.quantidade} peças · ${fmt(valor)}${p.pago ? ' · pago' : ' · pendente'}</div>
                 <div class="tx-date">${p.data}</div>
               </div>
@@ -3332,7 +3371,7 @@ function renderModoSupervisora(app) {
   const porDia = {};
   listaFiltrada.forEach((p) => {
     const produto = state.produtos.find((x) => x.id === p.produtoId);
-    const valorItem = p.quantidade * (produto ? produto.valorMaoObra : 0);
+    const valorItem = valorProducaoItem(p);
     if (!porDia[p.data]) porDia[p.data] = { qtd: 0, valor: 0 };
     porDia[p.data].qtd += p.quantidade;
     porDia[p.data].valor += valorItem;
@@ -8865,8 +8904,11 @@ function attachProducaoHandlers(c) {
     if (toggleDetalheForm) toggleDetalheForm.addEventListener('click', () => { state.showProducaoForm = !state.showProducaoForm; render(); });
 
     document.querySelectorAll('[data-prod-detalhe-tipo]').forEach((btn) => {
-      btn.addEventListener('click', () => { window.__prodDetalheTipo = btn.dataset.prodDetalheTipo; render(); });
+      btn.addEventListener('click', () => { window.__prodDetalheTipo = btn.dataset.prodDetalheTipo; window.__prodFormMotivoDefeito = null; render(); });
     });
+
+    const detalheMotivoSelect = document.getElementById('detalheMotivoDefeito');
+    if (detalheMotivoSelect) detalheMotivoSelect.addEventListener('change', (e) => { window.__prodFormMotivoDefeito = e.target.value; render(); });
 
     const detalheProdutoSelect = document.getElementById('detalheProduto');
     if (detalheProdutoSelect) detalheProdutoSelect.addEventListener('change', (e) => { window.__prodFormProdutoId = e.target.value; render(); });
@@ -8886,11 +8928,26 @@ function attachProducaoHandlers(c) {
       const origemVarianteId = origemValor === '__sem_cor__' ? null : (origemValor || undefined);
       if (!produtoId || !quantidade || quantidade <= 0) { alert('Selecione o produto e informe a quantidade.'); return; }
       if (varianteSelect && !varianteId) { alert('Selecione a cor.'); return; }
-      if (tipo === 'defeito') quantidade = -quantidade;
-      await registrarProducao(costureiraId, produtoId, quantidade, data, varianteId || null, jaPago, origemVarianteId);
+      let motivoDefeito = null;
+      let valorAjuste = null;
+      if (tipo === 'defeito') {
+        motivoDefeito = document.getElementById('detalheMotivoDefeito')?.value || '';
+        if (!motivoDefeito) { alert('Selecione o motivo do defeito.'); return; }
+        quantidade = -quantidade;
+        if (motivoDefeito === 'costureira') {
+          const valorDigitado = parseBRNumber(document.getElementById('detalheValorDesconto')?.value || '');
+          if (valorDigitado > 0) {
+            valorAjuste = -valorDigitado;
+          } // se deixar em branco, valorAjuste fica null e usa o valor normal da peça (comportamento padrão)
+        } else {
+          valorAjuste = 0; // erro de corte/tecido ou outro motivo: não desconta nada dela
+        }
+      }
+      await registrarProducao(costureiraId, produtoId, quantidade, data, varianteId || null, jaPago, origemVarianteId, motivoDefeito, valorAjuste);
       state.showProducaoForm = false;
       window.__prodDetalheTipo = 'producao';
       window.__prodFormProdutoId = null;
+      window.__prodFormMotivoDefeito = null;
       await loadData();
     });
 
