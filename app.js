@@ -1313,7 +1313,7 @@ async function removeTx(id) {
   if (error) alert('Erro ao remover: ' + error.message);
 }
 async function removeTxBatch(ids) {
-  const { error } = await sb.from('transacoes').delete().in('id', ids);
+  const { error } = await deleteEmLotes('transacoes', ids);
   if (error) alert('Erro ao remover lançamentos: ' + error.message);
 }
 async function updateTx(id, tx) {
@@ -1535,17 +1535,17 @@ async function desfazerImportacaoVendas(importacaoId) {
     if (errI) { alert('Erro ao restaurar insumo: ' + errI.message); return false; }
   }
   if (importacao.transacao_ids?.length) {
-    const { error: errTx, count } = await sb.from('transacoes').delete({ count: 'exact' }).in('id', importacao.transacao_ids);
+    const { error: errTx, count } = await deleteEmLotes('transacoes', importacao.transacao_ids);
     if (errTx) { alert('Erro ao apagar lançamentos dessa importação: ' + errTx.message); return false; }
     if (count !== importacao.transacao_ids.length) alert(`Aviso: tentei apagar ${importacao.transacao_ids.length} lançamento(s) dessa importação, mas só ${count ?? 0} foram removidos de fato.`);
   }
   if (importacao.vendas_detalhe_ids?.length) {
-    const { error: errVd, count: countVd } = await sb.from('vendas_detalhe').delete({ count: 'exact' }).in('id', importacao.vendas_detalhe_ids);
+    const { error: errVd, count: countVd } = await deleteEmLotes('vendas_detalhe', importacao.vendas_detalhe_ids);
     if (errVd) { alert('Erro ao apagar detalhe de vendas dessa importação: ' + errVd.message); return false; }
     if (countVd !== importacao.vendas_detalhe_ids.length) alert(`Aviso: tentei apagar ${importacao.vendas_detalhe_ids.length} detalhe(s) de venda dessa importação, mas só ${countVd ?? 0} foram removidos de fato.`);
   }
   if (importacao.sku_pendente_ids?.length) {
-    const { error: errSp } = await sb.from('vendas_sku_pendentes').delete().in('id', importacao.sku_pendente_ids);
+    const { error: errSp } = await deleteEmLotes('vendas_sku_pendentes', importacao.sku_pendente_ids);
     if (errSp) { alert('Erro ao apagar SKUs pendentes dessa importação: ' + errSp.message); return false; }
   }
   const { error } = await sb.from('importacoes_vendas').update({ desfeita: true }).eq('id', importacaoId);
@@ -1573,6 +1573,18 @@ function calcularPreviaReversaoPorData(dataStr) {
   });
   return { vendasDoDia, txVendaDoDia, txTaxaDoDia, semCor, comCor, pendentesDoDia, totalValor: txVendaDoDia.reduce((a, t) => a + t.valor, 0) };
 }
+// apaga uma lista grande de ids em lotes pequenos — o Supabase recusa (Bad Request) quando
+// a lista de ids na URL fica grande demais de uma vez só (acontece com 200+ registros)
+async function deleteEmLotes(tabela, ids, tamanhoLote = 100) {
+  let totalApagado = 0;
+  for (let i = 0; i < ids.length; i += tamanhoLote) {
+    const lote = ids.slice(i, i + tamanhoLote);
+    const { error, count } = await sb.from(tabela).delete({ count: 'exact' }).in('id', lote);
+    if (error) return { error, count: totalApagado };
+    totalApagado += count ?? lote.length;
+  }
+  return { error: null, count: totalApagado };
+}
 async function reverterVendasPorData(dataStr, apagarPendentesTambem) {
   const { vendasDoDia, txVendaDoDia, txTaxaDoDia, semCor, pendentesDoDia } = calcularPreviaReversaoPorData(dataStr);
   for (const item of semCor) {
@@ -1588,12 +1600,12 @@ async function reverterVendasPorData(dataStr, apagarPendentesTambem) {
   const idsVenda = vendasDoDia.map((v) => v.id);
   const idsTx = [...txVendaDoDia, ...txTaxaDoDia].map((t) => t.id);
   if (idsVenda.length) {
-    const { error: errVenda, count } = await sb.from('vendas_detalhe').delete({ count: 'exact' }).in('id', idsVenda);
+    const { error: errVenda, count } = await deleteEmLotes('vendas_detalhe', idsVenda);
     if (errVenda) { alert('Erro ao apagar detalhe de vendas: ' + errVenda.message); return false; }
     if (count !== idsVenda.length) { alert(`Aviso: tentei apagar ${idsVenda.length} registro(s) de detalhe de vendas, mas só ${count ?? 0} foram removidos de fato. Pode ter alguma permissão bloqueando — confere no Supabase.`); }
   }
   if (idsTx.length) {
-    const { error: errTx, count: countTx } = await sb.from('transacoes').delete({ count: 'exact' }).in('id', idsTx);
+    const { error: errTx, count: countTx } = await deleteEmLotes('transacoes', idsTx);
     if (errTx) { alert('Erro ao apagar lançamentos: ' + errTx.message); return false; }
     if (countTx !== idsTx.length) { alert(`Aviso: tentei apagar ${idsTx.length} lançamento(s), mas só ${countTx ?? 0} foram removidos de fato. Pode ter alguma permissão bloqueando — confere no Supabase.`); }
   }
