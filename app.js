@@ -103,6 +103,12 @@ function inicioDaSemana(dataStr) {
   return d.toISOString().slice(0, 10);
 }
 const esc = (s) => (s ?? '').toString().replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// deixa "sku||variação" mais legível na tela (ex: "KIT-2-TOP||preto,branco" -> "KIT-2-TOP (preto,branco)")
+// — o "||" é só um jeito interno de guardar o alias, não precisa aparecer cru pro usuário
+const fmtSkuExibicao = (sku) => (sku ?? '').toString().split(',').map((s) => {
+  const partes = s.trim().split('||');
+  return partes.length > 1 ? `${partes[0]} (${partes[1]})` : partes[0];
+}).join(', ');
 
 function parseBRNumber(str) {
   if (typeof str !== 'string') return Number(str) || 0;
@@ -1450,12 +1456,17 @@ async function vincularSkuPendente(pendenteId, produtoId, varianteId) {
   const pendente = state.vendasSkuPendentes.find((v) => v.id === pendenteId);
   const produto = state.produtos.find((p) => p.id === produtoId);
   if (!pendente || !produto) return;
+  // quando o SKU pendente tem um texto de variação (cor, ou combinação de cores no caso de
+  // kit), salva o alias como "sku||variação" em vez do sku puro — assim, se o mesmo SKU for
+  // reusado pra outras combinações no futuro (comum em kit com várias opções de cor), cada
+  // combinação casa só com o vínculo certo, em vez de todas caírem no mesmo lugar
+  const aliasSku = pendente.varianteTexto ? `${pendente.sku.trim()}||${pendente.varianteTexto.trim()}` : pendente.sku.trim();
   if (produto.ehKit) {
     // kit não guarda estoque próprio — desconta direto dos componentes, multiplicado pela
     // quantidade de cada um
     const skusAtuais = (produto.sku || '').split(',').map((s) => s.trim()).filter(Boolean);
-    if (!skusAtuais.some((s) => s.toLowerCase() === pendente.sku.trim().toLowerCase())) {
-      skusAtuais.push(pendente.sku.trim());
+    if (!skusAtuais.some((s) => s.toLowerCase() === aliasSku.toLowerCase())) {
+      skusAtuais.push(aliasSku);
       await updateProduto(produtoId, { ...produto, sku: skusAtuais.join(', ') });
     }
     await baixarEstoqueVenda(produto, null, pendente.quantidade);
@@ -1474,16 +1485,16 @@ async function vincularSkuPendente(pendenteId, produtoId, varianteId) {
     const variante = state.variantes.find((v) => v.id === varianteId);
     if (variante) {
       const skusAtuaisCor = (variante.skuVariante || '').split(',').map((s) => s.trim()).filter(Boolean);
-      if (!skusAtuaisCor.some((s) => s.toLowerCase() === pendente.sku.trim().toLowerCase())) {
-        skusAtuaisCor.push(pendente.sku.trim());
+      if (!skusAtuaisCor.some((s) => s.toLowerCase() === aliasSku.toLowerCase())) {
+        skusAtuaisCor.push(aliasSku);
         await updateVarianteSku(varianteId, skusAtuaisCor.join(', '));
       }
       await updateVarianteEstoque(varianteId, variante.estoqueAtual - pendente.quantidade);
     }
   } else {
     const skusAtuais = (produto.sku || '').split(',').map((s) => s.trim()).filter(Boolean);
-    if (!skusAtuais.some((s) => s.toLowerCase() === pendente.sku.trim().toLowerCase())) {
-      skusAtuais.push(pendente.sku.trim());
+    if (!skusAtuais.some((s) => s.toLowerCase() === aliasSku.toLowerCase())) {
+      skusAtuais.push(aliasSku);
       await updateProduto(produtoId, { ...produto, sku: skusAtuais.join(', ') });
     }
   }
@@ -4951,7 +4962,7 @@ function renderFichaTecnica(c) {
               <div class="produto-header">
                 <div>
                   <div class="produto-nome">${esc(p.nome)}${p.tipo === 'kit' ? ' 🎁 Kit' : ''}</div>
-                  ${p.sku ? `<div class="produto-sku">${esc(p.sku)}</div>` : ''}
+                  ${p.sku ? `<div class="produto-sku">${esc(fmtSkuExibicao(p.sku))}</div>` : ''}
                 </div>
                 <div style="display:flex;gap:2px">
                   <button class="trash-btn" data-editar-ficha="${p.id}">✏️</button>
@@ -6716,7 +6727,7 @@ function renderEstoque(c) {
               <div class="produto-header">
                 <div>
                   <div class="produto-nome">${esc(p.nome)}${p.ativo === false ? ' <span style="font-size:10px;font-weight:600;color:var(--text-muted);border:1px solid var(--border);border-radius:4px;padding:1px 5px;vertical-align:middle">FORA DE LINHA</span>' : ''}</div>
-                  ${p.sku ? `<div class="produto-sku">${esc(p.sku)}</div>` : ''}
+                  ${p.sku ? `<div class="produto-sku">${esc(fmtSkuExibicao(p.sku))}</div>` : ''}
                 </div>
                 <div style="display:flex;gap:2px">
                   <button class="trash-btn" data-toggle-ativo="${p.id}" data-ativo="${p.ativo !== false}" title="${p.ativo === false ? 'Reativar' : 'Tirar de linha'}">${p.ativo === false ? '✅' : '🚫'}</button>
@@ -8081,7 +8092,14 @@ function attachVendasHandlers(c) {
       const sku = guessSkuField(row);
       if (sku) {
         temSku = true;
-        const match = skuMap.get(sku.trim().toLowerCase());
+        // quando o mesmo SKU cobre várias combinações de cor (comum em kit com N cores
+        // possíveis, ou produto que usa 1 SKU genérico pra todas as cores), o casamento
+        // primeiro tenta "SKU + texto da variação" (mais específico) antes do SKU sozinho —
+        // assim cada combinação vinculada fica de fato separada das outras, mesmo tendo o
+        // mesmo código de SKU
+        const varianteTextoLinhaMatch = guessVarianteTextoField(row);
+        const chaveComposta = varianteTextoLinhaMatch ? `${sku.trim().toLowerCase()}||${varianteTextoLinhaMatch.trim().toLowerCase()}` : null;
+        const match = (chaveComposta && skuMap.get(chaveComposta)) || skuMap.get(sku.trim().toLowerCase());
         const qtd = qtdLinha;
         if (match) {
           const { produto, variante } = match;
@@ -8107,9 +8125,8 @@ function attachVendasHandlers(c) {
           atualDetalhe.taxa += taxaTotalLinha;
           detalhesVendas.set(chaveDetalhe, atualDetalhe);
         } else {
-          const varianteTextoLinha = guessVarianteTextoField(row);
-          const chavePendente = sku.trim().toLowerCase() + '||' + (varianteTextoLinha ? varianteTextoLinha.trim().toLowerCase() : '');
-          const atual = skusNaoEncontrados.get(chavePendente) || { sku: sku.trim(), qtd: 0, faturamento: 0, pedidos: 0, taxa: 0, ultimaData: dataLinha, plataformaNome: plataformaLinha ? plataformaLinha.nome : null, descricao: descricaoItem, varianteTexto: varianteTextoLinha };
+          const chavePendente = sku.trim().toLowerCase() + '||' + (varianteTextoLinhaMatch ? varianteTextoLinhaMatch.trim().toLowerCase() : '');
+          const atual = skusNaoEncontrados.get(chavePendente) || { sku: sku.trim(), qtd: 0, faturamento: 0, pedidos: 0, taxa: 0, ultimaData: dataLinha, plataformaNome: plataformaLinha ? plataformaLinha.nome : null, descricao: descricaoItem, varianteTexto: varianteTextoLinhaMatch };
           atual.qtd += qtd;
           atual.faturamento += valor;
           atual.pedidos += pedidosLinha;
