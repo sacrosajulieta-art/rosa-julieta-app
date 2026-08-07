@@ -2372,13 +2372,19 @@ async function registrarProducao(costureiraId, produtoId, quantidade, data, vari
   const varianteParaAbater = origemVarianteId !== undefined ? origemVarianteId : varianteId;
   const { error } = await sb.from('producoes').insert({ costureira_id: costureiraId, produto_id: produtoId, quantidade, data, pago: !!jaPago, variante_id: varianteId || null, abate_variante_id: varianteParaAbater || null, motivo_defeito: motivoDefeito || null, valor_ajuste: valorAjuste !== undefined ? valorAjuste : null });
   if (error) { alert('Erro ao registrar produção: ' + error.message); return; }
-  if (varianteId) {
-    const variante = state.variantes.find((v) => v.id === varianteId);
-    if (variante) await updateVarianteEstoque(varianteId, variante.estoqueAtual + quantidade);
-  } else {
-    const produto = state.produtos.find((p) => p.id === produtoId);
-    if (produto) await updateProdutoEstoque(produtoId, produto.estoqueAtual + quantidade);
+  // só peça BOA entregue (quantidade > 0) entra no estoque de venda — defeito nunca chegou a
+  // virar peça vendável, então não pode tirar estoque que nunca foi somado
+  if (quantidade > 0) {
+    if (varianteId) {
+      const variante = state.variantes.find((v) => v.id === varianteId);
+      if (variante) await updateVarianteEstoque(varianteId, variante.estoqueAtual + quantidade);
+    } else {
+      const produto = state.produtos.find((p) => p.id === produtoId);
+      if (produto) await updateProdutoEstoque(produtoId, produto.estoqueAtual + quantidade);
+    }
   }
+  // já a fila de "peças em mãos" da costureira desconta sempre, seja peça boa ou defeito — nos
+  // dois casos a peça saiu das mãos dela (ou virou produto, ou foi descartada como defeito)
   if (quantidade !== 0) await baixarDistribuicoesFIFO(costureiraId, produtoId, varianteParaAbater, Math.abs(quantidade));
   // peças de verdade entregues (não defeito) já consomem os insumos de "produção" da ficha técnica, tipo etiqueta
   if (quantidade > 0) await baixarInsumosProducao(produtoId, quantidade, data);
@@ -2395,12 +2401,16 @@ async function removeProducao(id) {
   const p = state.producoes.find((x) => x.id === id);
   let avisoManual = false;
   if (p) {
-    if (p.varianteId) {
-      const variante = state.variantes.find((v) => v.id === p.varianteId);
-      if (variante) await updateVarianteEstoque(variante.id, variante.estoqueAtual - p.quantidade);
-    } else {
-      const produto = state.produtos.find((x) => x.id === p.produtoId);
-      if (produto) await updateProdutoEstoque(produto.id, Math.max(0, produto.estoqueAtual - p.quantidade));
+    // só desfaz estoque se essa peça tinha entrado como peça boa (quantidade > 0) — defeito
+    // nunca soma estoque, então remover ele também não deve tirar estoque
+    if (p.quantidade > 0) {
+      if (p.varianteId) {
+        const variante = state.variantes.find((v) => v.id === p.varianteId);
+        if (variante) await updateVarianteEstoque(variante.id, variante.estoqueAtual - p.quantidade);
+      } else {
+        const produto = state.produtos.find((x) => x.id === p.produtoId);
+        if (produto) await updateProdutoEstoque(produto.id, Math.max(0, produto.estoqueAtual - p.quantidade));
+      }
     }
     // devolve a peça pra fila de "em mãos" da costureira (desfaz o abate feito no lançamento) —
     // usa a variante que foi abatida de verdade (pode ser diferente da variante da peça, se veio
@@ -2447,19 +2457,22 @@ async function updateProducao(id, novo) {
     }
   }
   // lançamentos com cor (variante) não trocam de produto na edição — só ajusta a quantidade na mesma cor
+  // só peça boa (quantidade > 0) conta pro estoque — por isso o ajuste usa max(0, quantidade) dos
+  // dois lados: cobre trocar de produção pra defeito (ou vice-versa) sem sujar o estoque
+  const deltaEstoque = Math.max(0, novo.quantidade) - Math.max(0, antigo.quantidade);
   if (antigo.varianteId) {
     const variante = state.variantes.find((v) => v.id === antigo.varianteId);
-    if (variante) await updateVarianteEstoque(variante.id, Math.max(0, variante.estoqueAtual + (novo.quantidade - antigo.quantidade)));
+    if (variante && deltaEstoque !== 0) await updateVarianteEstoque(variante.id, Math.max(0, variante.estoqueAtual + deltaEstoque));
     return;
   }
   if (antigo.produtoId === novo.produtoId) {
     const produto = state.produtos.find((p) => p.id === novo.produtoId);
-    if (produto) await updateProdutoEstoque(produto.id, Math.max(0, produto.estoqueAtual + (novo.quantidade - antigo.quantidade)));
+    if (produto && deltaEstoque !== 0) await updateProdutoEstoque(produto.id, Math.max(0, produto.estoqueAtual + deltaEstoque));
   } else {
     const produtoAntigo = state.produtos.find((p) => p.id === antigo.produtoId);
-    if (produtoAntigo) await updateProdutoEstoque(produtoAntigo.id, Math.max(0, produtoAntigo.estoqueAtual - antigo.quantidade));
+    if (produtoAntigo && antigo.quantidade > 0) await updateProdutoEstoque(produtoAntigo.id, Math.max(0, produtoAntigo.estoqueAtual - antigo.quantidade));
     const produtoNovo = state.produtos.find((p) => p.id === novo.produtoId);
-    if (produtoNovo) await updateProdutoEstoque(produtoNovo.id, produtoNovo.estoqueAtual + novo.quantidade);
+    if (produtoNovo && novo.quantidade > 0) await updateProdutoEstoque(produtoNovo.id, produtoNovo.estoqueAtual + novo.quantidade);
   }
 }
 
