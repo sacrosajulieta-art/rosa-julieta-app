@@ -2347,7 +2347,11 @@ async function removeCostureira(id) {
   const { error } = await sb.from('costureiras').delete().eq('id', id);
   if (error) alert('Erro ao remover costureira: ' + error.message);
 }
-async function registrarProducao(costureiraId, produtoId, quantidade, data, varianteId, jaPago) {
+// origemVarianteId: por padrão, undefined = abate a mesma cor da peça lançada. Mas se a peça
+// veio de um corte de cor mista (ex: "Preto + Marrom" cortado junto), dá pra passar a cor da
+// LEVA em mãos (diferente da cor da peça em si), e o abate da fila de "em mãos" usa essa —
+// null explícito = abater da leva "sem cor" (produto sem variante)
+async function registrarProducao(costureiraId, produtoId, quantidade, data, varianteId, jaPago, origemVarianteId) {
   const { error } = await sb.from('producoes').insert({ costureira_id: costureiraId, produto_id: produtoId, quantidade, data, pago: !!jaPago, variante_id: varianteId || null });
   if (error) { alert('Erro ao registrar produção: ' + error.message); return; }
   if (varianteId) {
@@ -2357,7 +2361,8 @@ async function registrarProducao(costureiraId, produtoId, quantidade, data, vari
     const produto = state.produtos.find((p) => p.id === produtoId);
     if (produto) await updateProdutoEstoque(produtoId, produto.estoqueAtual + quantidade);
   }
-  if (quantidade !== 0) await baixarDistribuicoesFIFO(costureiraId, produtoId, varianteId, Math.abs(quantidade));
+  const varianteParaAbater = origemVarianteId !== undefined ? origemVarianteId : varianteId;
+  if (quantidade !== 0) await baixarDistribuicoesFIFO(costureiraId, produtoId, varianteParaAbater, Math.abs(quantidade));
   // peças de verdade entregues (não defeito) já consomem os insumos de "produção" da ficha técnica, tipo etiqueta
   if (quantidade > 0) await baixarInsumosProducao(produtoId, quantidade, data);
 }
@@ -2910,6 +2915,18 @@ function renderCostureiraDetalhe(costureiraId) {
             ${variantesDoProduto(window.__prodFormProdutoId).map((v) => `<option value="${v.id}">${esc(v.nome)}</option>`).join('')}
           </select>
         ` : ''}
+        ${(() => {
+          if (!window.__prodFormProdutoId) return '';
+          const emMaosDoProduto = emMaosLista.filter((item) => item.produtoId === window.__prodFormProdutoId);
+          if (emMaosDoProduto.length === 0) return '';
+          return `
+            <select id="detalheOrigemDistribuicao">
+              <option value="">Abater automático (mesma cor que a peça)</option>
+              ${emMaosDoProduto.map((item) => `<option value="${item.varianteId || '__sem_cor__'}">Abater de: ${esc(item.nome)} (${item.qtd} em mãos)</option>`).join('')}
+            </select>
+            <div class="form-hint" style="margin-top:-4px">Se essa peça veio de um corte de cor mista (ex: cortou "Preto + Marrom" junto e agora tá devolvendo só o Marrom), escolhe aqui a leva certa pra abater — mesmo lançando a peça na cor pura.</div>
+          `;
+        })()}
         <input type="text" id="detalheQuantidade" placeholder="Quantidade de peças" inputmode="numeric" />
         <input type="date" id="detalheData" value="${todayStr()}" />
         <label class="checkbox-label"><input type="checkbox" id="detalheJaPago" /> 💰 Já foi pago antes (não lançar no financeiro)</label>
@@ -7639,6 +7656,7 @@ function renderVendas(c) {
                 <div class="form-row" style="margin-top:8px">
                   <select id="vincularSkuProduto-${v.id}" data-pendente-produto-select="${v.id}" style="flex:1">
                     <option value="">Selecione o produto (e a cor, se tiver)...</option>
+                    <option value="__criar_kit__" ${state.pendenteSelecaoAtual[v.id] === '__criar_kit__' ? 'selected' : ''}>➕ Criar um kit novo pra essa combinação</option>
                     ${state.produtos.map((p) => {
                       const vs = variantesDoProduto(p.id);
                       if (vs.length > 0) {
@@ -7894,13 +7912,26 @@ function attachVendasHandlers(c) {
   });
 
   document.querySelectorAll('[data-pendente-produto-select]').forEach((sel) => {
-    sel.addEventListener('change', () => {
+    sel.addEventListener('change', async () => {
       const pendenteId = sel.dataset.pendenteProdutoSelect;
       const valorSelecionado = sel.value;
+      if (valorSelecionado === '__criar_kit__') {
+        const pendente = state.vendasSkuPendentes.find((v) => v.id === pendenteId);
+        const nomeSugerido = [pendente?.descricao, pendente?.varianteTexto].filter(Boolean).join(' — ') || pendente?.sku || 'Novo kit';
+        const nome = prompt('Nome do kit pra essa combinação:', nomeSugerido);
+        if (!nome) { sel.value = state.pendenteSelecaoAtual[pendenteId] || ''; return; }
+        const criado = await addProduto({ nome, estoqueAtual: 0, estoqueMinimo: 0, custoUnitario: 0, valorMaoObra: 0, tipo: 'kit' });
+        if (!criado) return;
+        await loadData();
+        state.pendenteSelecaoAtual[pendenteId] = criado.id;
+        state.pendenteKitAtivo[pendenteId] = criado.id;
+        render();
+        return;
+      }
       state.pendenteSelecaoAtual[pendenteId] = valorSelecionado;
       const [produtoId] = valorSelecionado.split('|');
       const produto = state.produtos.find((p) => p.id === produtoId);
-      if (produto?.ehKit) {
+      if (produto?.ehKit || produto?.tipo === 'kit') {
         state.pendenteKitAtivo[pendenteId] = produtoId;
         render();
       } else if (state.pendenteKitAtivo[pendenteId]) {
@@ -8787,10 +8818,13 @@ function attachProducaoHandlers(c) {
       const data = document.getElementById('detalheData').value || todayStr();
       const tipo = window.__prodDetalheTipo || 'producao';
       const jaPago = document.getElementById('detalheJaPago')?.checked;
+      const origemSelect = document.getElementById('detalheOrigemDistribuicao');
+      const origemValor = origemSelect ? origemSelect.value : '';
+      const origemVarianteId = origemValor === '__sem_cor__' ? null : (origemValor || undefined);
       if (!produtoId || !quantidade || quantidade <= 0) { alert('Selecione o produto e informe a quantidade.'); return; }
       if (varianteSelect && !varianteId) { alert('Selecione a cor.'); return; }
       if (tipo === 'defeito') quantidade = -quantidade;
-      await registrarProducao(costureiraId, produtoId, quantidade, data, varianteId || null, jaPago);
+      await registrarProducao(costureiraId, produtoId, quantidade, data, varianteId || null, jaPago, origemVarianteId);
       state.showProducaoForm = false;
       window.__prodDetalheTipo = 'producao';
       window.__prodFormProdutoId = null;
