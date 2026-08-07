@@ -1546,6 +1546,7 @@ function calcularPreviaReversaoPorData(dataStr) {
   const vendasDoDia = state.vendasDetalhe.filter((v) => v.data === dataStr);
   const txVendaDoDia = state.tx.filter((t) => t.data === dataStr && t.tipo === 'entrada' && t.categoria.startsWith('Venda'));
   const txTaxaDoDia = state.tx.filter((t) => t.data === dataStr && t.tipo === 'saida' && t.categoria === 'Taxas de marketplace');
+  const pendentesDoDia = state.vendasSkuPendentes.filter((v) => v.ultimaData === dataStr);
   const porProduto = {};
   vendasDoDia.forEach((v) => { porProduto[v.produtoId] = (porProduto[v.produtoId] || 0) + v.quantidade; });
   const semCor = [];
@@ -1555,10 +1556,10 @@ function calcularPreviaReversaoPorData(dataStr) {
     const vs = variantesDoProduto(produtoId);
     (vs.length > 0 ? comCor : semCor).push({ produtoId, nome: produto?.nome || 'Produto removido', qtd });
   });
-  return { vendasDoDia, txVendaDoDia, txTaxaDoDia, semCor, comCor, totalValor: txVendaDoDia.reduce((a, t) => a + t.valor, 0) };
+  return { vendasDoDia, txVendaDoDia, txTaxaDoDia, semCor, comCor, pendentesDoDia, totalValor: txVendaDoDia.reduce((a, t) => a + t.valor, 0) };
 }
-async function reverterVendasPorData(dataStr) {
-  const { vendasDoDia, txVendaDoDia, txTaxaDoDia, semCor } = calcularPreviaReversaoPorData(dataStr);
+async function reverterVendasPorData(dataStr, apagarPendentesTambem) {
+  const { vendasDoDia, txVendaDoDia, txTaxaDoDia, semCor, pendentesDoDia } = calcularPreviaReversaoPorData(dataStr);
   for (const item of semCor) {
     const produto = state.produtos.find((p) => p.id === item.produtoId);
     if (produto) {
@@ -1573,6 +1574,9 @@ async function reverterVendasPorData(dataStr) {
   if (idsVenda.length) await sb.from('vendas_detalhe').delete().in('id', idsVenda);
   if (idsTx.length) await sb.from('transacoes').delete().in('id', idsTx);
   await sb.from('vendas_resumo_diario').delete().eq('data', dataStr);
+  if (apagarPendentesTambem && pendentesDoDia.length) {
+    await sb.from('vendas_sku_pendentes').delete().in('id', pendentesDoDia.map((v) => v.id));
+  }
 }
 // venda manual (atacado, feira, venda direta etc) — mesma lógica de baixa de estoque
 // do import, só que lançada na mão em vez de vir de uma planilha. Se o produto tem cor
@@ -7427,8 +7431,8 @@ function renderVendas(c) {
           const p = window.__reversaoPrevia;
           return `
             <div class="entrada-box">
-              ${p.txVendaDoDia.length === 0 ? `<div class="empty-state">Nenhuma venda encontrada nessa data.</div>` : `
-                <div class="form-hint">Vai apagar: ${p.txVendaDoDia.length} venda(s) (${fmt(p.totalValor)}) + ${p.txTaxaDoDia.length} taxa(s) de marketplace.</div>
+              ${p.txVendaDoDia.length === 0 && p.pendentesDoDia.length === 0 ? `<div class="empty-state">Nenhuma venda encontrada nessa data.</div>` : `
+                ${p.txVendaDoDia.length > 0 ? `<div class="form-hint">Vai apagar: ${p.txVendaDoDia.length} venda(s) (${fmt(p.totalValor)}) + ${p.txTaxaDoDia.length} taxa(s) de marketplace.</div>` : `<div class="form-hint">Não achei lançamento financeiro nessa data (já deve ter sido apagado antes).</div>`}
                 ${p.semCor.length > 0 ? `
                   <div class="form-hint" style="margin-top:8px;color:var(--teal)">✅ Estoque será devolvido automático (sem cor):</div>
                   <div class="prod-breakdown">${p.semCor.map((i) => `<div class="prod-breakdown-item"><span>${esc(i.nome)}</span><span>+${i.qtd}</span></div>`).join('')}</div>
@@ -7436,6 +7440,11 @@ function renderVendas(c) {
                 ${p.comCor.length > 0 ? `
                   <div class="form-hint" style="margin-top:8px;color:var(--amber)">⚠️ Esses têm cor — o sistema não sabe qual vendeu, você redistribui na mão depois:</div>
                   <div class="prod-breakdown">${p.comCor.map((i) => `<div class="prod-breakdown-item"><span>${esc(i.nome)}</span><span>${i.qtd} peça(s)</span></div>`).join('')}</div>
+                ` : ''}
+                ${p.pendentesDoDia.length > 0 ? `
+                  <div class="form-hint" style="margin-top:8px;color:var(--red)">🔗 Isso NÃO apaga sozinho: tem ${p.pendentesDoDia.length} SKU(s) pendente(s) com última venda nessa data, ainda esperando vínculo:</div>
+                  <div class="prod-breakdown">${p.pendentesDoDia.map((v) => `<div class="prod-breakdown-item"><span>${esc(v.sku)}${v.varianteTexto ? ' — ' + esc(v.varianteTexto) : ''}</span><span>${v.quantidade} un</span></div>`).join('')}</div>
+                  <label class="checkbox-label" style="margin-top:6px"><input type="checkbox" id="reversaoApagarPendentes" checked /> Apagar esses SKUs pendentes junto (marque se essa data é a origem deles — senão desmarque e apague manualmente pela lixeira depois)</label>
                 ` : ''}
                 <button class="confirm-btn" style="margin-top:10px;background:var(--red)" data-confirmar-reversao-data="${p.dataStr}">🗑️ Reverter essa data</button>
               `}
@@ -7757,7 +7766,8 @@ function attachVendasHandlers(c) {
     btn.addEventListener('click', async () => {
       const dataStr = btn.dataset.confirmarReversaoData;
       if (!confirm(`Reverter todas as vendas de ${new Date(dataStr + 'T00:00:00').toLocaleDateString('pt-BR')}?\n\nIsso apaga os lançamentos e o detalhe de vendas dessa data, e devolve o estoque dos produtos sem cor. Produtos com cor você redistribui na mão depois.\n\nConfirma?`)) return;
-      await reverterVendasPorData(dataStr);
+      const apagarPendentes = document.getElementById('reversaoApagarPendentes')?.checked || false;
+      await reverterVendasPorData(dataStr, apagarPendentes);
       window.__reversaoPrevia = null;
       window.__reversaoDataSelecionada = null;
       await loadData();
