@@ -1677,7 +1677,10 @@ async function toggleProdutoAtivo(id, ativo) {
 function fichaTecnicaDoProduto(produtoId) {
   return state.fichaTecnicaItens.filter((f) => f.produtoId === produtoId);
 }
-// custo total = tecido/corte + mão de obra + (insumos da ficha × custo) + (produtos componentes da ficha × custo total deles, recursivo)
+// custo total = tecido/corte + mão de obra + (insumos da ficha × custo) + (produtos componentes × custo total deles, recursivo)
+// pra kits (produto.tipo === 'kit'), os componentes vêm de kit_componentes (a mesma composição
+// com cor que desconta o estoque de verdade quando vende) — não da ficha técnica genérica —
+// pra não ter duas fontes de composição desencontradas (uma só de custo, outra só de estoque)
 function calcularCustoTotalProduto(produtoId, visitados) {
   visitados = visitados || new Set();
   if (visitados.has(produtoId)) return 0; // evita loop infinito se alguém criar uma referência circular
@@ -1689,10 +1692,15 @@ function calcularCustoTotalProduto(produtoId, visitados) {
     if (item.tipoItem === 'insumo') {
       const insumo = state.insumos.find((i) => i.id === item.insumoId);
       if (insumo) total += insumo.custoMedioUnitario * item.quantidade;
-    } else if (item.tipoItem === 'produto') {
+    } else if (item.tipoItem === 'produto' && produto.tipo !== 'kit') {
       total += calcularCustoTotalProduto(item.componenteProdutoId, visitados) * item.quantidade;
     }
   });
+  if (produto.tipo === 'kit') {
+    state.kitComponentes.filter((k) => k.produtoKitId === produtoId).forEach((k) => {
+      total += calcularCustoTotalProduto(k.componenteProdutoId, visitados) * k.quantidade;
+    });
+  }
   return total;
 }
 async function salvarFichaTecnica(produtoId, itens) {
@@ -4878,7 +4886,37 @@ function renderFichaTecnica(c) {
                 }).join('')}
                 <button class="entrada-btn" type="button" data-mais-insumo-ft="${p.id}">＋ Mais um insumo</button>
 
-                <div class="form-hint" style="margin-top:12px">Produtos componentes (pra kits — ex: 2× Top Joy M)</div>
+                ${p.tipo === 'kit' ? (() => {
+                  const kitCompsExistentes = state.kitComponentes.filter((k) => k.produtoKitId === p.id);
+                  // se ainda não tem composição com cor salva, usa a ficha técnica antiga (sem cor)
+                  // como ponto de partida, só pra não perder o que já tava preenchido
+                  const baseParaPreencher = kitCompsExistentes.length > 0
+                    ? kitCompsExistentes.map((k) => ({ produtoId: k.componenteProdutoId, varianteId: k.componenteVarianteId, quantidade: k.quantidade }))
+                    : itensComponente.map((i) => ({ produtoId: i.componenteProdutoId, varianteId: null, quantidade: i.quantidade }));
+                  return `
+                    <div class="form-hint" style="margin-top:12px">🎁 Peças que compõem esse kit — escolhe a cor de cada uma (ex: 1 Preto + 1 Branco). Isso é o que desconta o estoque de verdade quando o kit vende, e também entra no custo.</div>
+                    ${Array.from({ length: 4 }, (_, i) => {
+                      const atual = baseParaPreencher[i];
+                      const valorAtual = atual ? `${atual.produtoId}|${atual.varianteId || ''}` : '';
+                      return `
+                        <div class="form-row" style="margin-top:4px">
+                          <select id="ftKitComp-${p.id}-${i}">
+                            <option value="">Componente (opcional)</option>
+                            ${state.produtos.filter((prod) => prod.id !== p.id && prod.tipo !== 'kit').map((prod) => {
+                              const vsComp = variantesDoProduto(prod.id);
+                              if (vsComp.length > 0) {
+                                return vsComp.map((vc) => `<option value="${prod.id}|${vc.id}" ${valorAtual === `${prod.id}|${vc.id}` ? 'selected' : ''}>${esc(prod.nome)} — ${esc(vc.nome)}</option>`).join('');
+                              }
+                              return `<option value="${prod.id}|" ${valorAtual === `${prod.id}|` ? 'selected' : ''}>${esc(prod.nome)}</option>`;
+                            }).join('')}
+                          </select>
+                          <input type="text" id="ftKitCompQtd-${p.id}-${i}" placeholder="Qtd" value="${atual ? atual.quantidade : '1'}" style="max-width:70px" inputmode="numeric" />
+                        </div>
+                      `;
+                    }).join('')}
+                  `;
+                })() : `
+                <div class="form-hint" style="margin-top:12px">Produtos componentes (custo desse produto incluir o custo de outro produto)</div>
                 ${Array.from({ length: numComponente }, (_, i) => {
                   const atual = componenteValores[i] || { ref: '', qtd: '' };
                   return `
@@ -4892,9 +4930,10 @@ function renderFichaTecnica(c) {
                 `;
                 }).join('')}
                 <button class="entrada-btn" type="button" data-mais-componente-ft="${p.id}">＋ Mais um produto componente</button>
+                `}
 
                 <div class="form-row" style="margin-top:12px">
-                  <button class="confirm-btn" data-salvar-ficha="${p.id}" data-num-insumo="${numInsumo}" data-num-componente="${numComponente}">Salvar ficha técnica</button>
+                  <button class="confirm-btn" data-salvar-ficha="${p.id}" data-num-insumo="${numInsumo}" data-num-componente="${numComponente}" data-eh-kit="${p.tipo === 'kit' ? '1' : '0'}">Salvar ficha técnica</button>
                   <button class="toggle-btn" data-cancelar-ficha="1">Cancelar</button>
                 </div>
               </div>
@@ -4910,7 +4949,7 @@ function renderFichaTecnica(c) {
                 </div>
                 <div style="display:flex;gap:2px">
                   <button class="trash-btn" data-editar-ficha="${p.id}">✏️</button>
-                  ${itens.length > 0 ? `<button class="trash-btn" data-excluir-ficha="${p.id}">🗑️</button>` : ''}
+                  ${itens.length > 0 || state.kitComponentes.some((k) => k.produtoKitId === p.id) ? `<button class="trash-btn" data-excluir-ficha="${p.id}">🗑️</button>` : ''}
                 </div>
               </div>
               <div class="produto-meta">Custo base (tecido/corte + mão de obra): <strong style="color:var(--text)">${fmt(custoBase)}</strong></div>
@@ -4935,18 +4974,26 @@ function renderFichaTecnica(c) {
                   ${qtdManual > 0 ? `<div class="produto-meta" style="margin-top:2px">🧾 Atacado/manual: <strong style="color:var(--text)">${fmt(precoManual)}</strong>/un (${qtdManual} peças) · lucro <strong style="color:${(precoManual - custoTotal) >= 0 ? 'var(--teal)' : 'var(--red)'}">${fmt(precoManual - custoTotal)}</strong> (${(((precoManual - custoTotal) / precoManual) * 100).toFixed(0)}%)</div>` : ''}
                 `;
               })()}
-              ${itens.length > 0 ? `
+              ${(() => {
+                const itensParaMostrar = p.tipo === 'kit'
+                  ? state.kitComponentes.filter((k) => k.produtoKitId === p.id).map((k) => ({ tipoItem: 'produto', componenteProdutoId: k.componenteProdutoId, componenteVarianteId: k.componenteVarianteId, quantidade: k.quantidade }))
+                  : itens;
+                const insumosParaMostrar = itens.filter((i) => i.tipoItem === 'insumo');
+                const listaFinal = p.tipo === 'kit' ? [...itensParaMostrar, ...insumosParaMostrar] : itensParaMostrar;
+                return listaFinal.length > 0 ? `
                 <div class="prod-breakdown" style="margin-top:8px">
-                  ${itens.map((item) => {
+                  ${listaFinal.map((item) => {
                     if (item.tipoItem === 'insumo') {
                       const insumo = state.insumos.find((i) => i.id === item.insumoId);
                       return `<div class="prod-breakdown-item"><span>🧷 ${esc(insumo?.nome || 'Insumo removido')} <span style="color:var(--text-muted);font-size:11px">(${item.momento === 'producao' ? 'na produção' : 'na venda'})</span></span><span>${item.quantidade}×</span></div>`;
                     }
                     const componente = state.produtos.find((prod) => prod.id === item.componenteProdutoId);
-                    return `<div class="prod-breakdown-item"><span>📦 ${esc(componente?.nome || 'Produto removido')}</span><span>${item.quantidade}×</span></div>`;
+                    const variante = item.componenteVarianteId ? state.variantes.find((v) => v.id === item.componenteVarianteId) : null;
+                    return `<div class="prod-breakdown-item"><span>📦 ${esc(componente?.nome || 'Produto removido')}${variante ? ' — ' + esc(variante.nome) : ''}</span><span>${item.quantidade}×</span></div>`;
                   }).join('')}
                 </div>
-              ` : `<div class="form-hint" style="margin-top:6px">Sem ficha técnica cadastrada ainda.</div>`}
+              ` : `<div class="form-hint" style="margin-top:6px">Sem ficha técnica cadastrada ainda.</div>`;
+              })()}
             </div>
           `;
         }).join('')}
@@ -5033,6 +5080,7 @@ function attachFichaTecnicaHandlers(c) {
       const produtoId = btn.dataset.salvarFicha;
       const numInsumo = Number(btn.dataset.numInsumo);
       const numComponente = Number(btn.dataset.numComponente);
+      const ehKitForm = btn.dataset.ehKit === '1';
       const produtoOriginal = state.produtos.find((p) => p.id === produtoId);
       const custoEl = document.getElementById(`ftCusto-${produtoId}`);
       const maoObraEl = document.getElementById(`ftMaoObra-${produtoId}`);
@@ -5049,10 +5097,25 @@ function attachFichaTecnicaHandlers(c) {
         const momento = document.getElementById(`ftInsumoMomento-${produtoId}-${i}`)?.value || 'venda';
         if (insumoId && qtd > 0) itens.push({ tipoItem: 'insumo', refId: insumoId, quantidade: qtd, momento });
       }
-      for (let i = 0; i < numComponente; i++) {
-        const componenteId = document.getElementById(`ftComponente-${produtoId}-${i}`)?.value;
-        const qtd = parseBRNumber(document.getElementById(`ftComponenteQtd-${produtoId}-${i}`)?.value || '0');
-        if (componenteId && qtd > 0) itens.push({ tipoItem: 'produto', refId: componenteId, quantidade: qtd });
+      if (ehKitForm) {
+        // kit: a composição (com cor) vem dos campos ftKitComp — grava em kit_componentes,
+        // que é o que desconta o estoque de verdade quando o kit vende
+        const componentesKit = [];
+        for (let i = 0; i < 4; i++) {
+          const sel = document.getElementById(`ftKitComp-${produtoId}-${i}`);
+          const qtdInput = document.getElementById(`ftKitCompQtd-${produtoId}-${i}`);
+          if (!sel || !sel.value) continue;
+          const [compProdutoId, compVarianteId] = sel.value.split('|');
+          const qtd = Number(qtdInput?.value) || 1;
+          if (compProdutoId && qtd > 0) componentesKit.push({ produtoId: compProdutoId, varianteId: compVarianteId || null, quantidade: qtd });
+        }
+        await salvarComponentesKit(produtoId, componentesKit);
+      } else {
+        for (let i = 0; i < numComponente; i++) {
+          const componenteId = document.getElementById(`ftComponente-${produtoId}-${i}`)?.value;
+          const qtd = parseBRNumber(document.getElementById(`ftComponenteQtd-${produtoId}-${i}`)?.value || '0');
+          if (componenteId && qtd > 0) itens.push({ tipoItem: 'produto', refId: componenteId, quantidade: qtd });
+        }
       }
       await salvarFichaTecnica(produtoId, itens);
       state.editingFichaTecnicaId = null;
