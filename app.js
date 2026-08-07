@@ -648,10 +648,11 @@ async function criarEmprestimo({ descricao, instituicao, valorRecebido, dataRece
       tipo: 'saida', valor: valorParcela, categoria: 'Empréstimo — parcela', natureza: 'fixo',
       descricao: `${descricao} — parcela ${i + 1}/${numeroParcelas}`, data: dataVenc,
     });
-    await sb.from('emprestimo_parcelas').insert({
+    const { error: errParcela } = await sb.from('emprestimo_parcelas').insert({
       emprestimo_id: emprestimo.id, numero: i + 1, valor: valorParcela, data_vencimento: dataVenc,
       transacao_id: tx ? tx.id : null,
     });
+    if (errParcela) console.error('Erro ao salvar parcela do empréstimo:', errParcela);
   }
 }
 async function removeEmprestimo(id) {
@@ -659,7 +660,10 @@ async function removeEmprestimo(id) {
   const emprestimo = state.emprestimos.find((e) => e.id === id);
   const idsTransacoes = parcelas.map((p) => p.transacaoId).filter(Boolean);
   if (emprestimo?.transacaoRecebimentoId) idsTransacoes.push(emprestimo.transacaoRecebimentoId);
-  if (idsTransacoes.length > 0) await sb.from('transacoes').delete().in('id', idsTransacoes);
+  if (idsTransacoes.length > 0) {
+    const { error: errTx } = await deleteEmLotes('transacoes', idsTransacoes);
+    if (errTx) { alert('Erro ao remover as parcelas desse empréstimo: ' + errTx.message); return; }
+  }
   const { error } = await sb.from('emprestimos').delete().eq('id', id);
   if (error) alert('Erro ao remover empréstimo: ' + error.message);
 }
@@ -1281,7 +1285,8 @@ async function baixarDistribuicoesFIFO(costureiraId, produtoId, varianteId, quan
     if (restante <= 0) break;
     const disponivel = d.quantidadeDistribuida - d.quantidadeDevolvida;
     const abate = Math.min(disponivel, restante);
-    await sb.from('distribuicoes').update({ quantidade_devolvida: d.quantidadeDevolvida + abate }).eq('id', d.id);
+    const { error } = await sb.from('distribuicoes').update({ quantidade_devolvida: d.quantidadeDevolvida + abate }).eq('id', d.id);
+    if (error) { console.error('Erro ao abater distribuição:', error); alert('Erro ao atualizar "peças em mãos": ' + error.message); return; }
     restante -= abate;
   }
 }
@@ -1294,7 +1299,8 @@ async function restaurarDistribuicoesLIFO(costureiraId, produtoId, varianteId, q
   for (const d of comDevolucao) {
     if (restante <= 0) break;
     const restaura = Math.min(d.quantidadeDevolvida, restante);
-    await sb.from('distribuicoes').update({ quantidade_devolvida: d.quantidadeDevolvida - restaura }).eq('id', d.id);
+    const { error } = await sb.from('distribuicoes').update({ quantidade_devolvida: d.quantidadeDevolvida - restaura }).eq('id', d.id);
+    if (error) { console.error('Erro ao restaurar distribuição:', error); alert('Erro ao devolver peças pra "em mãos": ' + error.message); return restante; }
     restante -= restaura;
   }
   return restante; // > 0 se não havia devolução suficiente pra desfazer
@@ -1368,7 +1374,8 @@ async function baixarEstoqueVenda(produto, varianteId, quantidadeVendida) {
 // salva os componentes de um kit — apaga os antigos e grava os novos de uma vez, e marca o
 // produto como kit (ou desmarca, se a lista vier vazia)
 async function salvarComponentesKit(produtoKitId, componentes) {
-  await sb.from('kit_componentes').delete().eq('produto_kit_id', produtoKitId);
+  const { error: errDelete } = await sb.from('kit_componentes').delete().eq('produto_kit_id', produtoKitId);
+  if (errDelete) { alert('Erro ao limpar a composição antiga do kit: ' + errDelete.message + '\n\nNão continuei pra não duplicar os componentes.'); return; }
   if (componentes.length > 0) {
     const { error } = await sb.from('kit_componentes').insert(componentes.map((c) => ({
       produto_kit_id: produtoKitId, componente_produto_id: c.produtoId, componente_variante_id: c.varianteId || null, quantidade: c.quantidade,
@@ -1386,15 +1393,17 @@ async function acumularResumoDiario(mapaResumo) {
     const [plataformaNome, data] = chave.split('|');
     const { data: existente } = await sb.from('vendas_resumo_diario').select('*').eq('plataforma_nome', plataformaNome || '').eq('data', data).maybeSingle();
     if (existente) {
-      await sb.from('vendas_resumo_diario').update({
+      const { error: errUp } = await sb.from('vendas_resumo_diario').update({
         pedidos: Number(existente.pedidos) + info.pedidos,
         unidades: Number(existente.unidades) + info.unidades,
         faturamento: Number(existente.faturamento) + info.faturamento,
       }).eq('id', existente.id);
+      if (errUp) console.error('Erro ao atualizar resumo diário:', errUp);
     } else {
-      await sb.from('vendas_resumo_diario').insert({
+      const { error: errIns } = await sb.from('vendas_resumo_diario').insert({
         plataforma_nome: plataformaNome || null, data, pedidos: info.pedidos, unidades: info.unidades, faturamento: info.faturamento,
       });
+      if (errIns) console.error('Erro ao criar resumo diário:', errIns);
     }
   }
 }
@@ -1474,11 +1483,13 @@ async function vincularSkuPendente(pendenteId, produtoId, varianteId) {
     await registrarVendaProduto(produtoId, produto.estoqueAtual, novoTotalVendidoKit, pendente.ultimaData);
     await atualizarPrecoVendaMedio(produtoId, pendente.faturamento, pendente.quantidade);
     await baixarEstoquePorFichaTecnica(produtoId, pendente.quantidade, pendente.ultimaData);
-    await sb.from('vendas_detalhe').insert({
+    const { error: errDetalheKit } = await sb.from('vendas_detalhe').insert({
       produto_id: produtoId, plataforma_nome: pendente.plataformaNome || null, sku: pendente.sku,
       quantidade: pendente.quantidade, valor: pendente.faturamento, data: pendente.ultimaData, pedidos: pendente.pedidos || pendente.quantidade, taxa: pendente.taxa || 0,
     });
-    await sb.from('vendas_sku_pendentes').delete().eq('id', pendenteId);
+    if (errDetalheKit) { alert('Vinculei e já baixei o estoque, mas deu erro ao registrar o detalhe da venda (não vai aparecer no ranking/lucro): ' + errDetalheKit.message); return; }
+    const { error: errDelPendenteKit } = await sb.from('vendas_sku_pendentes').delete().eq('id', pendenteId);
+    if (errDelPendenteKit) alert('Vinculei certo, mas não consegui remover esse SKU da lista de pendentes: ' + errDelPendenteKit.message + '\n\nPode ficar duplicado se vincular de novo — exclui manualmente pela lixeira.');
     return;
   }
   if (varianteId) {
@@ -1504,10 +1515,11 @@ async function vincularSkuPendente(pendenteId, produtoId, varianteId) {
   await registrarVendaProduto(produtoId, novoEstoque, novoTotalVendido, pendente.ultimaData);
   await atualizarPrecoVendaMedio(produtoId, pendente.faturamento, pendente.quantidade);
   await baixarEstoquePorFichaTecnica(produtoId, pendente.quantidade, pendente.ultimaData);
-  await sb.from('vendas_detalhe').insert({
+  const { error: errDetalhe } = await sb.from('vendas_detalhe').insert({
     produto_id: produtoId, plataforma_nome: pendente.plataformaNome || null, sku: pendente.sku,
     quantidade: pendente.quantidade, valor: pendente.faturamento, data: pendente.ultimaData, pedidos: pendente.pedidos || pendente.quantidade, taxa: pendente.taxa || 0,
   });
+  if (errDetalhe) { alert('Vinculei e já baixei o estoque, mas deu erro ao registrar o detalhe da venda (não vai aparecer no ranking/lucro): ' + errDetalhe.message); return; }
   const { error } = await sb.from('vendas_sku_pendentes').delete().eq('id', pendenteId);
   if (error) alert('Erro ao remover SKU pendente: ' + error.message);
 }
@@ -1621,7 +1633,8 @@ async function reverterVendasPorData(dataStr, apagarPendentesTambem) {
     if (errTx) { alert('Erro ao apagar lançamentos: ' + errTx.message); return false; }
     if (countTx !== idsTx.length) { alert(`Aviso: tentei apagar ${idsTx.length} lançamento(s), mas só ${countTx ?? 0} foram removidos de fato. Pode ter alguma permissão bloqueando — confere no Supabase.`); }
   }
-  await sb.from('vendas_resumo_diario').delete().eq('data', dataStr);
+  const { error: errResumo } = await sb.from('vendas_resumo_diario').delete().eq('data', dataStr);
+  if (errResumo) console.error('Erro ao apagar resumo diário dessa data:', errResumo);
   if (apagarPendentesTambem && pendentesDoDia.length) {
     const { error: errPendentes } = await sb.from('vendas_sku_pendentes').delete().in('id', pendentesDoDia.map((v) => v.id));
     if (errPendentes) { alert('Erro ao apagar SKUs pendentes: ' + errPendentes.message); return false; }
@@ -1736,7 +1749,11 @@ async function salvarFichaTecnica(produtoId, itens) {
 }
 async function excluirFichaTecnica(produtoId) {
   const { error } = await sb.from('ficha_tecnica_itens').delete().eq('produto_id', produtoId);
-  if (error) alert('Erro ao excluir ficha técnica: ' + error.message);
+  if (error) { alert('Erro ao excluir ficha técnica: ' + error.message); return; }
+  // pra kits, a composição de verdade (com cor) mora em kit_componentes, não em ficha_tecnica_itens
+  // — precisa limpar os dois, senão o kit continua descontando estoque da composição antiga
+  const produto = state.produtos.find((p) => p.id === produtoId);
+  if (produto?.tipo === 'kit') await salvarComponentesKit(produtoId, []);
 }
 // desconta do estoque os insumos (momento = venda) e produtos-componentes da ficha técnica, proporcional à quantidade vendida
 async function baixarEstoquePorFichaTecnica(produtoId, quantidadeVendida, dataVenda, visitados) {
@@ -2367,8 +2384,12 @@ async function registrarProducao(costureiraId, produtoId, quantidade, data, vari
   if (quantidade > 0) await baixarInsumosProducao(produtoId, quantidade, data);
 }
 async function marcarProducaoPaga(ids) {
-  const { error } = await sb.from('producoes').update({ pago: true }).in('id', ids);
-  if (error) alert('Erro ao marcar produção como paga: ' + error.message);
+  // mesmo cuidado do deleteEmLotes: lista grande de ids na URL dá Bad Request, então atualiza em lotes
+  for (let i = 0; i < ids.length; i += 100) {
+    const lote = ids.slice(i, i + 100);
+    const { error } = await sb.from('producoes').update({ pago: true }).in('id', lote);
+    if (error) { alert('Erro ao marcar produção como paga: ' + error.message); return; }
+  }
 }
 async function removeProducao(id) {
   const p = state.producoes.find((x) => x.id === id);
@@ -2459,10 +2480,11 @@ async function garantirRecorrentes() {
       if (!jaExiste) {
         const diaFinal = Math.min(dia, daysInMonth(cursor));
         const novaData = `${cursor}-${String(diaFinal).padStart(2, '0')}`;
-        await sb.from('transacoes').insert({
+        const { error: errRecorrente } = await sb.from('transacoes').insert({
           tipo: t.tipo, valor: t.valor, categoria: t.categoria, natureza: t.natureza || null, descricao: t.descricao || null,
           data: novaData, recorrente: false, recorrente_origem_id: t.id,
         });
+        if (errRecorrente) console.error('Erro ao gerar lançamento recorrente:', errRecorrente);
       }
       cursor = addMonths(cursor, 1);
       iter++;
