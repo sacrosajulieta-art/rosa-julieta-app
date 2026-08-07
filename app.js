@@ -6761,10 +6761,11 @@ function renderEstoque(c) {
                   <input type="text" id="editPEstoqueAtual-${p.id}" placeholder="Estoque atual" value="${p.estoqueAtual}" />
                   <input type="text" id="editPEstoqueMinimo-${p.id}" placeholder="Estoque mínimo" value="${p.estoqueMinimo}" />
                 </div>
-                <input type="text" id="editPCusto-${p.id}" placeholder="Custo por unidade" value="${p.custoUnitario.toFixed(2).replace('.', ',')}" />
-                <label class="checkbox-label"><input type="checkbox" id="editPCustoEstimado-${p.id}" ${p.custoEstimado ? 'checked' : ''} /> ≈ Esse é um custo estimado (não sei o valor real do tecido/corte ainda)</label>
-                <input type="text" id="editPMaoObra-${p.id}" placeholder="Valor de mão de obra por peça" value="${(p.valorMaoObra || 0).toFixed(2).replace('.', ',')}" />
-                <div class="form-hint" style="margin-top:-4px">Esse valor é o mesmo usado na aba Produção pra pagar a costureira — dá pra ajustar aqui ou lá, os dois ficam sincronizados.</div>
+                <div class="form-hint" style="margin-top:6px;margin-bottom:2px">Custo e mão de obra agora se editam só na Ficha Técnica (lá já mostra o custo total certinho, com insumos):</div>
+                <div class="produto-meta" style="background:rgba(255,255,255,0.03);border-radius:8px;padding:8px 10px">
+                  🧵 ${p.custoEstimado ? '≈ ' : ''}${fmt(p.custoUnitario)} tecido/corte${p.custoEstimado ? ' (estimado)' : ''} · ✂️ ${fmt(p.valorMaoObra || 0)} mão de obra
+                </div>
+                <button class="entrada-btn" type="button" data-ir-para-ficha="${p.id}" style="margin-top:6px">✏️ Editar custo na Ficha Técnica</button>
                 <div class="form-hint" style="margin-top:10px;margin-bottom:2px">🎁 Esse produto desconta estoque de OUTROS produtos quando vendido? (ex: "Kit 2 Top Joy" desconta 2x Top Joy do estoque, não guarda estoque próprio)</div>
                 <label class="checkbox-label"><input type="checkbox" id="editPEhKit-${p.id}" ${(window.__editProdutoEhKit?.[p.id] ?? p.ehKit) ? 'checked' : ''} data-toggle-eh-kit="${p.id}" /> Sim, é um kit — descontar dos componentes abaixo</label>
                 ${(window.__editProdutoEhKit?.[p.id] ?? p.ehKit) ? (() => {
@@ -9246,6 +9247,14 @@ function attachEstoqueHandlers(c) {
   document.querySelectorAll('[data-edit-produto-tipo]').forEach((btn) => {
     btn.addEventListener('click', () => { window.__editProdutoTipo = btn.dataset.editProdutoTipo; render(); });
   });
+  document.querySelectorAll('[data-ir-para-ficha]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.tab = 'ficha';
+      state.editingFichaTecnicaId = btn.dataset.irParaFicha;
+      state.editingProdutoId = null;
+      render();
+    });
+  });
   document.querySelectorAll('[data-toggle-eh-kit]').forEach((chk) => {
     chk.addEventListener('change', (e) => {
       window.__editProdutoEhKit = window.__editProdutoEhKit || {};
@@ -9260,10 +9269,11 @@ function attachEstoqueHandlers(c) {
       const sku = document.getElementById(`editPSku-${id}`).value.trim();
       const estoqueAtual = Number(document.getElementById(`editPEstoqueAtual-${id}`).value) || 0;
       const estoqueMinimo = Number(document.getElementById(`editPEstoqueMinimo-${id}`).value) || 0;
-      const custoUnitario = parseBRNumber(document.getElementById(`editPCusto-${id}`).value);
-      const custoEstimado = document.getElementById(`editPCustoEstimado-${id}`)?.checked || false;
-      const valorMaoObra = parseBRNumber(document.getElementById(`editPMaoObra-${id}`).value);
       const produtoOriginal = state.produtos.find((p) => p.id === id);
+      // custo e mão de obra não se editam mais aqui — preserva o que já estava salvo
+      const custoUnitario = produtoOriginal?.custoUnitario || 0;
+      const custoEstimado = produtoOriginal?.custoEstimado || false;
+      const valorMaoObra = produtoOriginal?.valorMaoObra || 0;
       const tipo = window.__editProdutoTipo || produtoOriginal?.tipo || 'unitario';
       if (!nome) { alert('Informe o nome do produto.'); return; }
       await updateProduto(id, { nome, sku, estoqueAtual, estoqueMinimo, custoUnitario, custoEstimado, valorMaoObra, tipo });
