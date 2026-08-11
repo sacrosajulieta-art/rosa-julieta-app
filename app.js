@@ -7743,7 +7743,7 @@ function renderVendas(c) {
   });
   // lucro líquido de verdade: venda - custo de produção (tecido, corte, mão de obra,
   // insumos) - taxa da plataforma. É esse número que diz se o preço de venda está bom
-  const rankingProdutos = [...porProduto.values()].map((p) => ({ ...p, lucro: p.valor - p.custo - p.taxa })).sort((a, b) => b.quantidade - a.quantidade).slice(0, 15);
+  const rankingProdutos = [...porProduto.values()].map((p) => ({ ...p, lucro: p.valor - p.custo - p.taxa })).sort((a, b) => b.quantidade - a.quantidade).slice(0, 30);
   const maiorQtdRanking = Math.max(1, ...rankingProdutos.map((p) => p.quantidade));
   const lucroMes = [...porProduto.values()].reduce((a, p) => a + (p.valor - p.custo - p.taxa), 0);
   const temDadosDeLucro = detalheMes.length > 0;
@@ -8030,21 +8030,23 @@ function renderVendas(c) {
     `}
 
     <div class="section-title-wrap">
-      <div><div class="section-title">Ranking de produtos mais vendidos</div><div class="section-subtitle">No mês selecionado</div></div>
+      <div><div class="section-title">Ranking de produtos mais vendidos</div><div class="section-subtitle">No período selecionado</div></div>
+      ${renderControleColunas('rankingProdutos')}
     </div>
-    ${rankingProdutos.length === 0 ? `<div class="empty-state">Nenhum SKU vinculado vendeu nesse mês ainda (ou é um mês anterior a esse recurso — o ranking por período só existe a partir de agora).</div>` : `
-      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:24px">
+    ${rankingProdutos.length === 0 ? `<div class="empty-state">Nenhum SKU vinculado vendeu nesse período ainda (ou é um período anterior a esse recurso — o ranking por período só existe a partir de agora).</div>` : `
+      <div style="display:grid;grid-template-columns:${gridColumnsStyle('rankingProdutos', 320)};gap:6px;margin-bottom:24px">
         ${rankingProdutos.map((p, i) => `
-          <div class="alert-card" style="border-color:var(--border)">
-            <div class="alert-card-row">
-              <div class="alert-dot" style="background:var(--pink)">${i + 1}</div>
-              <div style="flex:1">
-                <div class="alert-name">${esc(p.nome)}</div>
-                <div class="alert-meta">${p.quantidade} peça(s) · ${fmt(p.valor)} · lucro <span style="color:${p.lucro >= 0 ? 'var(--teal)' : 'var(--red)'}">${fmt(p.lucro)}</span></div>
-                <div style="margin-top:6px;background:rgba(255,255,255,0.06);border-radius:6px;overflow:hidden;height:8px">
-                  <div style="height:100%;width:${(p.quantidade / maiorQtdRanking) * 100}%;background:var(--pink);border-radius:6px"></div>
-                </div>
+          <div style="display:flex;align-items:center;gap:8px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:8px;padding:6px 10px">
+            <div style="flex:0 0 20px;font-size:11px;color:var(--text-muted);font-weight:700">${i + 1}</div>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(p.nome)}</div>
+              <div style="height:4px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden;margin-top:3px">
+                <div style="height:100%;width:${(p.quantidade / maiorQtdRanking) * 100}%;background:var(--pink);border-radius:3px"></div>
               </div>
+            </div>
+            <div style="flex:0 0 auto;text-align:right;font-size:12px;white-space:nowrap">
+              <div><strong>${p.quantidade}</strong> un</div>
+              <div style="color:${p.lucro >= 0 ? 'var(--teal)' : 'var(--red)'}">${fmt(p.lucro)}</div>
             </div>
           </div>
         `).join('')}
