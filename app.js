@@ -1844,7 +1844,8 @@ async function excluirFichaTecnica(produtoId) {
   const produto = state.produtos.find((p) => p.id === produtoId);
   if (produto?.tipo === 'kit') await salvarComponentesKit(produtoId, []);
 }
-// desconta do estoque os insumos (momento = venda) e produtos-componentes da ficha técnica, proporcional à quantidade vendida
+// desconta do estoque os insumos (momento = venda) e produtos-componentes da ficha técnica,
+// proporcional à quantidade vendida
 async function baixarEstoquePorFichaTecnica(produtoId, quantidadeVendida, dataVenda, visitados) {
   visitados = visitados || new Set();
   if (visitados.has(produtoId)) return;
@@ -8327,7 +8328,11 @@ function attachVendasHandlers(c) {
         if (!pedidosPorPlataforma.has(chavePlataforma)) pedidosPorPlataforma.set(chavePlataforma, new Set());
         pedidosPorPlataforma.get(chavePlataforma).add(idPedidoLinha.trim().toLowerCase());
       } else {
-        linhasSemPedidoPorPlataforma.set(chavePlataforma, (linhasSemPedidoPorPlataforma.get(chavePlataforma) || 0) + 1);
+        // sem coluna de ID do pedido nessa planilha (ex: relatório "Sales by Variant", que
+        // resume por SKU) — soma o valor real da coluna "Pedidos Válidos" daquela linha, não
+        // conta só "+1 por linha" (senão subestima MUITO os pedidos reais, e por tabela
+        // desconta insumo de menos, tipo envelope/etiqueta que são "por pedido")
+        linhasSemPedidoPorPlataforma.set(chavePlataforma, (linhasSemPedidoPorPlataforma.get(chavePlataforma) || 0) + pedidosLinha);
       }
 
       // cada linha do relatório pode somar VÁRIAS vendas juntas numa linha só (ex: 39
