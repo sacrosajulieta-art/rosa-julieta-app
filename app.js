@@ -1623,14 +1623,14 @@ async function desfazerImportacaoVendas(importacaoId) {
     if (errI) { alert('Erro ao restaurar insumo: ' + errI.message); return false; }
   }
   if (importacao.transacao_ids?.length) {
-    const { error: errTx, count } = await deleteEmLotes('transacoes', importacao.transacao_ids);
+    const { error: errTx, sobrou } = await deleteEmLotes('transacoes', importacao.transacao_ids);
     if (errTx) { alert('Erro ao apagar lançamentos dessa importação: ' + errTx.message); return false; }
-    if (count !== importacao.transacao_ids.length) alert(`Aviso: tentei apagar ${importacao.transacao_ids.length} lançamento(s) dessa importação, mas só ${count ?? 0} foram removidos de fato.`);
+    if (sobrou > 0) alert(`Aviso: tentei apagar ${importacao.transacao_ids.length} lançamento(s) dessa importação, mas ${sobrou} continuam lá mesmo depois de tentar de novo várias vezes. Pode ter alguma permissão bloqueando — confere no Supabase.`);
   }
   if (importacao.vendas_detalhe_ids?.length) {
-    const { error: errVd, count: countVd } = await deleteEmLotes('vendas_detalhe', importacao.vendas_detalhe_ids);
+    const { error: errVd, sobrou: sobrouVd } = await deleteEmLotes('vendas_detalhe', importacao.vendas_detalhe_ids);
     if (errVd) { alert('Erro ao apagar detalhe de vendas dessa importação: ' + errVd.message); return false; }
-    if (countVd !== importacao.vendas_detalhe_ids.length) alert(`Aviso: tentei apagar ${importacao.vendas_detalhe_ids.length} detalhe(s) de venda dessa importação, mas só ${countVd ?? 0} foram removidos de fato.`);
+    if (sobrouVd > 0) alert(`Aviso: tentei apagar ${importacao.vendas_detalhe_ids.length} detalhe(s) de venda dessa importação, mas ${sobrouVd} continuam lá mesmo depois de tentar de novo várias vezes.`);
   }
   if (importacao.sku_pendente_ids?.length) {
     const { error: errSp } = await deleteEmLotes('vendas_sku_pendentes', importacao.sku_pendente_ids);
@@ -1663,16 +1663,30 @@ function calcularPreviaReversaoPorData(dataInicio, dataFim) {
   return { vendasDoDia, txVendaDoDia, txTaxaDoDia, semCor, comCor, pendentesDoDia, totalValor: txVendaDoDia.reduce((a, t) => a + t.valor, 0) };
 }
 // apaga uma lista grande de ids em lotes pequenos — o Supabase recusa (Bad Request) quando
-// a lista de ids na URL fica grande demais de uma vez só (acontece com 200+ registros)
+// a lista de ids na URL fica grande demais de uma vez só (acontece com 200+ registros).
+// depois de tentar apagar tudo, CONFERE de verdade (via select) quais ids ainda existem, e
+// tenta de novo só esses — até 3 vezes. Antes disso a pessoa tinha que repetir na mão até dar
+// certo; agora o próprio sistema insiste sozinho quando esbarra num limite temporário do banco
 async function deleteEmLotes(tabela, ids, tamanhoLote = 100) {
-  let totalApagado = 0;
-  for (let i = 0; i < ids.length; i += tamanhoLote) {
-    const lote = ids.slice(i, i + tamanhoLote);
-    const { error, count } = await sb.from(tabela).delete({ count: 'exact' }).in('id', lote);
-    if (error) return { error, count: totalApagado };
-    totalApagado += count ?? lote.length;
+  let restantes = [...new Set(ids)]; // remove duplicado, se algum vier repetido na lista
+  for (let tentativa = 0; tentativa < 3 && restantes.length > 0; tentativa++) {
+    for (let i = 0; i < restantes.length; i += tamanhoLote) {
+      const lote = restantes.slice(i, i + tamanhoLote);
+      const { error } = await sb.from(tabela).delete().in('id', lote);
+      if (error) return { error, count: ids.length - restantes.length };
+    }
+    // confere de verdade quem ainda existe, em vez de confiar só na resposta do delete
+    const aindaExistem = [];
+    for (let i = 0; i < restantes.length; i += tamanhoLote) {
+      const lote = restantes.slice(i, i + tamanhoLote);
+      const { data, error } = await sb.from(tabela).select('id').in('id', lote);
+      if (error) return { error, count: ids.length - restantes.length };
+      aindaExistem.push(...(data || []).map((r) => r.id));
+    }
+    restantes = aindaExistem;
+    if (restantes.length > 0) await new Promise((resolve) => setTimeout(resolve, 800)); // respira antes de tentar de novo
   }
-  return { error: null, count: totalApagado };
+  return { error: null, count: ids.length - restantes.length, sobrou: restantes.length };
 }
 async function reverterVendasPorData(dataInicio, dataFim, apagarPendentesTambem) {
   const { vendasDoDia, txVendaDoDia, txTaxaDoDia, semCor, pendentesDoDia } = calcularPreviaReversaoPorData(dataInicio, dataFim);
@@ -1689,14 +1703,14 @@ async function reverterVendasPorData(dataInicio, dataFim, apagarPendentesTambem)
   const idsVenda = vendasDoDia.map((v) => v.id);
   const idsTx = [...txVendaDoDia, ...txTaxaDoDia].map((t) => t.id);
   if (idsVenda.length) {
-    const { error: errVenda, count } = await deleteEmLotes('vendas_detalhe', idsVenda);
+    const { error: errVenda, sobrou } = await deleteEmLotes('vendas_detalhe', idsVenda);
     if (errVenda) { alert('Erro ao apagar detalhe de vendas: ' + errVenda.message); return false; }
-    if (count !== idsVenda.length) { alert(`Aviso: tentei apagar ${idsVenda.length} registro(s) de detalhe de vendas, mas só ${count ?? 0} foram removidos de fato. Pode ter alguma permissão bloqueando — confere no Supabase.`); }
+    if (sobrou > 0) { alert(`Aviso: tentei apagar ${idsVenda.length} registro(s) de detalhe de vendas, mas ${sobrou} continuam lá mesmo depois de tentar de novo várias vezes. Pode ter alguma permissão bloqueando — confere no Supabase.`); }
   }
   if (idsTx.length) {
-    const { error: errTx, count: countTx } = await deleteEmLotes('transacoes', idsTx);
+    const { error: errTx, sobrou: sobrouTx } = await deleteEmLotes('transacoes', idsTx);
     if (errTx) { alert('Erro ao apagar lançamentos: ' + errTx.message); return false; }
-    if (countTx !== idsTx.length) { alert(`Aviso: tentei apagar ${idsTx.length} lançamento(s), mas só ${countTx ?? 0} foram removidos de fato. Pode ter alguma permissão bloqueando — confere no Supabase.`); }
+    if (sobrouTx > 0) { alert(`Aviso: tentei apagar ${idsTx.length} lançamento(s), mas ${sobrouTx} continuam lá mesmo depois de tentar de novo várias vezes. Pode ter alguma permissão bloqueando — confere no Supabase.`); }
   }
   const { error: errResumo } = await sb.from('vendas_resumo_diario').delete().gte('data', dataInicio).lte('data', dataFim || dataInicio);
   if (errResumo) console.error('Erro ao apagar resumo diário desse período:', errResumo);
