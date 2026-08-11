@@ -839,17 +839,12 @@ async function criarOrdemCorte(cor, quantidadeRolos, valorTecido, dataEnvio, tip
     }
     if (materia) await sb.from('materia_prima').update({ rolos_disponiveis: Math.max(0, materia.rolosDisponiveis - quantidadeRolos) }).eq('id', materia.id);
   }
-  const { data: ordemCriada, error } = await sb.from('ordens_corte').insert({
+  // não lança no Financeiro ainda aqui — o valor do corte só é PAGO quando a peça volta pronta
+  // (em concluirOrdemCorte), não no dia que o tecido é enviado pra cortar
+  const { error } = await sb.from('ordens_corte').insert({
     cor, quantidade_rolos: quantidadeRolos, valor_tecido: valorTecido, data_envio: dataEnvio, status: 'aguardando', tipo, valor_corte: valorCorte || 0, grupo_id: grupoId || null,
   }).select().single();
   if (error) { alert('Erro ao criar ordem de corte: ' + error.message); return false; }
-  if (valorCorte > 0) {
-    const tx = await addTx({
-      tipo: 'saida', valor: valorCorte, categoria: 'Corte e costura (terceirizado)', natureza: 'variavel',
-      descricao: `${tipo === 'retalho' ? 'Corte de retalhos' : 'Corte'} — ${cor}`, data: dataEnvio,
-    });
-    if (tx) await sb.from('ordens_corte').update({ transacao_corte_id: tx.id }).eq('id', ordemCriada.id);
-  }
   return true;
 }
 async function concluirOrdemCorte(ordemId, itens) {
@@ -857,8 +852,19 @@ async function concluirOrdemCorte(ordemId, itens) {
     const { error } = await sb.from('ordens_corte_itens').insert({ ordem_id: ordemId, produto_id: item.produtoId, quantidade: item.quantidade });
     if (error) { alert('Erro ao salvar item do corte: ' + error.message); return; }
   }
-  const { error } = await sb.from('ordens_corte').update({ status: 'concluido', data_conclusao: todayStr() }).eq('id', ordemId);
-  if (error) alert('Erro ao concluir ordem: ' + error.message);
+  const dataConclusao = todayStr();
+  const { error } = await sb.from('ordens_corte').update({ status: 'concluido', data_conclusao: dataConclusao }).eq('id', ordemId);
+  if (error) { alert('Erro ao concluir ordem: ' + error.message); return; }
+  // é AQUI que lança o valor do corte no Financeiro — na data que a peça volta pronta (quando
+  // de fato se paga), não no dia que o tecido foi mandado pra cortar
+  const ordem = state.ordensCorte.find((o) => o.id === ordemId);
+  if (ordem && ordem.valorCorte > 0 && !ordem.transacaoCorteId) {
+    const tx = await addTx({
+      tipo: 'saida', valor: ordem.valorCorte, categoria: 'Corte e costura (terceirizado)', natureza: 'variavel',
+      descricao: `${ordem.tipo === 'retalho' ? 'Corte de retalhos' : 'Corte'} — ${ordem.cor}`, data: dataConclusao,
+    });
+    if (tx) await sb.from('ordens_corte').update({ transacao_corte_id: tx.id }).eq('id', ordemId);
+  }
 }
 async function removeOrdemCorte(id) {
   const ordem = state.ordensCorte.find((o) => o.id === id);
@@ -879,14 +885,18 @@ async function updateOrdemCorte(id, { cor, quantidadeRolos, valorTecido, valorCo
   const descricao = `${ordem && ordem.tipo === 'retalho' ? 'Corte de retalhos' : 'Corte'} — ${cor}`;
 
   if (transacaoCorteId) {
+    // já tinha lançamento (corte já concluído antes) — só ajusta o valor, mantém a data que já
+    // tava lá (a data de conclusão, não mexe nisso aqui)
     if (valorCorte > 0) {
-      await updateTx(transacaoCorteId, { tipo: 'saida', valor: valorCorte, categoria: 'Corte e costura (terceirizado)', natureza: 'variavel', descricao, data: dataEnvio, recorrente: false });
+      await updateTx(transacaoCorteId, { tipo: 'saida', valor: valorCorte, categoria: 'Corte e costura (terceirizado)', natureza: 'variavel', descricao, recorrente: false });
     } else {
       await removeTx(transacaoCorteId);
       transacaoCorteId = null;
     }
-  } else if (valorCorte > 0) {
-    const tx = await addTx({ tipo: 'saida', valor: valorCorte, categoria: 'Corte e costura (terceirizado)', natureza: 'variavel', descricao, data: dataEnvio });
+  } else if (valorCorte > 0 && ordem?.status === 'concluido' && ordem.dataConclusao) {
+    // só cria o lançamento aqui se o corte JÁ estiver concluído (peça pronta) — se ainda tá
+    // "aguardando", o valor fica só guardado, e o lançamento é criado na hora de concluir
+    const tx = await addTx({ tipo: 'saida', valor: valorCorte, categoria: 'Corte e costura (terceirizado)', natureza: 'variavel', descricao, data: ordem.dataConclusao });
     if (tx) transacaoCorteId = tx.id;
   }
 
