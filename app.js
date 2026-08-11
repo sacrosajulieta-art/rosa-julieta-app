@@ -249,12 +249,13 @@ function guessPedidosField(row) {
 }
 function guessDataFromFilename(fileName) {
   const m = fileName.match(/(\d{4})(\d{2})(\d{2})-(\d{4})(\d{2})(\d{2})/);
-  if (!m) return null;
+  if (!m) return { data: null, ehPeriodo: false };
   const [, y1, mo1, d1, y2, mo2, d2] = m;
-  // só usa se o relatório cobre um único dia (início = fim); em relatórios de
-  // vários dias não dá pra saber em qual dia exato cada linha vendeu
-  if (y1 === y2 && mo1 === mo2 && d1 === d2) return `${y1}-${mo1}-${d1}`;
-  return null;
+  if (y1 === y2 && mo1 === mo2 && d1 === d2) return { data: `${y1}-${mo1}-${d1}`, ehPeriodo: false };
+  // relatório de vários dias resumido numa linha só por SKU (ex: "Sales by Variant") — não dá
+  // pra saber o dia exato de cada venda, então usa o ÚLTIMO dia do período como referência (bem
+  // melhor que cair no dia de hoje, que não tem nada a ver com quando a venda aconteceu)
+  return { data: `${y2}-${mo2}-${d2}`, ehPeriodo: true };
 }
 function guessIdPedidoField(row) {
   const candidates = ['id do pedido', 'número do pedido', 'numero do pedido', 'order id', 'nº do pedido'];
@@ -386,6 +387,7 @@ const state = {
   showResumoFinanceiro: false,
   showContasAVencer: false,
   showProdutosParados: false,
+  showProdutosSemCor: false,
   showSkusPendentes: false,
   showVendaManualForm: false,
   variantes: [],
@@ -1643,11 +1645,12 @@ async function desfazerImportacaoVendas(importacaoId) {
 // lançamentos de venda/taxa e o detalhe de vendas daquele dia, e devolve o estoque exato
 // pra produtos sem cor. Produtos com cor ficam de fora da devolução automática, porque o
 // sistema nunca guardou qual cor específica vendeu — só fica listado pra redistribuir na mão
-function calcularPreviaReversaoPorData(dataStr) {
-  const vendasDoDia = state.vendasDetalhe.filter((v) => v.data === dataStr);
-  const txVendaDoDia = state.tx.filter((t) => t.data === dataStr && t.tipo === 'entrada' && t.categoria.startsWith('Venda'));
-  const txTaxaDoDia = state.tx.filter((t) => t.data === dataStr && t.tipo === 'saida' && t.categoria === 'Taxas de marketplace');
-  const pendentesDoDia = state.vendasSkuPendentes.filter((v) => v.ultimaData === dataStr);
+function calcularPreviaReversaoPorData(dataInicio, dataFim) {
+  const fim = dataFim || dataInicio;
+  const vendasDoDia = state.vendasDetalhe.filter((v) => v.data >= dataInicio && v.data <= fim);
+  const txVendaDoDia = state.tx.filter((t) => t.data >= dataInicio && t.data <= fim && t.tipo === 'entrada' && t.categoria.startsWith('Venda'));
+  const txTaxaDoDia = state.tx.filter((t) => t.data >= dataInicio && t.data <= fim && t.tipo === 'saida' && t.categoria === 'Taxas de marketplace');
+  const pendentesDoDia = state.vendasSkuPendentes.filter((v) => v.ultimaData >= dataInicio && v.ultimaData <= fim);
   const porProduto = {};
   vendasDoDia.forEach((v) => { porProduto[v.produtoId] = (porProduto[v.produtoId] || 0) + v.quantidade; });
   const semCor = [];
@@ -1671,8 +1674,8 @@ async function deleteEmLotes(tabela, ids, tamanhoLote = 100) {
   }
   return { error: null, count: totalApagado };
 }
-async function reverterVendasPorData(dataStr, apagarPendentesTambem) {
-  const { vendasDoDia, txVendaDoDia, txTaxaDoDia, semCor, pendentesDoDia } = calcularPreviaReversaoPorData(dataStr);
+async function reverterVendasPorData(dataInicio, dataFim, apagarPendentesTambem) {
+  const { vendasDoDia, txVendaDoDia, txTaxaDoDia, semCor, pendentesDoDia } = calcularPreviaReversaoPorData(dataInicio, dataFim);
   for (const item of semCor) {
     const produto = state.produtos.find((p) => p.id === item.produtoId);
     if (produto) {
@@ -1695,8 +1698,8 @@ async function reverterVendasPorData(dataStr, apagarPendentesTambem) {
     if (errTx) { alert('Erro ao apagar lançamentos: ' + errTx.message); return false; }
     if (countTx !== idsTx.length) { alert(`Aviso: tentei apagar ${idsTx.length} lançamento(s), mas só ${countTx ?? 0} foram removidos de fato. Pode ter alguma permissão bloqueando — confere no Supabase.`); }
   }
-  const { error: errResumo } = await sb.from('vendas_resumo_diario').delete().eq('data', dataStr);
-  if (errResumo) console.error('Erro ao apagar resumo diário dessa data:', errResumo);
+  const { error: errResumo } = await sb.from('vendas_resumo_diario').delete().gte('data', dataInicio).lte('data', dataFim || dataInicio);
+  if (errResumo) console.error('Erro ao apagar resumo diário desse período:', errResumo);
   if (apagarPendentesTambem && pendentesDoDia.length) {
     const { error: errPendentes } = await sb.from('vendas_sku_pendentes').delete().in('id', pendentesDoDia.map((v) => v.id));
     if (errPendentes) { alert('Erro ao apagar SKUs pendentes: ' + errPendentes.message); return false; }
@@ -2626,6 +2629,11 @@ function getComputed() {
     .filter((p) => p.ativo !== false && p.estoqueAtual > 0 && (p.diasSemVender === null || p.diasSemVender >= PARADO_DIAS))
     .sort((a, b) => (b.diasSemVender ?? 99999) - (a.diasSemVender ?? 99999));
 
+  // produtos que não têm NENHUMA cor cadastrada — cada venda desse SKU cai direto no estoque
+  // geral (sem passar por variante nenhuma). Se na vida real o produto tem cor, isso é sinal de
+  // que faltou cadastrar as variantes — daí toda venda vinculada erra a cor
+  const produtosSemCor = produtosStatus.filter((p) => p.ativo !== false && p.tipo !== 'kit' && variantesDoProduto(p.id).length === 0);
+
   // contas a vencer: saídas com data futura (ainda não contam no saldo atual),
   // dentro dos próximos 7 dias, pra você se antecipar
   const hoje = todayStr();
@@ -2659,7 +2667,7 @@ function getComputed() {
     .map((p) => [`${p.nome} (${p.estoqueAtual} un)`, p.estoqueAtual * p.custoTotalUnitario])
     .sort((a, b) => b[1] - a[1]);
 
-  return { saldoTotal, txMes, entradasMes, saidasMes, custoFixo, custoVariavel, produtosStatus, produtosParados, contasAVencer, contasVencidasNaoConfirmadas, valorMateriaPrima, valorPecasProntas, valorEstoqueTotal, materiaPrimaDetalhe, pecasProntasDetalhe };
+  return { saldoTotal, txMes, entradasMes, saidasMes, custoFixo, custoVariavel, produtosStatus, produtosParados, produtosSemCor, contasAVencer, contasVencidasNaoConfirmadas, valorMateriaPrima, valorPecasProntas, valorEstoqueTotal, materiaPrimaDetalhe, pecasProntasDetalhe };
 }
 
 // ==================== RENDER ====================
@@ -6796,6 +6804,7 @@ function renderEstoque(c) {
         ${renderControleColunas('estoque')}
         <button class="icon-btn-ghost" id="toggleForaDeLinha" style="${state.estoqueMostrarForaLinha ? 'background:rgba(154,156,168,0.2);color:var(--text)' : ''}">🚫 Fora de linha${foraDeLinhaCount > 0 ? ` (${foraDeLinhaCount})` : ''}</button>
         <button class="icon-btn-ghost" id="toggleProdutosParados">⏸️ Parados${c.produtosParados.length > 0 ? ` (${c.produtosParados.length})` : ''}</button>
+        <button class="icon-btn-ghost" id="toggleProdutosSemCor" style="${c.produtosSemCor.length > 0 ? 'background:rgba(255,182,39,0.15);border:1.5px solid var(--amber);color:var(--amber);font-weight:700' : ''}">🎨 Sem cor cadastrada${c.produtosSemCor.length > 0 ? ` (${c.produtosSemCor.length})` : ''}</button>
         <button class="icon-btn" id="toggleProdutoForm">＋ Produto</button>
       </div>
     </div>
@@ -6829,6 +6838,33 @@ function renderEstoque(c) {
                     <div class="alert-status" style="color:var(--amber)">${p.diasSemVender === null ? '⏸️ Nunca vendeu' : `⏸️ ${p.diasSemVender} dias sem vender`}</div>
                     <div class="alert-meta">Estoque: ${p.estoqueAtual} un · ${fmt(p.custoTotalUnitario)}/un parado</div>
                   </div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        `}
+      </div>
+    ` : ''}
+
+    ${state.showProdutosSemCor ? `
+      <div class="form-card">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+          <div>
+            <div class="section-title" style="margin-bottom:2px">Produtos sem cor cadastrada</div>
+            <div class="section-subtitle" style="margin-bottom:12px">Se algum desses tem cor de verdade, adiciona a(s) variante(s) — senão, todo vínculo de SKU vai cair no estoque geral, sem separar por cor</div>
+          </div>
+        </div>
+        ${c.produtosSemCor.length === 0 ? `<div class="empty-state">Todo produto ativo (que não é kit) já tem cor cadastrada 🎉</div>` : `
+          <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(240px, 1fr));gap:8px">
+            ${c.produtosSemCor.map((p) => `
+              <div class="alert-card" style="border-color:var(--amber)55">
+                <div class="alert-card-row">
+                  <div class="alert-dot" style="background:var(--amber)"></div>
+                  <div style="flex:1">
+                    <div class="alert-name">${esc(p.nome)}</div>
+                    <div class="alert-meta">${p.sku ? esc(fmtSkuExibicao(p.sku)) : 'sem SKU'} · estoque: ${p.estoqueAtual} un</div>
+                  </div>
+                  <button class="entrada-btn" data-editar-sem-cor="${p.id}" data-nome-produto="${esc(p.nome)}">＋ Cor</button>
                 </div>
               </div>
             `).join('')}
@@ -7745,15 +7781,19 @@ function renderVendas(c) {
         `;
         })()}
 
-        <div class="form-hint" style="margin-top:16px;margin-bottom:6px;border-top:1px solid var(--border);padding-top:12px">Importou algo antes desse recurso existir e não tem "Desfazer"? Reverte por data aqui embaixo (funciona pra qualquer venda importada, com ou sem histórico salvo).</div>
-        <input type="date" id="reversaoData" value="${window.__reversaoDataSelecionada || ''}" />
-        <button class="entrada-btn" type="button" id="buscarReversaoData">🔍 Ver o que tem nessa data</button>
+        <div class="form-hint" style="margin-top:16px;margin-bottom:6px;border-top:1px solid var(--border);padding-top:12px">Importou algo antes desse recurso existir e não tem "Desfazer"? Reverte por período aqui embaixo (funciona pra qualquer venda importada, com ou sem histórico salvo) — pode ser um dia só ou vários dias seguidos.</div>
+        <div class="form-row">
+          <input type="date" id="reversaoDataInicio" value="${window.__reversaoDataInicioSelecionada || ''}" />
+          <span style="color:var(--text-muted);align-self:center">até</span>
+          <input type="date" id="reversaoDataFim" value="${window.__reversaoDataFimSelecionada || ''}" />
+        </div>
+        <button class="entrada-btn" type="button" id="buscarReversaoData">🔍 Ver o que tem nesse período</button>
         ${window.__reversaoPrevia ? (() => {
           const p = window.__reversaoPrevia;
           return `
             <div class="entrada-box">
-              ${p.txVendaDoDia.length === 0 && p.pendentesDoDia.length === 0 ? `<div class="empty-state">Nenhuma venda encontrada nessa data.</div>` : `
-                ${p.txVendaDoDia.length > 0 ? `<div class="form-hint">Vai apagar: ${p.txVendaDoDia.length} venda(s) (${fmt(p.totalValor)}) + ${p.txTaxaDoDia.length} taxa(s) de marketplace.</div>` : `<div class="form-hint">Não achei lançamento financeiro nessa data (já deve ter sido apagado antes).</div>`}
+              ${p.txVendaDoDia.length === 0 && p.pendentesDoDia.length === 0 ? `<div class="empty-state">Nenhuma venda encontrada nesse período.</div>` : `
+                ${p.txVendaDoDia.length > 0 ? `<div class="form-hint">Vai apagar: ${p.txVendaDoDia.length} venda(s) (${fmt(p.totalValor)}) + ${p.txTaxaDoDia.length} taxa(s) de marketplace.</div>` : `<div class="form-hint">Não achei lançamento financeiro nesse período (já deve ter sido apagado antes).</div>`}
                 ${p.semCor.length > 0 ? `
                   <div class="form-hint" style="margin-top:8px;color:var(--teal)">✅ Estoque será devolvido automático (sem cor):</div>
                   <div class="prod-breakdown">${p.semCor.map((i) => `<div class="prod-breakdown-item"><span>${esc(i.nome)}</span><span>+${i.qtd}</span></div>`).join('')}</div>
@@ -7763,11 +7803,11 @@ function renderVendas(c) {
                   <div class="prod-breakdown">${p.comCor.map((i) => `<div class="prod-breakdown-item"><span>${esc(i.nome)}</span><span>${i.qtd} peça(s)</span></div>`).join('')}</div>
                 ` : ''}
                 ${p.pendentesDoDia.length > 0 ? `
-                  <div class="form-hint" style="margin-top:8px;color:var(--red)">🔗 Isso NÃO apaga sozinho: tem ${p.pendentesDoDia.length} SKU(s) pendente(s) com última venda nessa data, ainda esperando vínculo:</div>
+                  <div class="form-hint" style="margin-top:8px;color:var(--red)">🔗 Isso NÃO apaga sozinho: tem ${p.pendentesDoDia.length} SKU(s) pendente(s) com última venda nesse período, ainda esperando vínculo:</div>
                   <div class="prod-breakdown">${p.pendentesDoDia.map((v) => `<div class="prod-breakdown-item"><span>${esc(v.sku)}${v.varianteTexto ? ' — ' + esc(v.varianteTexto) : ''}</span><span>${v.quantidade} un</span></div>`).join('')}</div>
-                  <label class="checkbox-label" style="margin-top:6px"><input type="checkbox" id="reversaoApagarPendentes" checked /> Apagar esses SKUs pendentes junto (marque se essa data é a origem deles — senão desmarque e apague manualmente pela lixeira depois)</label>
+                  <label class="checkbox-label" style="margin-top:6px"><input type="checkbox" id="reversaoApagarPendentes" checked /> Apagar esses SKUs pendentes junto (marque se esse período é a origem deles — senão desmarque e apague manualmente pela lixeira depois)</label>
                 ` : ''}
-                <button class="confirm-btn" style="margin-top:10px;background:var(--red)" data-confirmar-reversao-data="${p.dataStr}">🗑️ Reverter essa data</button>
+                <button class="confirm-btn" style="margin-top:10px;background:var(--red)" data-confirmar-reversao-data="${p.dataInicio}" data-reversao-fim="${p.dataFim}">🗑️ Reverter esse período</button>
               `}
             </div>
           `;
@@ -8077,20 +8117,27 @@ function attachVendasHandlers(c) {
 
   const buscarReversaoData = document.getElementById('buscarReversaoData');
   if (buscarReversaoData) buscarReversaoData.addEventListener('click', () => {
-    const dataStr = document.getElementById('reversaoData').value;
-    if (!dataStr) { alert('Escolha uma data primeiro.'); return; }
-    window.__reversaoDataSelecionada = dataStr;
-    window.__reversaoPrevia = { ...calcularPreviaReversaoPorData(dataStr), dataStr };
+    const dataInicio = document.getElementById('reversaoDataInicio').value;
+    const dataFim = document.getElementById('reversaoDataFim').value || dataInicio;
+    if (!dataInicio) { alert('Escolha uma data de início primeiro.'); return; }
+    window.__reversaoDataInicioSelecionada = dataInicio;
+    window.__reversaoDataFimSelecionada = dataFim;
+    window.__reversaoPrevia = { ...calcularPreviaReversaoPorData(dataInicio, dataFim), dataInicio, dataFim };
     render();
   });
   document.querySelectorAll('[data-confirmar-reversao-data]').forEach((btn) => {
     btn.addEventListener('click', async () => {
-      const dataStr = btn.dataset.confirmarReversaoData;
-      if (!confirm(`Reverter todas as vendas de ${new Date(dataStr + 'T00:00:00').toLocaleDateString('pt-BR')}?\n\nIsso apaga os lançamentos e o detalhe de vendas dessa data, e devolve o estoque dos produtos sem cor. Produtos com cor você redistribui na mão depois.\n\nConfirma?`)) return;
+      const dataInicio = btn.dataset.confirmarReversaoData;
+      const dataFim = btn.dataset.reversaoFim || dataInicio;
+      const rotuloPeriodo = dataInicio === dataFim
+        ? new Date(dataInicio + 'T00:00:00').toLocaleDateString('pt-BR')
+        : `${new Date(dataInicio + 'T00:00:00').toLocaleDateString('pt-BR')} até ${new Date(dataFim + 'T00:00:00').toLocaleDateString('pt-BR')}`;
+      if (!confirm(`Reverter todas as vendas de ${rotuloPeriodo}?\n\nIsso apaga os lançamentos e o detalhe de vendas desse período, e devolve o estoque dos produtos sem cor. Produtos com cor você redistribui na mão depois.\n\nConfirma?`)) return;
       const apagarPendentes = document.getElementById('reversaoApagarPendentes')?.checked || false;
-      const sucesso = await reverterVendasPorData(dataStr, apagarPendentes);
+      const sucesso = await reverterVendasPorData(dataInicio, dataFim, apagarPendentes);
       window.__reversaoPrevia = null;
-      window.__reversaoDataSelecionada = null;
+      window.__reversaoDataInicioSelecionada = null;
+      window.__reversaoDataFimSelecionada = null;
       await loadData();
       if (sucesso) alert('Revertido! Confere o estoque dos produtos com cor pra redistribuir manualmente.');
     });
@@ -8175,7 +8222,9 @@ function attachVendasHandlers(c) {
 
     const plataformaId = document.getElementById('uploadPlataforma')?.value || '';
     const plataforma = state.plataformas.find((p) => p.id === plataformaId);
-    const dataArquivo = guessDataFromFilename(file.name);
+    const dataArquivoInfo = guessDataFromFilename(file.name);
+    const dataArquivo = dataArquivoInfo.data;
+    let houveLinhaSemDataPropria = false;
 
     // foto de como está tudo ANTES de processar — se algo der errado, dá pra restaurar
     // exatamente esse estado com o botão de desfazer, sem precisar recalcular nada
@@ -8228,7 +8277,9 @@ function attachVendasHandlers(c) {
       if (!valor) return;
 
       const descricaoItem = guessDescricaoField(row, file.name);
-      const dataLinha = guessDataField(row) || dataArquivo || todayStr();
+      const dataDaLinhaPropria = guessDataField(row);
+      if (!dataDaLinhaPropria) houveLinhaSemDataPropria = true;
+      const dataLinha = dataDaLinhaPropria || dataArquivo || todayStr();
       const plataformaLinha = guessPlataformaFromRow(row, state.plataformas) || plataforma;
       // relatórios "por variante" trazem o TOTAL de várias vendas numa linha só (ex: 39
       // unidades, R$1.403,61) — pra escolher a faixa de taxa certa e cobrar a taxa fixa o
@@ -8432,6 +8483,9 @@ function attachVendasHandlers(c) {
 
     const qtdVendas = novos.filter((n) => n.tipo === 'entrada').length;
     let resumo = `${qtdVendas} venda(s) importada(s).\n\n↩️ Se algo saiu errado, vá em "📜 Ver importações" pra desfazer essa importação inteira (restaura o estoque de antes automaticamente).`;
+    if (houveLinhaSemDataPropria && dataArquivoInfo.ehPeriodo) {
+      resumo += `\n\n⚠️ Essa planilha resume um período de vários dias (não traz a data de cada venda individual) — lancei tudo com data ${new Date(dataArquivo + 'T00:00:00').toLocaleDateString('pt-BR')} (o último dia do período), só como referência. Se quiser separar por dia certinho, use um relatório de pedidos que traga a data de cada venda.`;
+    }
     if (totalTaxas > 0) {
       resumo += `\nTaxas descontadas: ${fmt(totalTaxas)}`;
       const partes = [];
@@ -9241,6 +9295,19 @@ function attachEstoqueHandlers(c) {
 
   const toggleParados = document.getElementById('toggleProdutosParados');
   if (toggleParados) toggleParados.addEventListener('click', () => { state.showProdutosParados = !state.showProdutosParados; render(); });
+
+  const toggleSemCor = document.getElementById('toggleProdutosSemCor');
+  if (toggleSemCor) toggleSemCor.addEventListener('click', () => { state.showProdutosSemCor = !state.showProdutosSemCor; render(); });
+
+  document.querySelectorAll('[data-editar-sem-cor]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.showProdutosSemCor = false;
+      state.estoqueBusca = btn.dataset.nomeProduto;
+      state.editingProdutoId = btn.dataset.editarSemCor;
+      window.__editProdutoTipo = null;
+      render();
+    });
+  });
 
   function capturarCoresDigitadas() {
     const valores = [];
