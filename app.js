@@ -77,6 +77,47 @@ function daysInMonth(mKey) {
   const [y, m] = mKey.split('-').map(Number);
   return new Date(y, m, 0).getDate();
 }
+// seletor de período (de/até) reutilizado em Financeiro, Vendas, Dashboard e DRE — com atalhos
+// rápidos, tipo os que aparecem no Upseller e nos painéis das plataformas, pra não precisar
+// digitar duas datas toda vez pra ver "hoje" ou "esse mês"
+function renderSeletorPeriodo(prefixoId) {
+  return `
+    <div class="form-row" style="align-items:center;flex-wrap:wrap;gap:6px">
+      <input type="date" id="${prefixoId}Inicio" value="${state.periodoInicio}" style="max-width:150px" />
+      <span style="color:var(--text-muted)">até</span>
+      <input type="date" id="${prefixoId}Fim" value="${state.periodoFim}" style="max-width:150px" />
+      <button class="toggle-btn" data-periodo-atalho="hoje" data-periodo-alvo="${prefixoId}">Hoje</button>
+      <button class="toggle-btn" data-periodo-atalho="7dias" data-periodo-alvo="${prefixoId}">7 dias</button>
+      <button class="toggle-btn" data-periodo-atalho="30dias" data-periodo-alvo="${prefixoId}">30 dias</button>
+      <button class="toggle-btn" data-periodo-atalho="mes" data-periodo-alvo="${prefixoId}">Este mês</button>
+    </div>
+  `;
+}
+function wireSeletorPeriodo(prefixoId) {
+  const inicioEl = document.getElementById(`${prefixoId}Inicio`);
+  const fimEl = document.getElementById(`${prefixoId}Fim`);
+  if (inicioEl) inicioEl.addEventListener('change', (e) => { state.periodoInicio = e.target.value; render(); });
+  if (fimEl) fimEl.addEventListener('change', (e) => { state.periodoFim = e.target.value; render(); });
+  document.querySelectorAll(`[data-periodo-alvo="${prefixoId}"]`).forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const hoje = todayStr();
+      if (btn.dataset.periodoAtalho === 'hoje') { state.periodoInicio = hoje; state.periodoFim = hoje; }
+      else if (btn.dataset.periodoAtalho === '7dias') { state.periodoInicio = somaDias(hoje, -6); state.periodoFim = hoje; }
+      else if (btn.dataset.periodoAtalho === '30dias') { state.periodoInicio = somaDias(hoje, -29); state.periodoFim = hoje; }
+      else if (btn.dataset.periodoAtalho === 'mes') {
+        const mk = hoje.slice(0, 7);
+        state.periodoInicio = `${mk}-01`;
+        state.periodoFim = `${mk}-${String(daysInMonth(mk)).padStart(2, '0')}`;
+      }
+      render();
+    });
+  });
+}
+function somaDias(dataStr, n) {
+  const d = new Date(dataStr + 'T00:00:00');
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+}
 // mesma data-base, N meses à frente — usado pra gerar as datas das parcelas
 function dataParcela(dataBase, indice) {
   const dia = Number(dataBase.slice(8, 10));
@@ -314,6 +355,8 @@ const state = {
   tx: [],
   produtos: [],
   selectedMonth: todayStr().slice(0, 7),
+  periodoInicio: todayStr().slice(0, 8) + '01',
+  periodoFim: `${todayStr().slice(0, 8)}${String(daysInMonth(todayStr().slice(0, 7))).padStart(2, '0')}`,
   loading: true,
   showTxForm: false,
   showUpload: false,
@@ -2559,7 +2602,7 @@ function getComputed() {
   // saldo real de caixa: só conta o que já aconteceu até hoje, não despesas/receitas
   // futuras já cadastradas adiantado (ex: aluguel do mês que vem lançado hoje)
   const saldoTotal = state.tx.filter((t) => t.data <= todayStr()).reduce((acc, t) => acc + (t.tipo === 'entrada' ? t.valor : -t.valor), 0);
-  const txMes = state.tx.filter((t) => monthKey(t.data) === state.selectedMonth);
+  const txMes = state.tx.filter((t) => t.data >= state.periodoInicio && t.data <= state.periodoFim);
   const entradasMes = txMes.filter((t) => t.tipo === 'entrada').reduce((a, t) => a + t.valor, 0);
   const saidasMes = txMes.filter((t) => t.tipo === 'saida').reduce((a, t) => a + t.valor, 0);
   const custoFixo = txMes.filter((t) => t.tipo === 'saida' && t.natureza === 'fixo').reduce((a, t) => a + t.valor, 0);
@@ -4836,7 +4879,7 @@ function renderFinanceiro(c) {
       </div>
     </div>
 
-    <input type="month" class="month-input" id="monthSelect" value="${state.selectedMonth}" />
+    ${renderSeletorPeriodo('fin')}
 
     <div class="filtro-tipo-bar">
       <button class="filtro-tipo-btn ${state.filtroTipo === 'todos' ? 'active' : ''}" data-filtro="todos">Tudo</button>
@@ -6680,9 +6723,9 @@ function renderDRE(c) {
   const vazio = receitaBruta === 0 && custosFixos === 0 && custosVariaveis === 0;
 
   return `
-    <input type="month" class="month-input" id="dreMonthSelect" value="${state.selectedMonth}" />
+    ${renderSeletorPeriodo('dre')}
 
-    ${vazio ? `<div class="empty-state">Sem lançamentos neste mês ainda pra montar o DRE.</div>` : `
+    ${vazio ? `<div class="empty-state">Sem lançamentos nesse período ainda pra montar o DRE.</div>` : `
     <table class="dre-table">
       <tr class="dre-tr-item">
         <td>Receita Bruta de Vendas</td>
@@ -6992,7 +7035,7 @@ function renderDashboard(c) {
   const lembreteHolerite = hoje.getDate() >= ultimoDiaMes - 2 && funcionariasSemHolerite.length > 0;
 
   return `
-    <input type="month" class="month-input" id="dashboardMonthSelect" value="${state.selectedMonth}" />
+    ${renderSeletorPeriodo('dash')}
 
     ${c.contasVencidasNaoConfirmadas.length > 0 ? `
       <div class="alerta-vencimento" data-ir-financeiro="1" style="background:rgba(255,71,87,0.1);border-color:var(--red);color:var(--red)">
@@ -7018,12 +7061,12 @@ function renderDashboard(c) {
     <div class="stats-grid">
       <div class="stat-card" style="border-color:var(--teal)55;background:rgba(0,212,160,0.06)">
         <div class="stat-icon" style="background:rgba(0,212,160,0.15)">📈</div>
-        <div class="stat-label">Entradas do mês</div>
+        <div class="stat-label">Entradas no período</div>
         <div class="stat-value" style="color:var(--teal)">${fmt(c.entradasMes)}</div>
       </div>
       <div class="stat-card" style="border-color:var(--pink)55;background:rgba(255,46,126,0.06)">
         <div class="stat-icon" style="background:rgba(255,46,126,0.15)">📉</div>
-        <div class="stat-label">Saídas do mês</div>
+        <div class="stat-label">Saídas no período</div>
         <div class="stat-value" style="color:var(--pink)">${fmt(c.saidasMes)}</div>
       </div>
       <div class="stat-card" style="border-color:${c.saldoTotal >= 0 ? 'var(--teal)' : 'var(--red)'}55;background:${c.saldoTotal >= 0 ? 'rgba(0,212,160,0.06)' : 'rgba(255,71,87,0.06)'}">
@@ -7193,8 +7236,7 @@ function attachHandlers(c) {
   });
 
   if (state.tab === 'dashboard') {
-    const dashboardMonthSelect = document.getElementById('dashboardMonthSelect');
-    if (dashboardMonthSelect) dashboardMonthSelect.addEventListener('change', (e) => { state.selectedMonth = e.target.value; render(); });
+    wireSeletorPeriodo('dash');
 
     document.querySelectorAll('[data-ir-financeiro]').forEach((el) => el.addEventListener('click', () => {
       state.tab = 'financeiro';
@@ -7214,8 +7256,7 @@ function attachHandlers(c) {
   if (state.tab === 'ficha') attachFichaTecnicaHandlers(c);
   if (state.tab === 'rh') attachRHHandlers(c);
   if (state.tab === 'dre') {
-    const dreMonthSelect = document.getElementById('dreMonthSelect');
-    if (dreMonthSelect) dreMonthSelect.addEventListener('change', (e) => { state.selectedMonth = e.target.value; render(); });
+    wireSeletorPeriodo('dre');
   }
 }
 
@@ -7353,15 +7394,14 @@ function attachFinanceiroHandlers(c) {
     });
   });
 
-  const monthSelect = document.getElementById('monthSelect');
-  if (monthSelect) monthSelect.addEventListener('change', (e) => { state.selectedMonth = e.target.value; render(); });
+  wireSeletorPeriodo('fin');
 
   document.querySelectorAll('[data-filtro]').forEach((btn) => {
     btn.addEventListener('click', () => { state.filtroTipo = btn.dataset.filtro; render(); });
   });
 
   const exportBtn = document.getElementById('exportCsv');
-  if (exportBtn) exportBtn.addEventListener('click', () => exportCSV(c.txMes, state.selectedMonth));
+  if (exportBtn) exportBtn.addEventListener('click', () => exportCSV(c.txMes, `${state.periodoInicio}_a_${state.periodoFim}`));
 
   const toggleSelect = document.getElementById('toggleSelect');
   if (toggleSelect) toggleSelect.addEventListener('click', () => {
@@ -7591,11 +7631,10 @@ const mesLabel = (mk) => {
   return label.replace('.', '').replace(/^\w/, (c) => c.toUpperCase());
 };
 function renderVendas(c) {
-  const mesAtual = state.selectedMonth;
+  const resumoDiarioMes = state.vendasResumoDiario.filter((r) => r.data && r.data >= state.periodoInicio && r.data <= state.periodoFim);
   const vendasMes = c.txMes.filter((t) => t.tipo === 'entrada' && t.categoria.startsWith('Venda'));
   const faturamentoMes = vendasMes.reduce((a, t) => a + t.valor, 0);
   const pedidosUnicosMes = new Set(vendasMes.filter((t) => t.idPedido).map((t) => t.idPedido.trim().toLowerCase()));
-  const resumoDiarioMes = state.vendasResumoDiario.filter((r) => r.data && monthKey(r.data) === mesAtual);
   const pedidosResumoMesTotal = resumoDiarioMes.reduce((a, r) => a + r.pedidos, 0);
   const qtdPedidosMes = pedidosUnicosMes.size > 0 ? pedidosUnicosMes.size : (pedidosResumoMesTotal || vendasMes.length);
   const ticketMedio = qtdPedidosMes > 0 ? faturamentoMes / qtdPedidosMes : 0;
@@ -7628,7 +7667,7 @@ function renderVendas(c) {
 
   // ranking de produtos mais vendidos, no mês selecionado (usa vendas_detalhe, disponível a
   // partir do momento em que essa função entrou no ar — imports antigos não têm esse detalhe)
-  const detalheMes = state.vendasDetalhe.filter((v) => v.data && monthKey(v.data) === mesAtual);
+  const detalheMes = state.vendasDetalhe.filter((v) => v.data && v.data >= state.periodoInicio && v.data <= state.periodoFim);
   const porProduto = new Map();
   detalheMes.forEach((v) => {
     const produto = state.produtos.find((p) => p.id === v.produtoId);
@@ -7656,8 +7695,10 @@ function renderVendas(c) {
   const custosFixosMes = c.txMes.filter((t) => t.tipo === 'saida' && t.natureza === 'fixo').reduce((a, t) => a + t.valor, 0);
   const lucroLiquidoMes = lucroMes - custosFixosMes;
 
-  // evolução de faturamento nos últimos 6 meses (independe do mês selecionado no filtro)
-  const mesesEvolucao = [5, 4, 3, 2, 1, 0].map((i) => addMonths(mesAtual, -i));
+  // evolução de faturamento nos últimos 6 meses (independe do período selecionado no filtro —
+  // sempre usa como referência o mês em que o "até" do período cai)
+  const mesReferenciaEvolucao = monthKey(state.periodoFim);
+  const mesesEvolucao = [5, 4, 3, 2, 1, 0].map((i) => addMonths(mesReferenciaEvolucao, -i));
   const faturamentoPorMes = mesesEvolucao.map((mk) => ({
     mes: mk,
     total: state.tx.filter((t) => t.tipo === 'entrada' && t.categoria.startsWith('Venda') && monthKey(t.data) === mk).reduce((a, t) => a + t.valor, 0),
@@ -7734,7 +7775,7 @@ function renderVendas(c) {
       </div>
     ` : ''}
 
-    <input type="month" class="month-input" id="vendasMonthSelect" value="${state.selectedMonth}" />
+    ${renderSeletorPeriodo('vendas')}
 
     ${state.showVendaManualForm ? `
       <div class="form-card">
@@ -7849,7 +7890,7 @@ function renderVendas(c) {
     <div class="stats-grid" style="margin-top:14px">
       <div class="stat-card">
         <div class="stat-icon" style="background:rgba(0,212,160,0.1)">💰</div>
-        <div class="stat-label">Faturamento do mês</div>
+        <div class="stat-label">Faturamento no período</div>
         <div class="stat-value">${fmt(faturamentoMes)}</div>
       </div>
       <div class="stat-card">
@@ -7884,7 +7925,7 @@ function renderVendas(c) {
         </div>
       </div>
     ` : ''}
-    <div class="section-subtitle" style="margin-top:${faturamentoNaoVinculadoMes > 1 && pctVinculadoMes < 95 ? '10px' : '-8px'};margin-bottom:8px">Lucro bruto = venda − custo direto da peça (tecido, corte, mão de obra, insumos) − taxa da plataforma. Lucro líquido = lucro bruto − custos fixos do mês (${fmt(custosFixosMes)}, ex: aluguel, ferramentas).${!temDadosDeLucro ? ' * Só considera vendas com produto identificado.' : ''}</div>
+    <div class="section-subtitle" style="margin-top:${faturamentoNaoVinculadoMes > 1 && pctVinculadoMes < 95 ? '10px' : '-8px'};margin-bottom:8px">Lucro bruto = venda − custo direto da peça (tecido, corte, mão de obra, insumos) − taxa da plataforma. Lucro líquido = lucro bruto − custos fixos no período (${fmt(custosFixosMes)}, ex: aluguel, ferramentas).${!temDadosDeLucro ? ' * Só considera vendas com produto identificado.' : ''}</div>
 
     <div class="section-title-wrap" style="margin-top:24px">
       <div><div class="section-title">Evolução — últimos 6 meses</div><div class="section-subtitle">Faturamento total de vendas por mês</div></div>
@@ -7894,7 +7935,7 @@ function renderVendas(c) {
         <div style="display:flex;align-items:center;gap:10px">
           <div style="width:48px;font-size:12.5px;color:var(--text-muted)">${mesLabel(m.mes)}</div>
           <div style="flex:1;background:rgba(255,255,255,0.06);border-radius:6px;overflow:hidden;height:22px">
-            <div style="height:100%;width:${(m.total / maiorFaturamentoMes) * 100}%;background:${m.mes === mesAtual ? 'var(--pink)' : 'var(--teal)'};border-radius:6px"></div>
+            <div style="height:100%;width:${(m.total / maiorFaturamentoMes) * 100}%;background:${m.mes === mesReferenciaEvolucao ? 'var(--pink)' : 'var(--teal)'};border-radius:6px"></div>
           </div>
           <div style="width:110px;text-align:right;font-size:13px;font-weight:600">${fmt(m.total)}</div>
         </div>
@@ -7946,7 +7987,7 @@ function renderVendas(c) {
     `}
 
     <div class="section-title-wrap">
-      <div><div class="section-title">Histórico de pedidos</div><div class="section-subtitle">Vendas importadas no mês selecionado</div></div>
+      <div><div class="section-title">Histórico de pedidos</div><div class="section-subtitle">Vendas importadas no período selecionado</div></div>
       ${canaisHistorico.length > 1 ? `
         <select id="filtroHistoricoCanal" style="width:auto">
           <option value="todos" ${(!state.filtroHistoricoCanal || state.filtroHistoricoCanal === 'todos') ? 'selected' : ''}>Todos os canais</option>
@@ -7963,8 +8004,7 @@ function renderVendas(c) {
 }
 
 function attachVendasHandlers(c) {
-  const vendasMonthSelect = document.getElementById('vendasMonthSelect');
-  if (vendasMonthSelect) vendasMonthSelect.addEventListener('change', (e) => { state.selectedMonth = e.target.value; render(); });
+  wireSeletorPeriodo('vendas');
 
   const toggleUpload = document.getElementById('toggleUpload');
   if (toggleUpload) toggleUpload.addEventListener('click', () => { state.showUpload = !state.showUpload; render(); });
