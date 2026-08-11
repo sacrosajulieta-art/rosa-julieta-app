@@ -427,19 +427,43 @@ const state = {
 };
 
 // ==================== DATA LAYER ====================
+// busca TODAS as linhas de uma tabela, sem depender do limite padrão do Supabase (que corta em
+// 1000 linhas por padrão) — pagina de 1000 em 1000 até não sobrar mais nada. Essencial pra
+// tabelas que crescem muito, tipo "transacoes" (cada peça vendida vira um lançamento separado)
+async function fetchAllRows(tabela, colunaOrdem, ascending) {
+  const linhas = [];
+  const tamanhoPagina = 1000;
+  let pagina = 0;
+  while (true) {
+    const de = pagina * tamanhoPagina;
+    const ate = de + tamanhoPagina - 1;
+    const { data, error } = await sb.from(tabela).select('*').order(colunaOrdem, { ascending }).range(de, ate);
+    if (error) { console.error(`Erro ao buscar página de ${tabela}:`, error); break; }
+    if (!data || data.length === 0) break;
+    linhas.push(...data);
+    if (data.length < tamanhoPagina) break; // última página
+    pagina++;
+  }
+  return linhas;
+}
 async function loadData() {
-  const [{ data: tx, error: e1 }, { data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: producoes, error: e5 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: distribuicoes, error: e11 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }, { data: feriasTiradas, error: e16 }, { data: solicitacoesPonto, error: e17 }, { data: horasExtrasLiquidadas, error: e18 }, { data: bancoHorasLancamentos, error: e19 }, { data: emprestimos, error: e20 }, { data: emprestimoParcelas, error: e21 }, { data: cartoesCredito, error: e22 }, { data: vendasSkuPendentes, error: e23 }, { data: vendasDetalhe, error: e24 }, { data: abonosPonto, error: e25 }, { data: holerites, error: e26 }, { data: feriados, error: e27 }, { data: empresaConfig, error: e28 }, { data: importacoesVendas, error: e29 }, { data: kitComponentes, error: e30 }, { data: vendasResumoDiario, error: e31 }] = await Promise.all([
-    sb.from('transacoes').select('*').order('data', { ascending: false }),
+  // essas duas tabelas crescem muito rápido (cada peça vendida = 1 linha), então buscam
+  // paginado em paralelo com o resto, pra nunca cortar dado antigo por engano
+  const [tx, vendasDetalhe, producoes, distribuicoes] = await Promise.all([
+    fetchAllRows('transacoes', 'data', false),
+    fetchAllRows('vendas_detalhe', 'data', false),
+    fetchAllRows('producoes', 'data', false),
+    fetchAllRows('distribuicoes', 'data', false),
+  ]);
+  const [{ data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }, { data: feriasTiradas, error: e16 }, { data: solicitacoesPonto, error: e17 }, { data: horasExtrasLiquidadas, error: e18 }, { data: bancoHorasLancamentos, error: e19 }, { data: emprestimos, error: e20 }, { data: emprestimoParcelas, error: e21 }, { data: cartoesCredito, error: e22 }, { data: vendasSkuPendentes, error: e23 }, { data: abonosPonto, error: e25 }, { data: holerites, error: e26 }, { data: feriados, error: e27 }, { data: empresaConfig, error: e28 }, { data: importacoesVendas, error: e29 }, { data: kitComponentes, error: e30 }, { data: vendasResumoDiario, error: e31 }] = await Promise.all([
     sb.from('produtos').select('*').order('created_at', { ascending: false }),
     sb.from('plataformas').select('*').order('nome', { ascending: true }),
     sb.from('costureiras').select('*').order('nome', { ascending: true }),
-    sb.from('producoes').select('*').order('data', { ascending: false }),
     sb.from('variantes').select('*').order('nome', { ascending: true }),
     sb.from('materia_prima').select('*').order('cor', { ascending: true }),
     sb.from('ordens_corte').select('*').order('data_envio', { ascending: false }),
     sb.from('ordens_corte_itens').select('*'),
     sb.from('insumos').select('*').order('nome', { ascending: true }),
-    sb.from('distribuicoes').select('*').order('data', { ascending: false }),
     sb.from('ficha_tecnica_itens').select('*'),
     sb.from('insumo_plataforma_qtd').select('*'),
     sb.from('funcionarias').select('*').order('nome', { ascending: true }),
@@ -452,7 +476,6 @@ async function loadData() {
     sb.from('emprestimo_parcelas').select('*').order('numero', { ascending: true }),
     sb.from('cartoes_credito').select('*').order('nome', { ascending: true }),
     sb.from('vendas_sku_pendentes').select('*').order('created_at', { ascending: false }),
-    sb.from('vendas_detalhe').select('*').order('data', { ascending: false }).limit(8000),
     sb.from('abonos_ponto').select('*').order('data', { ascending: false }),
     sb.from('holerites').select('*').order('mes', { ascending: false }),
     sb.from('feriados').select('*').order('data', { ascending: true }),
@@ -461,17 +484,14 @@ async function loadData() {
     sb.from('kit_componentes').select('*'),
     sb.from('vendas_resumo_diario').select('*'),
   ]);
-  if (e1) console.error(e1);
   if (e2) console.error(e2);
   if (e3) console.error(e3);
   if (e4) console.error(e4);
-  if (e5) console.error(e5);
   if (e6) console.error(e6);
   if (e7) console.error(e7);
   if (e8) console.error(e8);
   if (e9) console.error(e9);
   if (e10) console.error(e10);
-  if (e11) console.error(e11);
   if (e12) console.error(e12);
   if (e13) console.error(e13);
   if (e14) console.error(e14);
@@ -484,7 +504,6 @@ async function loadData() {
   if (e21) console.error(e21);
   if (e22) console.error(e22);
   if (e23) console.error(e23);
-  if (e24) console.error(e24);
   if (e25) console.error(e25);
   if (e26) console.error(e26);
   if (e27) console.error(e27);
@@ -1809,9 +1828,18 @@ async function recalcularTaxasFaltantes() {
     const taxaEstimada = Math.round((v.valor * (pct / 100) + fixa * v.quantidade) * 100) / 100;
     if (taxaEstimada <= 0) continue;
     const { error } = await sb.from('vendas_detalhe').update({ taxa: taxaEstimada }).eq('id', v.id);
-    if (!error) corrigidas++;
+    if (error) continue;
+    // a taxa de vendas_detalhe é usada pelo Lucro bruto da aba Vendas, mas o DRE e o Financeiro
+    // olham pra um LANÇAMENTO separado (categoria "Taxas de marketplace") - sem isso, o DRE
+    // continuava sem essa despesa mesmo depois de corrigido aqui. Cria o lançamento que faltava
+    const { error: errTx } = await sb.from('transacoes').insert({
+      tipo: 'saida', valor: taxaEstimada, categoria: 'Taxas de marketplace', natureza: 'variavel',
+      descricao: `Taxa recalculada (correção retroativa) ${plataforma.nome} — SKU ${v.sku}`, data: v.data,
+    });
+    if (!errTx) corrigidas++;
   }
-  alert(`Pronto! ${corrigidas} venda(s) corrigida(s) com a taxa estimada pela faixa atual da plataforma.${semPlataformaConfigurada > 0 ? `\n\n${semPlataformaConfigurada} venda(s) não deu pra corrigir — plataforma sem taxa cadastrada ou nome da plataforma não bate com nenhuma cadastrada (confere em Financeiro → ⚙️ Taxas).` : ''}`);
+  const avisoIncompleto = semPlataformaConfigurada > 0 ? (' ' + semPlataformaConfigurada + ' venda(s) não deu pra corrigir — plataforma sem taxa cadastrada ou nome da plataforma não bate com nenhuma cadastrada (confere em Financeiro → ⚙️ Taxas).') : '';
+  alert('Pronto! ' + corrigidas + ' venda(s) corrigida(s) com a taxa estimada pela faixa atual da plataforma (já lançada no Financeiro/DRE também).' + avisoIncompleto);
   await loadData();
 }
 async function addPlataforma(nome, taxaPercentual, taxaFixa) {
