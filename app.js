@@ -306,10 +306,11 @@ function taxaDaPlataformaParaValor(plataforma, valor) {
   return { pct: plataforma.taxaPercentual, fixa: plataforma.taxaFixa };
 }
 
-async function parseXLSX(file) {
+async function parseXLSX(file, nomeAba) {
   const buffer = await file.arrayBuffer();
   const wb = XLSX.read(buffer, { type: 'array', cellDates: true });
-  const sheet = wb.Sheets[wb.SheetNames[0]];
+  const sheet = nomeAba ? wb.Sheets[nomeAba] : wb.Sheets[wb.SheetNames[0]];
+  if (!sheet) return null;
   const json = XLSX.utils.sheet_to_json(sheet, { defval: '' });
   // normaliza chaves pra minúsculo, igual o parseCSV
   return json.map((row) => {
@@ -8327,6 +8328,41 @@ function attachVendasHandlers(c) {
     // exatamente qual pedido teve cupom — mais preciso que a taxa estimada sozinha
     const ehRelatorioVoucher = /^voucher/i.test(file.name) || (rows[0] && 'custo (pedidos pagos) (brl)' in rows[0]);
     if (ehRelatorioVoucher) {
+      // período de vários dias (ex: "01/07/2026 - 31/07/2026" no nome do arquivo) — a Shopee
+      // já separa isso por dia sozinha, numa aba diferente ("Tendências das Métricas"), com uma
+      // linha por dia (formato "DD/MM/AAAA", sem hora — diferente do relatório de 1 dia só, que
+      // usa essa mesma aba mas com granularidade por HORA)
+      if (dataArquivoInfo.ehPeriodo) {
+        const linhasTendencia = await parseXLSX(file, 'Tendências das Métricas');
+        if (!linhasTendencia) { alert('Não achei a aba "Tendências das Métricas" nesse arquivo — não consigo separar por dia.'); e.target.value = ''; return; }
+        const registrosPorDia = linhasTendencia
+          .map((r) => {
+            const periodo = String(r['período'] || '').trim();
+            const m = periodo.match(/^(\d{2})\/(\d{2})\/(\d{4})$/); // só linhas de UM DIA (sem hora)
+            if (!m) return null;
+            const [, d, mo, y] = m;
+            return {
+              dataDia: `${y}-${mo}-${d}`,
+              custo: parseBRNumber(String(r['custo (pedidos pagos) (brl)'] || '0')),
+              pedidos: Number(r['pedidos (pedidos pagos)'] || 0),
+            };
+          })
+          .filter((r) => r && r.custo > 0);
+        if (registrosPorDia.length === 0) { alert('Não achei nenhum dia com custo de cupom nesse período.'); e.target.value = ''; return; }
+        const totalPeriodo = registrosPorDia.reduce((a, r) => a + r.custo, 0);
+        const listaResumo = registrosPorDia.map((r) => `${new Date(r.dataDia + 'T00:00:00').toLocaleDateString('pt-BR')}: ${fmt(r.custo)}`).join('\n');
+        if (!confirm(`Achei ${registrosPorDia.length} dia(s) de cupom nesse período${plataforma ? ` — ${plataforma.nome}` : ''}:\n\n${listaResumo}\n\nTotal: ${fmt(totalPeriodo)}\n\nLançar um lançamento de despesa por dia (${registrosPorDia.length} lançamento(s) no total)?`)) { e.target.value = ''; return; }
+        for (const r of registrosPorDia) {
+          await addTx({
+            tipo: 'saida', valor: r.custo, categoria: 'Desconto de cupom', natureza: 'variavel',
+            descricao: `Cupom${plataforma ? ' ' + plataforma.nome : ''} — custeado pela loja (${r.pedidos} pedido(s) afetados)`, data: r.dataDia,
+          });
+        }
+        await loadData();
+        alert(`Lançado! ${registrosPorDia.length} dia(s) de cupom registrados, totalizando ${fmt(totalPeriodo)}.`);
+        e.target.value = '';
+        return;
+      }
       const linha = rows[0];
       if (!linha) { alert('Não consegui ler os dados desse relatório de cupom.'); e.target.value = ''; return; }
       const custoCupom = parseBRNumber(String(linha['custo (pedidos pagos) (brl)'] || '0'));
