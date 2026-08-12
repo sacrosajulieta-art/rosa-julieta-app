@@ -58,7 +58,7 @@ const NATUREZA_POR_CATEGORIA = (() => {
 })();
 // entradas que não são venda (empréstimo, aporte...) — não contam como Receita Bruta no DRE,
 // mas continuam contando no saldo de caixa normalmente
-const CATEGORIAS_ENTRADA_NAO_OPERACIONAL = ['Empréstimo recebido', 'Reembolso de frete'];
+const CATEGORIAS_ENTRADA_NAO_OPERACIONAL = ['Empréstimo recebido', 'Reembolso de frete', 'Crédito grátis Ads'];
 // categorias já geradas automaticamente por outro fluxo do sistema (parcela de empréstimo,
 // holerite) — nunca devem ser marcadas como "repetir todos os meses" manualmente, senão
 // duplicam com o que o próprio sistema já lança sozinho
@@ -306,6 +306,76 @@ function taxaDaPlataformaParaValor(plataforma, valor) {
   return { pct: plataforma.taxaPercentual, fixa: plataforma.taxaFixa };
 }
 
+// fatura/extrato de anúncios da Shopee (Shopee Ads) — formato bem diferente de uma planilha
+// comum: tem linhas de metadado antes da tabela de verdade, e a tabela é um EXTRATO DE
+// CARTEIRA (cada recarga e cada uso, misturados), não um resumo por dia pronto. O gasto de
+// anúncio de verdade é o total das linhas "Deduction for..." (o que a própria Shopee chama de
+// "Investimento" no painel — confirmado batendo com o valor real que a Daniela conferiu na
+// tela dela). "Crédito de Recarga" é só o dinheiro entrando na carteira, não o gasto em si.
+async function processarFaturaAdsShopee(file) {
+  const texto = await file.text();
+  const linhas = texto.split(/\r?\n/);
+  const idxHeader = linhas.findIndex((l) => {
+    const low = l.toLowerCase();
+    return low.includes('descri') && low.includes('quantidade') && low.includes('tempo');
+  });
+  if (idxHeader === -1) { alert('Não consegui reconhecer esse relatório de anúncios — o formato pode ter mudado.'); return; }
+  const dados = parseCSV(linhas.slice(idxHeader).join('\n'));
+
+  const gastoPorDia = new Map(); // 'YYYY-MM-DD' -> valor gasto (deduzido) no dia
+  const gratisPorDia = new Map(); // 'YYYY-MM-DD' -> crédito grátis recebido da Shopee no dia (bônus, não é gasto)
+  dados.forEach((row) => {
+    const descricao = String(row['descrição'] || row['descricao'] || '').trim().toLowerCase();
+    const tempo = String(row['tempo'] || '').trim();
+    const m = tempo.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+    if (!m) return;
+    const [, d, mo, y] = m;
+    const dataDia = `${y}-${mo}-${d}`;
+    if (descricao.startsWith('deduction')) {
+      const valorLinha = Math.abs(parseBRNumber(String(row['quantidade'] || '0')));
+      gastoPorDia.set(dataDia, (gastoPorDia.get(dataDia) || 0) + valorLinha);
+    } else if (descricao.startsWith('crédito de recarga') || descricao.startsWith('credito de recarga')) {
+      const observacao = String(row['observação'] || row['observacao'] || '');
+      const matchGratis = observacao.match(/Cr[ée]dito Gratuito:\s*([\d.,]+)/i);
+      if (matchGratis) {
+        const valorGratis = parseBRNumber(matchGratis[1]);
+        gratisPorDia.set(dataDia, (gratisPorDia.get(dataDia) || 0) + valorGratis);
+      }
+    } else if (descricao.includes('rebate') || descricao.includes('roas')) {
+      // devolução de crédito grátis (ex: "ROAS Protection Free Ads Credit Rebate") — também é bônus, não saiu do bolso
+      const valorLinha = parseBRNumber(String(row['quantidade'] || '0'));
+      if (valorLinha > 0) gratisPorDia.set(dataDia, (gratisPorDia.get(dataDia) || 0) + valorLinha);
+    }
+  });
+
+  if (gastoPorDia.size === 0) { alert('Não achei nenhum gasto de anúncio (Deduction) nesse relatório — nada pra lançar.'); return; }
+
+  const registros = [...gastoPorDia.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  const total = registros.reduce((a, [, v]) => a + v, 0);
+  const totalGratis = [...gratisPorDia.values()].reduce((a, v) => a + v, 0);
+  const listaResumo = registros.map(([data, v]) => `${new Date(data + 'T00:00:00').toLocaleDateString('pt-BR')}: ${fmt(v)}`).join('\n');
+  if (!confirm(`Achei ${registros.length} dia(s) de gasto com Shopee Ads nesse relatório:\n\n${listaResumo}\n\nTotal: ${fmt(total)}${totalGratis > 0 ? ` (dos quais ${fmt(totalGratis)} vieram de crédito grátis que a Shopee te deu, o resto do seu saldo pago)` : ''}\n\n(Esse total é o "Investimento" que a própria Shopee mostra no painel.)\n\nLançar um lançamento de despesa por dia?`)) return;
+
+  for (const [dataDia, valor] of registros) {
+    await addTx({
+      tipo: 'saida', valor, categoria: 'Ads/Marketing', natureza: 'variavel',
+      descricao: 'Shopee Ads — gasto com anúncios (Investimento)', data: dataDia,
+    });
+  }
+  // crédito grátis não é despesa nem receita de venda — é só um registro informativo, guardado
+  // como entrada numa categoria própria, pra aparecer no painel de marketing sem contar como
+  // faturamento (o cálculo de faturamento só olha categorias que começam com "Venda")
+  for (const [dataDia, valor] of gratisPorDia) {
+    if (valor > 0) {
+      await addTx({
+        tipo: 'entrada', valor, categoria: 'Crédito grátis Ads', natureza: null,
+        descricao: 'Shopee Ads — crédito grátis recebido (bônus, não é gasto seu)', data: dataDia,
+      });
+    }
+  }
+  await loadData();
+  alert(`Lançado! ${registros.length} dia(s) de gasto com anúncios, totalizando ${fmt(total)}.${totalGratis > 0 ? `\n\nTambém registrei ${fmt(totalGratis)} de crédito grátis recebido, só pra referência (não conta como despesa nem receita).` : ''}`);
+}
 async function parseXLSX(file, nomeAba) {
   const buffer = await file.arrayBuffer();
   const wb = XLSX.read(buffer, { type: 'array', cellDates: true });
@@ -1677,7 +1747,10 @@ function calcularPreviaReversaoPorData(dataInicio, dataFim) {
   const fim = dataFim || dataInicio;
   const vendasDoDia = state.vendasDetalhe.filter((v) => v.data >= dataInicio && v.data <= fim);
   const txVendaDoDia = state.tx.filter((t) => t.data >= dataInicio && t.data <= fim && t.tipo === 'entrada' && t.categoria.startsWith('Venda'));
-  const txTaxaDoDia = state.tx.filter((t) => t.data >= dataInicio && t.data <= fim && t.tipo === 'saida' && (t.categoria === 'Taxas de marketplace' || t.categoria === 'Desconto de cupom'));
+  // só inclui aqui o que nasce JUNTO da importação de vendas (a taxa de cada venda é criada
+  // na mesma hora que a venda). Cupom e Ads são importados em arquivos separados, então reverter
+  // uma data de vendas não deve apagar esses — se precisar removê-los, é direto no Financeiro
+  const txTaxaDoDia = state.tx.filter((t) => t.data >= dataInicio && t.data <= fim && t.tipo === 'saida' && t.categoria === 'Taxas de marketplace');
   const pendentesDoDia = state.vendasSkuPendentes.filter((v) => v.ultimaData >= dataInicio && v.ultimaData <= fim);
   // agrupa por produto + cor (quando a venda já tem a cor salva, dá pra devolver o estoque
   // certinho na cor certa — só cai em "sem saber a cor" pra vendas registradas ANTES desse
@@ -2683,9 +2756,9 @@ function setupRealtime() {
 function getComputed() {
   // saldo real de caixa: só conta o que já aconteceu até hoje, não despesas/receitas
   // futuras já cadastradas adiantado (ex: aluguel do mês que vem lançado hoje)
-  const saldoTotal = state.tx.filter((t) => t.data <= todayStr()).reduce((acc, t) => acc + (t.tipo === 'entrada' ? t.valor : -t.valor), 0);
+  const saldoTotal = state.tx.filter((t) => t.data <= todayStr() && t.categoria !== 'Crédito grátis Ads').reduce((acc, t) => acc + (t.tipo === 'entrada' ? t.valor : -t.valor), 0);
   const txMes = state.tx.filter((t) => t.data >= state.periodoInicio && t.data <= state.periodoFim);
-  const entradasMes = txMes.filter((t) => t.tipo === 'entrada').reduce((a, t) => a + t.valor, 0);
+  const entradasMes = txMes.filter((t) => t.tipo === 'entrada' && t.categoria !== 'Crédito grátis Ads').reduce((a, t) => a + t.valor, 0);
   const saidasMes = txMes.filter((t) => t.tipo === 'saida').reduce((a, t) => a + t.valor, 0);
   const custoFixo = txMes.filter((t) => t.tipo === 'saida' && t.natureza === 'fixo').reduce((a, t) => a + t.valor, 0);
   const custoVariavel = txMes.filter((t) => t.tipo === 'saida' && t.natureza === 'variavel').reduce((a, t) => a + t.valor, 0);
@@ -6853,7 +6926,7 @@ function renderDRE(c) {
       </tr>
     </table>
     ${totalNaoOperacional > 0 ? `
-      <div class="form-hint" style="margin-top:16px">💡 Entradas não operacionais neste mês (não contam como venda, mas entraram no caixa): <strong style="color:var(--text)">${fmt(totalNaoOperacional)}</strong> — ${naoOperacionalPorCategoria.map(([nome, val]) => `${esc(nome)}: ${fmt(val)}`).join(', ')}</div>
+      <div class="form-hint" style="margin-top:16px">💡 Entradas não operacionais neste mês (não contam como venda — algumas são dinheiro de verdade, tipo empréstimo, outras são só informativas, tipo crédito grátis de anúncio, que nunca é dinheiro na conta): <strong style="color:var(--text)">${fmt(totalNaoOperacional)}</strong> — ${naoOperacionalPorCategoria.map(([nome, val]) => `${esc(nome)}: ${fmt(val)}`).join(', ')}</div>
     ` : ''}
     `}
   `;
@@ -7812,6 +7885,11 @@ function renderVendas(c) {
   const valorVinculadoMes = detalheMes.reduce((a, v) => a + v.valor, 0);
   const pctVinculadoMes = faturamentoMes > 0 ? (valorVinculadoMes / faturamentoMes) * 100 : 100;
   const faturamentoNaoVinculadoMes = Math.max(0, faturamentoMes - valorVinculadoMes);
+  // painel de marketing (cupom, ads) — só o que já foi importado pelos relatórios de cupom/ads
+  const descontoCupomMes = c.txMes.filter((t) => t.tipo === 'saida' && t.categoria === 'Desconto de cupom').reduce((a, t) => a + t.valor, 0);
+  const gastoAdsMes = c.txMes.filter((t) => t.tipo === 'saida' && t.categoria === 'Ads/Marketing').reduce((a, t) => a + t.valor, 0);
+  const creditoGratisAdsMes = c.txMes.filter((t) => t.tipo === 'entrada' && t.categoria === 'Crédito grátis Ads').reduce((a, t) => a + t.valor, 0);
+  const gastoAdsBolsoMes = Math.max(0, gastoAdsMes - creditoGratisAdsMes);
 
   // lucro líquido = lucro bruto menos os custos fixos do mês (aluguel, ferramentas, etc.),
   // sem dividir por produto — dá o número "não tem erro" pra saber se fechou no azul de verdade
@@ -7880,7 +7958,7 @@ function renderVendas(c) {
           return `
             <div class="entrada-box">
               ${p.txVendaDoDia.length === 0 && p.pendentesDoDia.length === 0 ? `<div class="empty-state">Nenhuma venda encontrada nesse período.</div>` : `
-                ${p.txVendaDoDia.length > 0 ? `<div class="form-hint">Vai apagar: ${p.txVendaDoDia.length} venda(s) (${fmt(p.totalValor)}) + ${p.txTaxaDoDia.length} taxa(s) de marketplace.</div>` : `<div class="form-hint">Não achei lançamento financeiro nesse período (já deve ter sido apagado antes).</div>`}
+                ${p.txVendaDoDia.length > 0 ? `<div class="form-hint">Vai apagar: ${p.txVendaDoDia.length} venda(s) (${fmt(p.totalValor)}) + ${p.txTaxaDoDia.length} taxa(s) de marketplace. (Cupom e Ads importados separadamente não são apagados aqui — remove manual no Financeiro se precisar.)</div>` : `<div class="form-hint">Não achei lançamento financeiro nesse período (já deve ter sido apagado antes).</div>`}
                 ${p.semCor.length > 0 ? `
                   <div class="form-hint" style="margin-top:8px;color:var(--teal)">✅ Estoque será devolvido automático (sem cor):</div>
                   <div class="prod-breakdown">${p.semCor.map((i) => `<div class="prod-breakdown-item"><span>${esc(i.nome)}</span><span>+${i.qtd}</span></div>`).join('')}</div>
@@ -8059,6 +8137,39 @@ function renderVendas(c) {
       </div>
     ` : ''}
     <div class="section-subtitle" style="margin-top:${faturamentoNaoVinculadoMes > 1 && pctVinculadoMes < 95 ? '10px' : '-8px'};margin-bottom:8px">Lucro bruto = venda − custo direto da peça (tecido, corte, mão de obra, insumos) − taxa da plataforma. Lucro líquido = lucro bruto − custos fixos no período (${fmt(custosFixosMes)}, ex: aluguel, ferramentas).${!temDadosDeLucro ? ' * Só considera vendas com produto identificado.' : ''}</div>
+
+    ${descontoCupomMes > 0 || gastoAdsMes > 0 ? `
+      <div class="section-title-wrap" style="margin-top:20px">
+        <div><div class="section-title">📢 Marketing no período</div><div class="section-subtitle">Cupom e anúncios já importados (dos relatórios da plataforma)</div></div>
+      </div>
+      <div class="stats-grid">
+        ${descontoCupomMes > 0 ? `
+          <div class="stat-card">
+            <div class="stat-icon" style="background:rgba(255,182,39,0.1)">🎟️</div>
+            <div class="stat-label">Desconto de cupom</div>
+            <div class="stat-value" style="color:var(--red)">${fmt(descontoCupomMes)}</div>
+          </div>
+        ` : ''}
+        ${gastoAdsMes > 0 ? `
+          <div class="stat-card">
+            <div class="stat-icon" style="background:rgba(255,46,126,0.1)">📢</div>
+            <div class="stat-label">Ads — total investido</div>
+            <div class="stat-value" style="color:var(--red)">${fmt(gastoAdsMes)}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon" style="background:rgba(255,46,126,0.1)">💸</div>
+            <div class="stat-label">Ads — saiu do seu bolso</div>
+            <div class="stat-value" style="color:var(--red)">${fmt(gastoAdsBolsoMes)}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon" style="background:rgba(0,212,160,0.1)">🎁</div>
+            <div class="stat-label">Ads — a Shopee te deu</div>
+            <div class="stat-value" style="color:var(--teal)">${fmt(creditoGratisAdsMes)}</div>
+          </div>
+        ` : ''}
+      </div>
+      <div class="section-subtitle" style="margin-top:-8px;margin-bottom:8px">Cupom e Ads já entram descontados no Lucro líquido e no DRE — esse painel é só pra você enxergar o detalhe rápido, sem precisar abrir o Financeiro.</div>
+    ` : ''}
 
     <div class="section-title-wrap" style="margin-top:24px">
       <div><div class="section-title">Evolução — últimos 6 meses</div><div class="section-subtitle">Faturamento total de vendas por mês</div></div>
@@ -8306,6 +8417,18 @@ function attachVendasHandlers(c) {
   if (csvInput) csvInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+
+    // fatura/extrato de anúncios da Shopee — formato bem diferente (linhas de metadado antes
+    // da tabela), detecta ANTES do parse genérico pra não virar lixo
+    if (/adwords_bill/i.test(file.name) || /\.csv$/i.test(file.name)) {
+      const previaTexto = await file.text();
+      if (/hist[oó]rico de transa[çc][õo]es de an[uú]ncios/i.test(previaTexto)) {
+        await processarFaturaAdsShopee(file);
+        e.target.value = '';
+        return;
+      }
+    }
+
     const isExcel = /\.xlsx?$/i.test(file.name);
     let rows;
     try {
