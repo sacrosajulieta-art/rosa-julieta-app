@@ -475,6 +475,11 @@ const state = {
 // busca TODAS as linhas de uma tabela, sem depender do limite padrão do Supabase (que corta em
 // 1000 linhas por padrão) — pagina de 1000 em 1000 até não sobrar mais nada. Essencial pra
 // tabelas que crescem muito, tipo "transacoes" (cada peça vendida vira um lançamento separado)
+// Ordenar só pela coluna pedida (ex: "data") não é suficiente quando MUITAS linhas empatam
+// nesse valor (ex: milhares de vendas na mesma data) — o banco pode devolver essas linhas em
+// ordem levemente diferente entre uma página e outra, fazendo alguma linha cair "no buraco"
+// entre duas páginas e nunca aparecer (ou aparecer duplicada). Adicionar "id" como critério de
+// desempate garante que a ordem fica sempre a mesma entre as páginas, sem perder nem repetir nada
 async function fetchAllRows(tabela, colunaOrdem, ascending) {
   const linhas = [];
   const tamanhoPagina = 1000;
@@ -482,7 +487,7 @@ async function fetchAllRows(tabela, colunaOrdem, ascending) {
   while (true) {
     const de = pagina * tamanhoPagina;
     const ate = de + tamanhoPagina - 1;
-    const { data, error } = await sb.from(tabela).select('*').order(colunaOrdem, { ascending }).range(de, ate);
+    const { data, error } = await sb.from(tabela).select('*').order(colunaOrdem, { ascending }).order('id', { ascending: true }).range(de, ate);
     if (error) { console.error(`Erro ao buscar página de ${tabela}:`, error); break; }
     if (!data || data.length === 0) break;
     linhas.push(...data);
