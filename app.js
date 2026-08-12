@@ -7922,6 +7922,10 @@ function renderVendas(c) {
   const historicoFiltrado = state.filtroHistoricoCanal && state.filtroHistoricoCanal !== 'todos'
     ? historicoOrdenado.filter((t) => t.categoria.replace(/^Venda\s*/, '').trim() === state.filtroHistoricoCanal)
     : historicoOrdenado;
+  // última data com lançamento de ads/cupom — não é do período selecionado, é de TODA a
+  // história, pra você sempre saber até onde já lançou, sem precisar caçar no Financeiro
+  const ultimaDataAds = state.tx.filter((t) => t.categoria === 'Ads/Marketing' && t.tipo === 'saida').reduce((max, t) => (t.data > max ? t.data : max), '');
+  const ultimaDataCupom = state.tx.filter((t) => t.categoria === 'Desconto de cupom' && t.tipo === 'saida').reduce((max, t) => (t.data > max ? t.data : max), '');
 
   return `
     <div class="section-title-wrap">
@@ -7934,6 +7938,13 @@ function renderVendas(c) {
         <button class="icon-btn" id="toggleVendaManual">＋ Venda manual</button>
       </div>
     </div>
+    ${ultimaDataAds || ultimaDataCupom ? `
+      <div class="form-hint" style="margin-top:-6px;margin-bottom:10px">
+        ${ultimaDataAds ? `📢 Ads lançado até: <strong style="color:var(--text)">${new Date(ultimaDataAds + 'T00:00:00').toLocaleDateString('pt-BR')}</strong>` : ''}
+        ${ultimaDataAds && ultimaDataCupom ? ' · ' : ''}
+        ${ultimaDataCupom ? `🎟️ Cupom lançado até: <strong style="color:var(--text)">${new Date(ultimaDataCupom + 'T00:00:00').toLocaleDateString('pt-BR')}</strong>` : ''}
+      </div>
+    ` : ''}
 
     ${state.showImportacoesVendas ? `
       <div class="form-card">
