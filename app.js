@@ -7714,6 +7714,10 @@ function renderVendas(c) {
   const faturamentoMes = vendasMes.reduce((a, t) => a + t.valor, 0);
   const pedidosUnicosMes = new Set(vendasMes.filter((t) => t.idPedido).map((t) => t.idPedido.trim().toLowerCase()));
   const pedidosResumoMesTotal = resumoDiarioMes.reduce((a, r) => a + r.pedidos, 0);
+  // "unidades" conta toda peça vendida (inclusive SKU pendente ainda não vinculado) — serve
+  // pra comparar direto com o "Unidades Vendidas" que a Shopee/Upseller mostram, sem precisar
+  // abrir a outra ferramenta pra conferir se bate
+  const unidadesResumoMesTotal = resumoDiarioMes.reduce((a, r) => a + r.unidades, 0);
   const qtdPedidosMes = pedidosUnicosMes.size > 0 ? pedidosUnicosMes.size : (pedidosResumoMesTotal || vendasMes.length);
   const ticketMedio = qtdPedidosMes > 0 ? faturamentoMes / qtdPedidosMes : 0;
 
@@ -7979,6 +7983,7 @@ function renderVendas(c) {
         <div class="stat-icon" style="background:rgba(255,182,39,0.1)">🧾</div>
         <div class="stat-label">Pedidos</div>
         <div class="stat-value">${qtdPedidosMes}</div>
+        ${unidadesResumoMesTotal > 0 && unidadesResumoMesTotal !== qtdPedidosMes ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">${unidadesResumoMesTotal} peças no total (compare com "Unidades Vendidas" da plataforma — diferença é normal quando um pedido tem mais de 1 peça)</div>` : ''}
       </div>
       <div class="stat-card">
         <div class="stat-icon" style="background:rgba(255,46,126,0.1)">🎯</div>
