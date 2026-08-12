@@ -8224,6 +8224,9 @@ function renderVendas(c) {
         ${renderControleColunas('rankingProdutos')}
       </div>
     </div>
+    ${state.vendasSkuPendentes.length > 0 ? `
+      <div class="form-hint" style="margin-top:-4px;margin-bottom:8px;color:var(--amber)">⚠️ Tem ${state.vendasSkuPendentes.length} SKU(s) ainda pendente(s) de vincular — os produtos abaixo podem estar com quantidade/lucro subestimados (ou nem aparecer aqui) até você vincular tudo. Vale conferir "🔗 SKUs pendentes" antes de decidir sobre preço.</div>
+    ` : ''}
     ${rankingProdutos.length === 0 ? `<div class="empty-state">Nenhum SKU vinculado vendeu nesse período ainda (ou é um período anterior a esse recurso — o ranking por período só existe a partir de agora).</div>` : `
       <div style="display:grid;grid-template-columns:${gridColumnsStyle('rankingProdutos', 320)};gap:6px;margin-bottom:24px">
         ${rankingProdutos.map((p, i) => `
