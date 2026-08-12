@@ -1461,24 +1461,36 @@ async function salvarComponentesKit(produtoKitId, componentes) {
 }
 // acumula pedidos/unidades/faturamento por plataforma+dia, de TODA venda importada — não
 // depende de o SKU já estar vinculado a um produto, pra "pedidos" e "ticket médio" ficarem
-// certos desde a hora da importação, sem esperar vincular nada
+// certos desde a hora da importação, sem esperar vincular nada. Tenta de novo automaticamente
+// se alguma chamada falhar (acontece às vezes por excesso de chamadas seguidas), e avisa se
+// mesmo assim não conseguir — pra não ficar um resumo incompleto sem ninguém saber
 async function acumularResumoDiario(mapaResumo) {
+  const falhas = [];
   for (const [chave, info] of mapaResumo.entries()) {
     const [plataformaNome, data] = chave.split('|');
-    const { data: existente } = await sb.from('vendas_resumo_diario').select('*').eq('plataforma_nome', plataformaNome || '').eq('data', data).maybeSingle();
-    if (existente) {
-      const { error: errUp } = await sb.from('vendas_resumo_diario').update({
-        pedidos: Number(existente.pedidos) + info.pedidos,
-        unidades: Number(existente.unidades) + info.unidades,
-        faturamento: Number(existente.faturamento) + info.faturamento,
-      }).eq('id', existente.id);
-      if (errUp) console.error('Erro ao atualizar resumo diário:', errUp);
-    } else {
-      const { error: errIns } = await sb.from('vendas_resumo_diario').insert({
-        plataforma_nome: plataformaNome || null, data, pedidos: info.pedidos, unidades: info.unidades, faturamento: info.faturamento,
-      });
-      if (errIns) console.error('Erro ao criar resumo diário:', errIns);
+    let sucesso = false;
+    for (let tentativa = 0; tentativa < 3 && !sucesso; tentativa++) {
+      if (tentativa > 0) await new Promise((resolve) => setTimeout(resolve, 600));
+      const { data: existente, error: errSel } = await sb.from('vendas_resumo_diario').select('*').eq('plataforma_nome', plataformaNome || '').eq('data', data).maybeSingle();
+      if (errSel) continue;
+      if (existente) {
+        const { error: errUp } = await sb.from('vendas_resumo_diario').update({
+          pedidos: Number(existente.pedidos) + info.pedidos,
+          unidades: Number(existente.unidades) + info.unidades,
+          faturamento: Number(existente.faturamento) + info.faturamento,
+        }).eq('id', existente.id);
+        sucesso = !errUp;
+      } else {
+        const { error: errIns } = await sb.from('vendas_resumo_diario').insert({
+          plataforma_nome: plataformaNome || null, data, pedidos: info.pedidos, unidades: info.unidades, faturamento: info.faturamento,
+        });
+        sucesso = !errIns;
+      }
     }
+    if (!sucesso) falhas.push(`${plataformaNome || 'sem plataforma'} (${data})`);
+  }
+  if (falhas.length > 0) {
+    alert(`Aviso: o resumo de "Pedidos" pode ficar incompleto pra: ${falhas.join(', ')}. As vendas em si foram importadas normal (isso não afeta faturamento nem estoque) — só o contador de pedidos desses dias pode ficar menor do que deveria. Se notar isso, me avisa.`);
   }
 }
 async function registrarVendaProduto(id, novoEstoque, novoTotalVendido, dataVenda) {
@@ -7132,7 +7144,7 @@ function renderDashboard(c) {
       </div>
       <div class="stat-card" style="border-color:${c.saldoTotal >= 0 ? 'var(--teal)' : 'var(--red)'}55;background:${c.saldoTotal >= 0 ? 'rgba(0,212,160,0.06)' : 'rgba(255,71,87,0.06)'}">
         <div class="stat-icon" style="background:${c.saldoTotal >= 0 ? 'rgba(0,212,160,0.15)' : 'rgba(255,71,87,0.15)'}">💰</div>
-        <div class="stat-label">Saldo total</div>
+        <div class="stat-label">Saldo total (desde o início)</div>
         <div class="stat-value" style="color:${c.saldoTotal >= 0 ? 'var(--teal)' : 'var(--red)'}">${fmt(c.saldoTotal)}</div>
       </div>
     </div>
