@@ -200,7 +200,10 @@ function parseCSV(text) {
 function guessValueField(row) {
   // prioriza valores por item de linha (evita duplicar o total do pedido quando há várias variações)
   const candidates = ['subtotal do produto', 'valor total', 'pagamentos recebidos', 'valor de vendas válidas', 'valor total de vendas', 'valor da nota fiscal', 'valor', 'total', 'preço total', 'preco total', 'valor do produto', 'receita'];
-  for (const c of candidates) if (row[c]) return row[c];
+  // usa a PRIMEIRA coluna candidata que existir na planilha, mesmo que o valor seja 0 — antes,
+  // um R$0,00 de verdade (ex: pedido cancelado, sem repasse) era tratado como "não tem essa
+  // coluna" e caía pra próxima candidata, ou pulava a linha inteira sem nem contar como pedido
+  for (const c of candidates) if (row[c] !== undefined && row[c] !== '' && row[c] !== null) return row[c];
   return null;
 }
 function guessDataField(row) {
@@ -8561,6 +8564,7 @@ function attachVendasHandlers(c) {
     // resumo diário por plataforma, de TODA linha — independente de o SKU já estar vinculado
     // ou não, pra "pedidos"/"ticket médio" ficarem certos desde já
     const resumoDiarioMap = new Map(); // "plataformaNome|data" -> { pedidos, unidades, faturamento }
+    const canceladosDiarioMap = new Map(); // "plataformaNome|data" -> { pedidos, unidades } — pedidos com R$0,00 (cancelado/sem repasse), separado pra não inflar "vendas"
     let temSku = false;
     let totalTaxas = 0;
     let totalTaxasReais = 0;
@@ -8568,9 +8572,8 @@ function attachVendasHandlers(c) {
 
     rows.forEach((row) => {
       const raw = guessValueField(row);
-      if (!raw) return;
+      if (raw === null) return; // coluna de valor nem existe nessa planilha — não dá pra processar essa linha de jeito nenhum
       const valor = parseBRNumber(String(raw));
-      if (!valor) return;
 
       const descricaoItem = guessDescricaoField(row, file.name);
       const dataDaLinhaPropria = guessDataField(row);
@@ -8582,12 +8585,19 @@ function attachVendasHandlers(c) {
       // número certo de vezes, precisa do preço por unidade, não do total do lote
       const qtdLinha = guessQuantidadeField(row) || 1;
       const pedidosLinha = guessPedidosField(row) || 1;
-      const valorUnitario = qtdLinha > 0 ? valor / qtdLinha : valor;
-      const taxaEscolhida = taxaDaPlataformaParaValor(plataformaLinha, valorUnitario);
-      const taxaPctLinha = taxaEscolhida.pct;
-      const taxaFixaLinha = taxaEscolhida.fixa;
-      const idPedidoLinha = guessIdPedidoField(row);
-      const chavePlataforma = plataformaLinha ? plataformaLinha.id : '_sem_plataforma';
+
+      // pedido com valor R$0,00 (cancelado, sem repasse, etc.) NÃO conta como venda real —
+      // fica só numa contagem separada, informativa, pra não dar a falsa impressão de que
+      // vendeu mais peças do que realmente vendeu. Não mexe em taxa, estoque, SKU pendente
+      // nem no resumo de "pedidos"/"unidades" que aparece pra você
+      if (!valor) {
+        const chaveCancel = `${plataformaLinha ? plataformaLinha.nome : ''}|${dataLinha}`;
+        const atualCancel = canceladosDiarioMap.get(chaveCancel) || { pedidos: 0, unidades: 0 };
+        atualCancel.pedidos += pedidosLinha;
+        atualCancel.unidades += qtdLinha;
+        canceladosDiarioMap.set(chaveCancel, atualCancel);
+        return;
+      }
 
       const chaveResumo = `${plataformaLinha ? plataformaLinha.nome : ''}|${dataLinha}`;
       const atualResumo = resumoDiarioMap.get(chaveResumo) || { pedidos: 0, unidades: 0, faturamento: 0 };
@@ -8595,6 +8605,13 @@ function attachVendasHandlers(c) {
       atualResumo.unidades += qtdLinha;
       atualResumo.faturamento += valor;
       resumoDiarioMap.set(chaveResumo, atualResumo);
+
+      const valorUnitario = qtdLinha > 0 ? valor / qtdLinha : valor;
+      const taxaEscolhida = taxaDaPlataformaParaValor(plataformaLinha, valorUnitario);
+      const taxaPctLinha = taxaEscolhida.pct;
+      const taxaFixaLinha = taxaEscolhida.fixa;
+      const idPedidoLinha = guessIdPedidoField(row);
+      const chavePlataforma = plataformaLinha ? plataformaLinha.id : '_sem_plataforma';
       if (idPedidoLinha) {
         if (!pedidosPorPlataforma.has(chavePlataforma)) pedidosPorPlataforma.set(chavePlataforma, new Set());
         pedidosPorPlataforma.get(chavePlataforma).add(idPedidoLinha.trim().toLowerCase());
@@ -8783,6 +8800,11 @@ function attachVendasHandlers(c) {
 
     const qtdVendas = novos.filter((n) => n.tipo === 'entrada').length;
     let resumo = `${qtdVendas} venda(s) importada(s).\n\n↩️ Se algo saiu errado, vá em "📜 Ver importações" pra desfazer essa importação inteira (restaura o estoque de antes automaticamente).`;
+    const pedidosCancelados = [...canceladosDiarioMap.values()].reduce((a, c) => a + c.pedidos, 0);
+    const unidadesCanceladas = [...canceladosDiarioMap.values()].reduce((a, c) => a + c.unidades, 0);
+    if (pedidosCancelados > 0) {
+      resumo += `\n\n🚫 ${pedidosCancelados} pedido(s) (${unidadesCanceladas} peça(s)) vieram com R$0,00 de pagamento — provavelmente cancelados ou sem repasse. Não contam como venda em nenhum número do Rosa (nem Pedidos, nem Unidades, nem Faturamento), só pra não dar impressão de venda que não teve.`;
+    }
     if (houveLinhaSemDataPropria && dataArquivoInfo.ehPeriodo) {
       resumo += `\n\n⚠️ Essa planilha resume um período de vários dias (não traz a data de cada venda individual) — lancei tudo com data ${new Date(dataArquivo + 'T00:00:00').toLocaleDateString('pt-BR')} (o último dia do período), só como referência. Se quiser separar por dia certinho, use um relatório de pedidos que traga a data de cada venda.`;
     }
