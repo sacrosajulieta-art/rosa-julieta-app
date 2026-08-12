@@ -7894,7 +7894,9 @@ function renderVendas(c) {
   // lucro líquido = lucro bruto menos os custos fixos do mês (aluguel, ferramentas, etc.),
   // sem dividir por produto — dá o número "não tem erro" pra saber se fechou no azul de verdade
   const custosFixosMes = c.txMes.filter((t) => t.tipo === 'saida' && t.natureza === 'fixo').reduce((a, t) => a + t.valor, 0);
-  const lucroLiquidoMes = lucroMes - custosFixosMes;
+  // lucro líquido de verdade também desconta os custos variáveis de marketing (ads, cupom) —
+  // antes só descontava custo fixo, o que dava uma impressão mais otimista do que a realidade
+  const lucroLiquidoMes = lucroMes - custosFixosMes - descontoCupomMes - gastoAdsMes;
 
   // evolução de faturamento nos últimos 6 meses (independe do período selecionado no filtro —
   // sempre usa como referência o mês em que o "até" do período cai)
@@ -8136,7 +8138,7 @@ function renderVendas(c) {
         </div>
       </div>
     ` : ''}
-    <div class="section-subtitle" style="margin-top:${faturamentoNaoVinculadoMes > 1 && pctVinculadoMes < 95 ? '10px' : '-8px'};margin-bottom:8px">Lucro bruto = venda − custo direto da peça (tecido, corte, mão de obra, insumos) − taxa da plataforma. Lucro líquido = lucro bruto − custos fixos no período (${fmt(custosFixosMes)}, ex: aluguel, ferramentas).${!temDadosDeLucro ? ' * Só considera vendas com produto identificado.' : ''}</div>
+    <div class="section-subtitle" style="margin-top:${faturamentoNaoVinculadoMes > 1 && pctVinculadoMes < 95 ? '10px' : '-8px'};margin-bottom:8px">Lucro bruto = venda − custo direto da peça (tecido, corte, mão de obra, insumos) − taxa da plataforma. Lucro líquido = lucro bruto − custos fixos (${fmt(custosFixosMes)}, ex: aluguel, ferramentas) − cupom (${fmt(descontoCupomMes)}) − ads (${fmt(gastoAdsMes)}).${!temDadosDeLucro ? ' * Só considera vendas com produto identificado.' : ''}</div>
 
     ${descontoCupomMes > 0 || gastoAdsMes > 0 ? `
       <div class="section-title-wrap" style="margin-top:20px">
