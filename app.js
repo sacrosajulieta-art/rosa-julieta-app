@@ -7717,7 +7717,11 @@ function renderVendas(c) {
   // "unidades" conta toda peça vendida (inclusive SKU pendente ainda não vinculado) — serve
   // pra comparar direto com o "Unidades Vendidas" que a Shopee/Upseller mostram, sem precisar
   // abrir a outra ferramenta pra conferir se bate
-  const unidadesResumoMesTotal = resumoDiarioMes.reduce((a, r) => a + r.unidades, 0);
+  // conta direto os lançamentos de venda (cada peça vendida = 1 lançamento), em vez de somar a
+  // tabela de resumo diário — essa tabela pode ter ficado incompleta em dias antigos (mesma
+  // falha silenciosa que achamos no dia 06/08), enquanto os lançamentos individuais são a fonte
+  // mais confiável (é o que a gente já conferiu bater 100% com as planilhas)
+  const unidadesResumoMesTotal = vendasMes.length;
   const qtdPedidosMes = pedidosUnicosMes.size > 0 ? pedidosUnicosMes.size : (pedidosResumoMesTotal || vendasMes.length);
   const ticketMedio = qtdPedidosMes > 0 ? faturamentoMes / qtdPedidosMes : 0;
 
