@@ -43,7 +43,7 @@ const CATEGORIAS_SAIDA = {
   ],
   'Custos variáveis': [
     'Tecido', 'Aviamento', 'Corte e costura (terceirizado)', 'Embalagem',
-    'Frete/Logística', 'Taxas de marketplace', 'Ads/Marketing',
+    'Frete/Logística', 'Taxas de marketplace', 'Desconto de cupom', 'Ads/Marketing',
     'Impostos sobre venda', 'Etiquetas/Tags', 'Reposição de estoque', 'Mão de obra — produção',
     'Cartão de crédito',
   ],
@@ -1676,7 +1676,7 @@ function calcularPreviaReversaoPorData(dataInicio, dataFim) {
   const fim = dataFim || dataInicio;
   const vendasDoDia = state.vendasDetalhe.filter((v) => v.data >= dataInicio && v.data <= fim);
   const txVendaDoDia = state.tx.filter((t) => t.data >= dataInicio && t.data <= fim && t.tipo === 'entrada' && t.categoria.startsWith('Venda'));
-  const txTaxaDoDia = state.tx.filter((t) => t.data >= dataInicio && t.data <= fim && t.tipo === 'saida' && t.categoria === 'Taxas de marketplace');
+  const txTaxaDoDia = state.tx.filter((t) => t.data >= dataInicio && t.data <= fim && t.tipo === 'saida' && (t.categoria === 'Taxas de marketplace' || t.categoria === 'Desconto de cupom'));
   const pendentesDoDia = state.vendasSkuPendentes.filter((v) => v.ultimaData >= dataInicio && v.ultimaData <= fim);
   // agrupa por produto + cor (quando a venda já tem a cor salva, dá pra devolver o estoque
   // certinho na cor certa — só cai em "sem saber a cor" pra vendas registradas ANTES desse
@@ -8319,6 +8319,30 @@ function attachVendasHandlers(c) {
     const dataArquivoInfo = guessDataFromFilename(file.name);
     const dataArquivo = dataArquivoInfo.data;
     let houveLinhaSemDataPropria = false;
+
+    // relatório de "desempenho de cupom" da Shopee (nome do arquivo começa com "voucher_",
+    // ou tem a coluna característica "Custo (Pedidos Pagos) (BRL)") — é bem diferente de um
+    // relatório de vendas: não lista peça por peça, só dá o custo TOTAL do dia gasto em cupom.
+    // Lança isso como uma despesa separada, pra reduzir o lucro do dia sem precisar saber
+    // exatamente qual pedido teve cupom — mais preciso que a taxa estimada sozinha
+    const ehRelatorioVoucher = /^voucher/i.test(file.name) || (rows[0] && 'custo (pedidos pagos) (brl)' in rows[0]);
+    if (ehRelatorioVoucher) {
+      const linha = rows[0];
+      if (!linha) { alert('Não consegui ler os dados desse relatório de cupom.'); e.target.value = ''; return; }
+      const custoCupom = parseBRNumber(String(linha['custo (pedidos pagos) (brl)'] || '0'));
+      const pedidosPagos = Number(linha['pedidos (pedidos pagos)'] || 0);
+      const dataCupom = dataArquivo || todayStr();
+      if (custoCupom <= 0) { alert('Esse relatório de cupom não tem custo nenhum registrado nesse dia — nada pra lançar.'); e.target.value = ''; return; }
+      if (!confirm(`Achei um relatório de desempenho de cupom (não é relatório de vendas).\n\nCusto total de cupom em ${new Date(dataCupom + 'T00:00:00').toLocaleDateString('pt-BR')}: ${fmt(custoCupom)} (afetou ${pedidosPagos} pedido(s) pagos)${plataforma ? ` — ${plataforma.nome}` : ''}.\n\nLançar isso como despesa nesse dia, pra descontar do lucro?`)) { e.target.value = ''; return; }
+      const txCupom = await addTx({
+        tipo: 'saida', valor: custoCupom, categoria: 'Desconto de cupom', natureza: 'variavel',
+        descricao: `Cupom${plataforma ? ' ' + plataforma.nome : ''} — custeado pela loja (${pedidosPagos} pedido(s) afetados)`, data: dataCupom,
+      });
+      await loadData();
+      if (txCupom) alert(`Lançado! ${fmt(custoCupom)} de cupom em ${new Date(dataCupom + 'T00:00:00').toLocaleDateString('pt-BR')}.`);
+      e.target.value = '';
+      return;
+    }
 
     // foto de como está tudo ANTES de processar — se algo der errado, dá pra restaurar
     // exatamente esse estado com o botão de desfazer, sem precisar recalcular nada
