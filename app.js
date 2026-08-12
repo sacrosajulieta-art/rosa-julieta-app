@@ -7993,6 +7993,7 @@ function renderVendas(c) {
         <div class="stat-icon" style="background:rgba(255,46,126,0.1)">🎯</div>
         <div class="stat-label">Ticket médio</div>
         <div class="stat-value">${fmt(ticketMedio)}</div>
+        ${unidadesResumoMesTotal > 0 ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">${fmt(unidadesResumoMesTotal > 0 ? faturamentoMes / unidadesResumoMesTotal : 0)} por peça (compare com "Preço Médio" da plataforma — ticket médio é por pedido, preço médio é por peça)</div>` : ''}
       </div>
       <div class="stat-card">
         <div class="stat-icon" style="background:rgba(0,212,160,0.1)">📈</div>
