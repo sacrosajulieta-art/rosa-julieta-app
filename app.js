@@ -584,7 +584,7 @@ async function loadData() {
   state.emprestimoParcelas = (emprestimoParcelas || []).map((p) => ({ id: p.id, emprestimoId: p.emprestimo_id, numero: p.numero, valor: Number(p.valor), dataVencimento: p.data_vencimento, transacaoId: p.transacao_id || null }));
   state.cartoesCredito = (cartoesCredito || []).map((c) => ({ id: c.id, nome: c.nome, limite: Number(c.limite || 0), diaFechamento: c.dia_fechamento, diaVencimento: c.dia_vencimento, ativo: c.ativo !== false }));
   state.vendasSkuPendentes = (vendasSkuPendentes || []).map((v) => ({ id: v.id, sku: v.sku, quantidade: Number(v.quantidade), faturamento: Number(v.faturamento), ultimaData: v.ultima_data, plataformaNome: v.plataforma_nome || null, descricao: v.descricao || null, varianteTexto: v.variante_texto || null, pedidos: Number(v.pedidos || v.quantidade || 1), taxa: Number(v.taxa || 0) }));
-  state.vendasDetalhe = (vendasDetalhe || []).map((v) => ({ id: v.id, produtoId: v.produto_id, plataformaId: v.plataforma_id, plataformaNome: v.plataforma_nome || null, sku: v.sku || null, quantidade: Number(v.quantidade), valor: Number(v.valor), data: v.data, pedidos: Number(v.pedidos || 1), taxa: Number(v.taxa || 0) }));
+  state.vendasDetalhe = (vendasDetalhe || []).map((v) => ({ id: v.id, produtoId: v.produto_id, varianteId: v.variante_id || null, plataformaId: v.plataforma_id, plataformaNome: v.plataforma_nome || null, sku: v.sku || null, quantidade: Number(v.quantidade), valor: Number(v.valor), data: v.data, pedidos: Number(v.pedidos || 1), taxa: Number(v.taxa || 0) }));
   state.abonosPonto = (abonosPonto || []).map((a) => ({ id: a.id, funcionariaId: a.funcionaria_id, data: a.data, tipo: a.tipo, motivo: a.motivo || '', horas: a.horas != null ? Number(a.horas) : null }));
   state.holerites = (holerites || []).map((h) => ({ id: h.id, funcionariaId: h.funcionaria_id, mes: h.mes, diasTrabalhados: Number(h.dias_trabalhados), salarioBase: Number(h.salario_base), horasExtras: Number(h.horas_extras), valorHorasExtras: Number(h.valor_horas_extras), horasExtras100: Number(h.horas_extras_100 || 0), valorHorasExtras100: Number(h.valor_horas_extras_100 || 0), modoHorasExtras: h.modo_horas_extras, horasFaltantes: Number(h.horas_faltantes), valorVt: Number(h.valor_vt), valorVr: Number(h.valor_vr), totalPagar: Number(h.total_pagar), assinadoEm: h.assinado_em || null, assinaturaImagem: h.assinatura_imagem || null, createdAt: h.created_at, numeroRecibo: h.numero_recibo || null, emitidoPor: h.emitido_por || null }));
   state.feriados = (feriados || []).map((f) => ({ id: f.id, data: f.data, nome: f.nome || '' }));
@@ -649,7 +649,7 @@ async function addTxBatch(rows) {
 async function addVendasDetalheBatch(rows) {
   if (!rows.length) return [];
   const { data, error } = await sb.from('vendas_detalhe').insert(rows.map((v) => ({
-    produto_id: v.produtoId, plataforma_id: v.plataformaId || null, plataforma_nome: v.plataformaNome || null, sku: v.sku || null, quantidade: v.quantidade, valor: v.valor, data: v.data, pedidos: v.pedidos || 1, taxa: v.taxa || 0,
+    produto_id: v.produtoId, variante_id: v.varianteId || null, plataforma_id: v.plataformaId || null, plataforma_nome: v.plataformaNome || null, sku: v.sku || null, quantidade: v.quantidade, valor: v.valor, data: v.data, pedidos: v.pedidos || 1, taxa: v.taxa || 0,
   }))).select('id');
   if (error) { console.error('Erro ao gravar detalhe de vendas: ' + error.message); return []; }
   return (data || []).map((r) => r.id);
@@ -1607,7 +1607,7 @@ async function vincularSkuPendente(pendenteId, produtoId, varianteId) {
   await atualizarPrecoVendaMedio(produtoId, pendente.faturamento, pendente.quantidade);
   await baixarEstoquePorFichaTecnica(produtoId, pendente.quantidade, pendente.ultimaData);
   const { error: errDetalhe } = await sb.from('vendas_detalhe').insert({
-    produto_id: produtoId, plataforma_nome: pendente.plataformaNome || null, sku: pendente.sku,
+    produto_id: produtoId, variante_id: varianteId || null, plataforma_nome: pendente.plataformaNome || null, sku: pendente.sku,
     quantidade: pendente.quantidade, valor: pendente.faturamento, data: pendente.ultimaData, pedidos: pendente.pedidos || pendente.quantidade, taxa: pendente.taxa || 0,
   });
   if (errDetalhe) { alert('Vinculei e já baixei o estoque, mas deu erro ao registrar o detalhe da venda (não vai aparecer no ranking/lucro): ' + errDetalhe.message); return; }
@@ -1678,16 +1678,34 @@ function calcularPreviaReversaoPorData(dataInicio, dataFim) {
   const txVendaDoDia = state.tx.filter((t) => t.data >= dataInicio && t.data <= fim && t.tipo === 'entrada' && t.categoria.startsWith('Venda'));
   const txTaxaDoDia = state.tx.filter((t) => t.data >= dataInicio && t.data <= fim && t.tipo === 'saida' && t.categoria === 'Taxas de marketplace');
   const pendentesDoDia = state.vendasSkuPendentes.filter((v) => v.ultimaData >= dataInicio && v.ultimaData <= fim);
-  const porProduto = {};
-  vendasDoDia.forEach((v) => { porProduto[v.produtoId] = (porProduto[v.produtoId] || 0) + v.quantidade; });
-  const semCor = [];
-  const comCor = [];
-  Object.entries(porProduto).forEach(([produtoId, qtd]) => {
-    const produto = state.produtos.find((p) => p.id === produtoId);
-    const vs = variantesDoProduto(produtoId);
-    (vs.length > 0 ? comCor : semCor).push({ produtoId, nome: produto?.nome || 'Produto removido', qtd });
+  // agrupa por produto + cor (quando a venda já tem a cor salva, dá pra devolver o estoque
+  // certinho na cor certa — só cai em "sem saber a cor" pra vendas registradas ANTES desse
+  // campo existir, ou quando realmente o produto não tem variante)
+  const porChave = {};
+  vendasDoDia.forEach((v) => {
+    const chave = `${v.produtoId}|${v.varianteId || ''}`;
+    if (!porChave[chave]) porChave[chave] = { produtoId: v.produtoId, varianteId: v.varianteId || null, qtd: 0 };
+    porChave[chave].qtd += v.quantidade;
   });
-  return { vendasDoDia, txVendaDoDia, txTaxaDoDia, semCor, comCor, pendentesDoDia, totalValor: txVendaDoDia.reduce((a, t) => a + t.valor, 0) };
+  const semCor = [];
+  const comCorConhecida = [];
+  const comCorDesconhecida = [];
+  Object.values(porChave).forEach((item) => {
+    const produto = state.produtos.find((p) => p.id === item.produtoId);
+    const vs = variantesDoProduto(item.produtoId);
+    const nome = produto?.nome || 'Produto removido';
+    if (vs.length === 0) {
+      semCor.push({ produtoId: item.produtoId, nome, qtd: item.qtd });
+    } else if (item.varianteId) {
+      const variante = state.variantes.find((v) => v.id === item.varianteId);
+      comCorConhecida.push({ produtoId: item.produtoId, varianteId: item.varianteId, nome: `${nome} — ${variante?.nome || 'cor removida'}`, qtd: item.qtd });
+    } else {
+      // venda antiga, registrada antes de guardar a cor — não tem como saber qual foi
+      comCorDesconhecida.push({ produtoId: item.produtoId, nome, qtd: item.qtd });
+    }
+  });
+  const comCor = comCorDesconhecida; // mantido pra não quebrar quem já usava esse nome
+  return { vendasDoDia, txVendaDoDia, txTaxaDoDia, semCor, comCorConhecida, comCor, pendentesDoDia, totalValor: txVendaDoDia.reduce((a, t) => a + t.valor, 0) };
 }
 // apaga uma lista grande de ids em lotes pequenos — o Supabase recusa (Bad Request) quando
 // a lista de ids na URL fica grande demais de uma vez só (acontece com 200+ registros).
@@ -1716,7 +1734,7 @@ async function deleteEmLotes(tabela, ids, tamanhoLote = 100) {
   return { error: null, count: ids.length - restantes.length, sobrou: restantes.length };
 }
 async function reverterVendasPorData(dataInicio, dataFim, apagarPendentesTambem) {
-  const { vendasDoDia, txVendaDoDia, txTaxaDoDia, semCor, pendentesDoDia } = calcularPreviaReversaoPorData(dataInicio, dataFim);
+  const { vendasDoDia, txVendaDoDia, txTaxaDoDia, semCor, comCorConhecida, pendentesDoDia } = calcularPreviaReversaoPorData(dataInicio, dataFim);
   for (const item of semCor) {
     const produto = state.produtos.find((p) => p.id === item.produtoId);
     if (produto) {
@@ -1725,6 +1743,24 @@ async function reverterVendasPorData(dataInicio, dataFim, apagarPendentesTambem)
         total_vendido: Math.max(0, (produto.totalVendido || 0) - item.qtd),
       }).eq('id', produto.id);
       if (errEstoque) { alert(`Erro ao devolver estoque de "${item.nome}": ${errEstoque.message}`); return false; }
+    }
+  }
+  // produto com cor CONHECIDA (venda salva com a variante certa) — devolve na cor certa, igual
+  // já fazia com "sem cor". Só cai em manual mesmo quando a venda é antiga e não tem essa info.
+  for (const item of comCorConhecida) {
+    const variante = state.variantes.find((v) => v.id === item.varianteId);
+    const produto = state.produtos.find((p) => p.id === item.produtoId);
+    if (variante) {
+      const { error: errEstoqueVar } = await sb.from('variantes').update({
+        estoque_atual: variante.estoqueAtual + item.qtd,
+      }).eq('id', variante.id);
+      if (errEstoqueVar) { alert(`Erro ao devolver estoque de "${item.nome}": ${errEstoqueVar.message}`); return false; }
+    }
+    if (produto) {
+      const { error: errTotalVendido } = await sb.from('produtos').update({
+        total_vendido: Math.max(0, (produto.totalVendido || 0) - item.qtd),
+      }).eq('id', produto.id);
+      if (errTotalVendido) console.error('Erro ao ajustar total vendido:', errTotalVendido);
     }
   }
   const idsVenda = vendasDoDia.map((v) => v.id);
@@ -7848,8 +7884,12 @@ function renderVendas(c) {
                   <div class="form-hint" style="margin-top:8px;color:var(--teal)">✅ Estoque será devolvido automático (sem cor):</div>
                   <div class="prod-breakdown">${p.semCor.map((i) => `<div class="prod-breakdown-item"><span>${esc(i.nome)}</span><span>+${i.qtd}</span></div>`).join('')}</div>
                 ` : ''}
+                ${p.comCorConhecida && p.comCorConhecida.length > 0 ? `
+                  <div class="form-hint" style="margin-top:8px;color:var(--teal)">✅ Estoque será devolvido automático (cor já registrada na venda):</div>
+                  <div class="prod-breakdown">${p.comCorConhecida.map((i) => `<div class="prod-breakdown-item"><span>${esc(i.nome)}</span><span>+${i.qtd}</span></div>`).join('')}</div>
+                ` : ''}
                 ${p.comCor.length > 0 ? `
-                  <div class="form-hint" style="margin-top:8px;color:var(--amber)">⚠️ Esses têm cor — o sistema não sabe qual vendeu, você redistribui na mão depois:</div>
+                  <div class="form-hint" style="margin-top:8px;color:var(--amber)">⚠️ Essas vendas são de antes de guardar a cor — o sistema não sabe qual vendeu, você redistribui na mão depois:</div>
                   <div class="prod-breakdown">${p.comCor.map((i) => `<div class="prod-breakdown-item"><span>${esc(i.nome)}</span><span>${i.qtd} peça(s)</span></div>`).join('')}</div>
                 ` : ''}
                 ${p.pendentesDoDia.length > 0 ? `
@@ -8186,14 +8226,14 @@ function attachVendasHandlers(c) {
       const rotuloPeriodo = dataInicio === dataFim
         ? new Date(dataInicio + 'T00:00:00').toLocaleDateString('pt-BR')
         : `${new Date(dataInicio + 'T00:00:00').toLocaleDateString('pt-BR')} até ${new Date(dataFim + 'T00:00:00').toLocaleDateString('pt-BR')}`;
-      if (!confirm(`Reverter todas as vendas de ${rotuloPeriodo}?\n\nIsso apaga os lançamentos e o detalhe de vendas desse período, e devolve o estoque dos produtos sem cor. Produtos com cor você redistribui na mão depois.\n\nConfirma?`)) return;
+      if (!confirm(`Reverter todas as vendas de ${rotuloPeriodo}?\n\nIsso apaga os lançamentos e o detalhe de vendas desse período, e devolve o estoque — inclusive de produtos com cor, quando a venda já tem a cor registrada. Vendas antigas sem essa informação salva você redistribui na mão depois.\n\nConfirma?`)) return;
       const apagarPendentes = document.getElementById('reversaoApagarPendentes')?.checked || false;
       const sucesso = await reverterVendasPorData(dataInicio, dataFim, apagarPendentes);
       window.__reversaoPrevia = null;
       window.__reversaoDataInicioSelecionada = null;
       window.__reversaoDataFimSelecionada = null;
       await loadData();
-      if (sucesso) alert('Revertido! Confere o estoque dos produtos com cor pra redistribuir manualmente.');
+      if (sucesso) alert('Revertido! Se sobrou algum produto com cor da lista "não sabe qual vendeu" (venda antiga), confere e redistribui manualmente.');
     });
   });
 
@@ -8439,9 +8479,9 @@ function attachVendasHandlers(c) {
           }
           deducoes.set(produto.id, atual);
 
-          const chaveDetalhe = `${produto.id}|${plataformaLinha ? plataformaLinha.id : ''}|${dataLinha}`;
+          const chaveDetalhe = `${produto.id}|${variante ? variante.id : ''}|${plataformaLinha ? plataformaLinha.id : ''}|${dataLinha}`;
           const atualDetalhe = detalhesVendas.get(chaveDetalhe) || {
-            produtoId: produto.id, plataformaId: plataformaLinha ? plataformaLinha.id : null,
+            produtoId: produto.id, varianteId: variante ? variante.id : null, plataformaId: plataformaLinha ? plataformaLinha.id : null,
             plataformaNome: plataformaLinha ? plataformaLinha.nome : null, sku: sku.trim(), quantidade: 0, valor: 0, data: dataLinha, pedidos: 0, taxa: 0,
           };
           atualDetalhe.quantidade += qtd;
