@@ -8189,21 +8189,21 @@ function renderVendas(c) {
     </div>
 
     <div class="section-title-wrap">
-      <div><div class="section-title">Comparação entre plataformas</div><div class="section-subtitle">No mês selecionado</div></div>
+      <div><div class="section-title">Comparação entre plataformas</div><div class="section-subtitle">No período selecionado</div></div>
     </div>
-    ${comparacaoPlataformas.length === 0 ? `<div class="empty-state">Nenhuma venda nesse mês ainda.</div>` : `
-      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:24px">
+    ${comparacaoPlataformas.length === 0 ? `<div class="empty-state">Nenhuma venda nesse período ainda.</div>` : `
+      <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:24px">
         ${comparacaoPlataformas.map((p) => `
-          <div class="alert-card" style="border-color:var(--border)">
-            <div class="alert-card-row">
-              <div style="flex:1">
-                <div class="alert-name">${esc(p.nome)}</div>
-                <div class="alert-meta">${p.pedidos} pedido(s) · ticket médio ${fmt(p.ticketMedio)}</div>
-                <div style="margin-top:6px;background:rgba(255,255,255,0.06);border-radius:6px;overflow:hidden;height:8px">
-                  <div style="height:100%;width:${(p.faturamento / maiorFaturamentoPlataforma) * 100}%;background:var(--teal);border-radius:6px"></div>
-                </div>
+          <div style="display:flex;align-items:center;gap:8px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:8px;padding:6px 10px">
+            <div style="flex:1;min-width:0">
+              <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(p.nome)}</div>
+              <div style="height:4px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden;margin-top:3px">
+                <div style="height:100%;width:${(p.faturamento / maiorFaturamentoPlataforma) * 100}%;background:var(--teal);border-radius:3px"></div>
               </div>
-              <div class="tx-valor" style="color:var(--teal);margin-left:12px">${fmt(p.faturamento)}</div>
+            </div>
+            <div style="flex:0 0 auto;text-align:right;font-size:12px;white-space:nowrap">
+              <div style="color:var(--teal);font-weight:600">${fmt(p.faturamento)}</div>
+              <div style="color:var(--text-muted)">${p.pedidos} ped. · ${fmt(p.ticketMedio)}</div>
             </div>
           </div>
         `).join('')}
