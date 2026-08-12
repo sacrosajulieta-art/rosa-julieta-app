@@ -459,6 +459,7 @@ const state = {
   showContasAVencer: false,
   showProdutosParados: false,
   showProdutosSemCor: false,
+  ordenarRankingPor: 'quantidade',
   showSkusPendentes: false,
   showVendaManualForm: false,
   variantes: [],
@@ -7878,7 +7879,12 @@ function renderVendas(c) {
   });
   // lucro líquido de verdade: venda - custo de produção (tecido, corte, mão de obra,
   // insumos) - taxa da plataforma. É esse número que diz se o preço de venda está bom
-  const rankingProdutos = [...porProduto.values()].map((p) => ({ ...p, lucro: p.valor - p.custo - p.taxa })).sort((a, b) => b.quantidade - a.quantidade).slice(0, 30);
+  const ordenarRankingPor = state.ordenarRankingPor || 'quantidade';
+  const rankingProdutosBase = [...porProduto.values()].map((p) => ({ ...p, lucro: p.valor - p.custo - p.taxa, margem: p.valor > 0 ? ((p.valor - p.custo - p.taxa) / p.valor) * 100 : 0 }));
+  const rankingProdutos = (ordenarRankingPor === 'margem'
+    ? [...rankingProdutosBase].sort((a, b) => a.margem - b.margem) // pior margem primeiro — é o que precisa de atenção
+    : [...rankingProdutosBase].sort((a, b) => b.quantidade - a.quantidade)
+  ).slice(0, 30);
   const maiorQtdRanking = Math.max(1, ...rankingProdutos.map((p) => p.quantidade));
   const lucroMes = [...porProduto.values()].reduce((a, p) => a + (p.valor - p.custo - p.taxa), 0);
   const temDadosDeLucro = detalheMes.length > 0;
@@ -8211,8 +8217,12 @@ function renderVendas(c) {
     `}
 
     <div class="section-title-wrap">
-      <div><div class="section-title">Ranking de produtos mais vendidos</div><div class="section-subtitle">No período selecionado</div></div>
-      ${renderControleColunas('rankingProdutos')}
+      <div><div class="section-title">Ranking de produtos ${ordenarRankingPor === 'margem' ? '— pior margem primeiro' : 'mais vendidos'}</div><div class="section-subtitle">No período selecionado</div></div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <button class="toggle-btn ${ordenarRankingPor === 'quantidade' ? 'active-teal' : ''}" data-ordenar-ranking="quantidade">Mais vendidos</button>
+        <button class="toggle-btn ${ordenarRankingPor === 'margem' ? 'active-teal' : ''}" data-ordenar-ranking="margem">Pior margem</button>
+        ${renderControleColunas('rankingProdutos')}
+      </div>
     </div>
     ${rankingProdutos.length === 0 ? `<div class="empty-state">Nenhum SKU vinculado vendeu nesse período ainda (ou é um período anterior a esse recurso — o ranking por período só existe a partir de agora).</div>` : `
       <div style="display:grid;grid-template-columns:${gridColumnsStyle('rankingProdutos', 320)};gap:6px;margin-bottom:24px">
@@ -8222,11 +8232,11 @@ function renderVendas(c) {
             <div style="flex:1;min-width:0">
               <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(p.nome)}</div>
               <div style="height:4px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden;margin-top:3px">
-                <div style="height:100%;width:${(p.quantidade / maiorQtdRanking) * 100}%;background:var(--pink);border-radius:3px"></div>
+                <div style="height:100%;width:${ordenarRankingPor === 'margem' ? Math.min(100, Math.max(0, p.margem)) : (p.quantidade / maiorQtdRanking) * 100}%;background:${ordenarRankingPor === 'margem' && p.margem < 15 ? 'var(--amber)' : 'var(--pink)'};border-radius:3px"></div>
               </div>
             </div>
             <div style="flex:0 0 auto;text-align:right;font-size:12px;white-space:nowrap">
-              <div><strong>${p.quantidade}</strong> un</div>
+              <div><strong>${p.quantidade}</strong> un · <span style="color:${p.margem >= 15 ? 'var(--teal)' : 'var(--amber)'}">${p.margem.toFixed(0)}%</span></div>
               <div style="color:${p.lucro >= 0 ? 'var(--teal)' : 'var(--red)'}">${fmt(p.lucro)}</div>
             </div>
           </div>
@@ -8253,6 +8263,10 @@ function renderVendas(c) {
 
 function attachVendasHandlers(c) {
   wireSeletorPeriodo('vendas');
+
+  document.querySelectorAll('[data-ordenar-ranking]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.ordenarRankingPor = btn.dataset.ordenarRanking; render(); });
+  });
 
   const toggleUpload = document.getElementById('toggleUpload');
   if (toggleUpload) toggleUpload.addEventListener('click', () => { state.showUpload = !state.showUpload; render(); });
