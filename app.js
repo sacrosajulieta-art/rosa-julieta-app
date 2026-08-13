@@ -6135,7 +6135,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
     <div class="stats-grid">
       <div class="stat-card">
         <div class="stat-icon" style="background:${saldoBancoHoras >= 0 ? 'rgba(0,212,160,0.1)' : 'rgba(255,71,87,0.1)'}">🏦</div>
-        <div class="stat-label">Saldo no banco de horas</div>
+        <div class="stat-label">Saldo no banco de horas (acumulado desde sempre)</div>
         <div class="stat-value" style="color:${saldoBancoHoras >= 0 ? 'var(--teal)' : 'var(--red)'}">${saldoBancoHoras >= 0 ? '+' : '-'}${formatarHorasMin(saldoBancoHoras)}</div>
       </div>
     </div>
