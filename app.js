@@ -462,6 +462,7 @@ const state = {
   showContasAVencer: false,
   showProdutosParados: false,
   showProdutosSemCor: false,
+  sincronizando: false,
   ordenarRankingPor: 'quantidade',
   showSkusPendentes: false,
   showVendaManualForm: false,
@@ -572,6 +573,10 @@ async function fetchAllRows(tabela, colunaOrdem, ascending) {
   return linhas;
 }
 async function loadData() {
+  // mostra um aviso pequeno de "sincronizando" sem cobrir a tela inteira (o spinner de tela
+  // cheia é só pra primeira vez que o app abre) — antes disso, qualquer ação (bater ponto,
+  // lançar produção, etc.) processava em silêncio total, parecendo travado
+  if (!state.loading) { state.sincronizando = true; render(); }
   // essas duas tabelas crescem muito rápido (cada peça vendida = 1 linha), então buscam
   // paginado em paralelo com o resto, pra nunca cortar dado antigo por engano
   const [tx, vendasDetalhe, producoes, distribuicoes] = await Promise.all([
@@ -668,6 +673,7 @@ async function loadData() {
   state.kitComponentes = (kitComponentes || []).map((k) => ({ id: k.id, produtoKitId: k.produto_kit_id, componenteProdutoId: k.componente_produto_id, componenteVarianteId: k.componente_variante_id || null, quantidade: Number(k.quantidade) }));
   state.vendasResumoDiario = (vendasResumoDiario || []).map((r) => ({ id: r.id, plataformaNome: r.plataforma_nome || null, data: r.data, pedidos: Number(r.pedidos), unidades: Number(r.unidades), faturamento: Number(r.faturamento) }));
   state.loading = false;
+  state.sincronizando = false;
   render();
 }
 
@@ -4870,6 +4876,20 @@ function renderGate(app) {
 }
 
 function render() {
+  // indicador pequeno de "sincronizando", num elemento próprio fora do #app — assim não some
+  // toda vez que o #app é redesenhado, e não precisa cobrir a tela inteira feito o loading
+  // inicial. Sem isso, qualquer ação (bater ponto, lançar produção) processava em silêncio,
+  // dando a impressão de estar travado
+  let syncEl = document.getElementById('sync-indicator');
+  if (!syncEl) {
+    syncEl = document.createElement('div');
+    syncEl.id = 'sync-indicator';
+    syncEl.style.cssText = 'position:fixed;top:10px;right:10px;background:rgba(20,20,20,0.92);color:#fff;padding:6px 12px;border-radius:20px;font-size:12px;z-index:99999;display:none;align-items:center;gap:6px;pointer-events:none;box-shadow:0 2px 8px rgba(0,0,0,0.4)';
+    syncEl.innerHTML = '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#ff2e7e"></span> Salvando...';
+    document.body.appendChild(syncEl);
+  }
+  syncEl.style.display = (state.sincronizando && !state.loading) ? 'flex' : 'none';
+
   const app = document.getElementById('app');
   if (state.loading) {
     app.innerHTML = `<div class="loading-wrap"><div class="spinner"></div></div>`;
@@ -9431,6 +9451,7 @@ function attachProducaoHandlers(c) {
 
     const salvarDetalhe = document.getElementById('salvarDetalheProducao');
     if (salvarDetalhe) salvarDetalhe.addEventListener('click', async () => {
+      if (salvarDetalhe.disabled) return; // já está salvando, ignora clique duplicado
       const costureiraId = salvarDetalhe.dataset.costureira;
       const produtoId = document.getElementById('detalheProduto').value;
       const varianteSelect = document.getElementById('detalheVariante');
@@ -9461,6 +9482,9 @@ function attachProducaoHandlers(c) {
           valorAjuste = 0; // erro de corte/tecido ou outro motivo: não desconta nada dela
         }
       }
+      const textoOriginalBtn = salvarDetalhe.textContent;
+      salvarDetalhe.disabled = true;
+      salvarDetalhe.textContent = 'Salvando...';
       await registrarProducao(costureiraId, produtoId, quantidade, data, varianteId || null, jaPago, origemVarianteId, motivoDefeito, valorAjuste);
       state.showProducaoForm = false;
       window.__prodDetalheTipo = 'producao';
