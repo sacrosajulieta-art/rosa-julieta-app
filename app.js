@@ -6058,10 +6058,10 @@ function renderFuncionariaDetalhe(funcionariaId) {
           const pontosDoDia = porDia[dia].sort((a, b) => new Date(a.horario) - new Date(b.horario));
           const calc = f ? calcularHorasDia(pontosDoDia, f, dia) : null;
           const abonoDoDia = state.abonosPonto.find((a) => a.funcionariaId === funcionariaId && a.data === dia);
-          const temFalta = !!(calc && calc.completo && calc.diferenca < 0);
+          const temFalta = !!(calc && calc.diferenca < 0);
           const faltaAbonadaTotal = !!(abonoDoDia && temFalta && abonoDoDia.horas == null);
           const faltaRestanteParcial = (abonoDoDia && temFalta && abonoDoDia.horas != null) ? Math.max(0, Math.abs(calc.diferenca) - abonoDoDia.horas) : null;
-          if (calc && calc.completo && !faltaAbonadaTotal) {
+          if (calc && !faltaAbonadaTotal) {
             if (calc.diferenca >= 0) totalExtra += calc.diferenca;
             else if (faltaRestanteParcial !== null) totalFalta += faltaRestanteParcial;
             else totalFalta += Math.abs(calc.diferenca);
@@ -6070,13 +6070,16 @@ function renderFuncionariaDetalhe(funcionariaId) {
             <div class="produto-card">
               <div class="produto-header">
                 <div><div class="produto-nome">${dia}</div></div>
-                ${faltaAbonadaTotal ? `
-                  <span style="font-size:11px;color:var(--teal)">✅ Abonado (${formatarHorasMin(calc.diferenca)} não descontado)</span>
-                ` : faltaRestanteParcial !== null ? `
-                  <span style="font-size:11px;color:${faltaRestanteParcial > 0 ? 'var(--red)' : 'var(--teal)'}">🏦 ${formatarHorasMin(abonoDoDia.horas)} do saldo${faltaRestanteParcial > 0 ? ` · ainda falta ${formatarHorasMin(faltaRestanteParcial)}` : ' · cobriu tudo'}</span>
-                ` : calc && calc.completo ? `
-                  <div class="dre-td-num ${calc.diferenca >= 0 ? 'dre-positivo' : 'dre-negativo'}" style="font-size:13px">${calc.diferenca >= 0 ? '+' : '-'}${formatarHorasMin(calc.diferenca)}</div>
-                ` : `<span style="font-size:11px;color:var(--amber)">⚠️ incompleto</span>`}
+                <div style="display:flex;align-items:center;gap:8px">
+                  ${!calc || !calc.completo ? `<span style="font-size:11px;color:var(--amber)">⚠️ incompleto</span>` : ''}
+                  ${faltaAbonadaTotal ? `
+                    <span style="font-size:11px;color:var(--teal)">✅ Abonado (${formatarHorasMin(calc.diferenca)} não descontado)</span>
+                  ` : faltaRestanteParcial !== null ? `
+                    <span style="font-size:11px;color:${faltaRestanteParcial > 0 ? 'var(--red)' : 'var(--teal)'}">🏦 ${formatarHorasMin(abonoDoDia.horas)} do saldo${faltaRestanteParcial > 0 ? ` · ainda falta ${formatarHorasMin(faltaRestanteParcial)}` : ' · cobriu tudo'}</span>
+                  ` : calc ? `
+                    <div class="dre-td-num ${calc.diferenca >= 0 ? 'dre-positivo' : 'dre-negativo'}" style="font-size:13px">${calc.diferenca >= 0 ? '+' : '-'}${formatarHorasMin(calc.diferenca)}</div>
+                  ` : ''}
+                </div>
               </div>
               <div class="prod-breakdown">
                 ${pontosDoDia.map((p) => {
