@@ -6127,6 +6127,18 @@ function renderFuncionariaDetalhe(funcionariaId) {
           <div class="stat-label">Horas faltantes no período</div>
           <div class="stat-value" style="color:var(--red)">-${formatarHorasMin(totalFalta)}</div>
         </div>
+        ${extratoBancoMes ? (() => {
+          const saldoTempoReal = extratoBancoMes.saldoAnterior + totalExtra - totalFalta;
+          const periodoBateComMesHolerite = inicio === `${mesHolerite}-01` && monthKey(fim) === mesHolerite;
+          return `
+            <div class="stat-card">
+              <div class="stat-icon" style="background:${saldoTempoReal >= 0 ? 'rgba(0,212,160,0.1)' : 'rgba(255,71,87,0.1)'}">📡</div>
+              <div class="stat-label">Saldo total em tempo real</div>
+              <div class="stat-value" style="color:${saldoTempoReal >= 0 ? 'var(--teal)' : 'var(--red)'}">${saldoTempoReal >= 0 ? '+' : '-'}${formatarHorasMin(saldoTempoReal)}</div>
+              <div class="form-hint" style="margin-top:2px">${extratoBancoMes.saldoAnterior >= 0 ? '+' : '-'}${formatarHorasMin(extratoBancoMes.saldoAnterior)} de antes + esse período, sem esperar fechar o holerite${!periodoBateComMesHolerite ? ` ⚠️ o período acima (dias) não é o mês inteiro de ${mesLabelHolerite(mesHolerite)} — ajusta o filtro de data pra esse número ficar preciso` : ''}</div>
+            </div>
+          `;
+        })() : ''}
       </div>
     ` : ''}
 
