@@ -463,6 +463,7 @@ const state = {
   showProdutosParados: false,
   showProdutosSemCor: false,
   sincronizando: false,
+  adiantamentos: [],
   ordenarRankingPor: 'quantidade',
   showSkusPendentes: false,
   showVendaManualForm: false,
@@ -585,7 +586,7 @@ async function loadData() {
     fetchAllRows('producoes', 'data', false),
     fetchAllRows('distribuicoes', 'data', false),
   ]);
-  const [{ data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }, { data: feriasTiradas, error: e16 }, { data: solicitacoesPonto, error: e17 }, { data: horasExtrasLiquidadas, error: e18 }, { data: bancoHorasLancamentos, error: e19 }, { data: emprestimos, error: e20 }, { data: emprestimoParcelas, error: e21 }, { data: cartoesCredito, error: e22 }, { data: vendasSkuPendentes, error: e23 }, { data: abonosPonto, error: e25 }, { data: holerites, error: e26 }, { data: feriados, error: e27 }, { data: empresaConfig, error: e28 }, { data: importacoesVendas, error: e29 }, { data: kitComponentes, error: e30 }, { data: vendasResumoDiario, error: e31 }] = await Promise.all([
+  const [{ data: produtos, error: e2 }, { data: plataformas, error: e3 }, { data: costureiras, error: e4 }, { data: variantes, error: e6 }, { data: materiaPrima, error: e7 }, { data: ordensCorte, error: e8 }, { data: ordensCorteItens, error: e9 }, { data: insumos, error: e10 }, { data: fichaTecnicaItens, error: e12 }, { data: insumoPlataformaQtd, error: e13 }, { data: funcionarias, error: e14 }, { data: pontos, error: e15 }, { data: feriasTiradas, error: e16 }, { data: solicitacoesPonto, error: e17 }, { data: horasExtrasLiquidadas, error: e18 }, { data: bancoHorasLancamentos, error: e19 }, { data: emprestimos, error: e20 }, { data: emprestimoParcelas, error: e21 }, { data: cartoesCredito, error: e22 }, { data: vendasSkuPendentes, error: e23 }, { data: abonosPonto, error: e25 }, { data: holerites, error: e26 }, { data: feriados, error: e27 }, { data: empresaConfig, error: e28 }, { data: importacoesVendas, error: e29 }, { data: kitComponentes, error: e30 }, { data: vendasResumoDiario, error: e31 }, { data: adiantamentos, error: e32 }] = await Promise.all([
     sb.from('produtos').select('*').order('created_at', { ascending: false }),
     sb.from('plataformas').select('*').order('nome', { ascending: true }),
     sb.from('costureiras').select('*').order('nome', { ascending: true }),
@@ -613,6 +614,7 @@ async function loadData() {
     sb.from('importacoes_vendas').select('id, nome_arquivo, transacao_ids, vendas_detalhe_ids, sku_pendente_ids, desfeita, created_at').order('created_at', { ascending: false }).limit(10),
     sb.from('kit_componentes').select('*'),
     sb.from('vendas_resumo_diario').select('*'),
+    sb.from('adiantamentos').select('*').order('data', { ascending: false }),
   ]);
   if (e2) console.error(e2);
   if (e3) console.error(e3);
@@ -641,6 +643,7 @@ async function loadData() {
   if (e29) console.error(e29);
   if (e30) console.error(e30);
   if (e31) console.error(e31);
+  if (e32) console.error(e32);
   state.tx = (tx || []).map(mapTxFromDb);
   state.produtos = (produtos || []).map(mapProdutoFromDb);
   state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0), taxaFaixas: Array.isArray(p.taxa_faixas) ? p.taxa_faixas : [] }));
@@ -672,6 +675,7 @@ async function loadData() {
   state.importacoesVendas = (importacoesVendas || []).map((i) => ({ id: i.id, nomeArquivo: i.nome_arquivo || 'Importação', transacaoIds: i.transacao_ids || [], vendasDetalheIds: i.vendas_detalhe_ids || [], skuPendenteIds: i.sku_pendente_ids || [], desfeita: i.desfeita, createdAt: i.created_at }));
   state.kitComponentes = (kitComponentes || []).map((k) => ({ id: k.id, produtoKitId: k.produto_kit_id, componenteProdutoId: k.componente_produto_id, componenteVarianteId: k.componente_variante_id || null, quantidade: Number(k.quantidade) }));
   state.vendasResumoDiario = (vendasResumoDiario || []).map((r) => ({ id: r.id, plataformaNome: r.plataforma_nome || null, data: r.data, pedidos: Number(r.pedidos), unidades: Number(r.unidades), faturamento: Number(r.faturamento) }));
+  state.adiantamentos = (adiantamentos || []).map((a) => ({ id: a.id, funcionariaId: a.funcionaria_id, data: a.data, valor: Number(a.valor), motivo: a.motivo || '', transacaoId: a.transacao_id || null }));
   state.loading = false;
   state.sincronizando = false;
   render();
@@ -2170,12 +2174,35 @@ async function removeBancoHorasLancamento(id) {
 // fecha o holerite de um mês: grava o registro congelado, lança a saída no Financeiro
 // (se as horas extras forem pagas em dinheiro), e movimenta o banco de horas (crédito se
 // escolheu banco pras extras, débito sempre que tem falta não abonada)
+// registra um adiantamento/vale — lança a saída no Financeiro na data escolhida (pode ser uma
+// data passada, tipo ontem) e guarda o vínculo com a funcionária + mês, pra descontar
+// automático quando fechar o holerite daquele mês
+async function registrarAdiantamento(funcionariaId, data, valor, motivo) {
+  const funcionaria = state.funcionarias.find((f) => f.id === funcionariaId);
+  const tx = await addTx({
+    tipo: 'saida', valor, categoria: 'Funcionários — salário', natureza: 'fixo',
+    descricao: `Adiantamento/vale — ${funcionaria?.nome || ''}${motivo ? ` (${motivo})` : ''}`, data,
+  });
+  const { error } = await sb.from('adiantamentos').insert({
+    funcionaria_id: funcionariaId, data, valor, motivo: motivo || null, transacao_id: tx ? tx.id : null,
+  });
+  if (error) alert('Erro ao registrar adiantamento: ' + error.message);
+}
+async function removerAdiantamento(id) {
+  const a = state.adiantamentos.find((x) => x.id === id);
+  if (a?.transacaoId) await removeTx(a.transacaoId);
+  const { error } = await sb.from('adiantamentos').delete().eq('id', id);
+  if (error) alert('Erro ao remover adiantamento: ' + error.message);
+}
 async function fecharHolerite(funcionaria, mesKey, resumo, modoHorasExtras, valorVtFinal, valorVrFinal, dataPagamento) {
   const dataLancamento = dataPagamento || todayStr();
+  // adiantamento/vale já pago nesse mês desconta do total — já saiu da conta antes, não pode
+  // sair de novo no fechamento
+  const totalAdiantamentosMes = state.adiantamentos.filter((a) => a.funcionariaId === funcionaria.id && a.data.slice(0, 7) === mesKey).reduce((acc, a) => acc + a.valor, 0);
   const totalPagar = resumo.salarioBase
     + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras : 0)
     + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras100 : 0)
-    + valorVtFinal + valorVrFinal;
+    + valorVtFinal + valorVrFinal - totalAdiantamentosMes;
   const { error: errHolerite } = await sb.from('holerites').upsert({
     funcionaria_id: funcionaria.id, mes: mesKey, dias_trabalhados: resumo.diasTrabalhados,
     salario_base: resumo.salarioBase, horas_extras: resumo.horasExtras, valor_horas_extras: resumo.valorHorasExtras,
@@ -2187,14 +2214,17 @@ async function fecharHolerite(funcionaria, mesKey, resumo, modoHorasExtras, valo
   if (errHolerite) { alert('Erro ao fechar holerite: ' + errHolerite.message); return; }
 
   const mesLabelTexto = new Date(mesKey + '-01T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
-  const valorSalarioEExtras = resumo.salarioBase
+  // o adiantamento desconta primeiro do salário/extras (a parte mais provável de ter sido
+  // "adiantada"), sem deixar o valor lançado ficar negativo
+  const valorSalarioEExtrasBruto = resumo.salarioBase
     + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras : 0)
     + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras100 : 0);
+  const valorSalarioEExtras = Math.max(0, valorSalarioEExtrasBruto - totalAdiantamentosMes);
   const valorBeneficios = valorVtFinal + valorVrFinal;
   if (valorSalarioEExtras > 0) {
     await addTx({
       tipo: 'saida', valor: valorSalarioEExtras, categoria: 'Funcionários — salário', natureza: 'fixo',
-      descricao: `Holerite ${funcionaria.nome} — ${mesLabelTexto}`, data: dataLancamento,
+      descricao: `Holerite ${funcionaria.nome} — ${mesLabelTexto}${totalAdiantamentosMes > 0 ? ` (já descontado ${fmt(totalAdiantamentosMes)} de adiantamento)` : ''}`, data: dataLancamento,
     });
   }
   if (valorBeneficios > 0) {
@@ -2490,7 +2520,10 @@ function calcularResumoHolerite(funcionaria, mesKey) {
     const pontosDoDia = state.pontos.filter((p) => p.funcionariaId === funcionaria.id && p.data === dataStr);
     if (pontosDoDia.length === 0) continue;
     const calc = calcularHorasDia(pontosDoDia, funcionaria, dataStr);
-    if (!calc.completo) continue;
+    // dia incompleto (ex: bateu entrada e saída de almoço, mas foi embora passando mal e não
+    // bateu o resto) NÃO é mais ignorado — conta as horas que ela realmente trabalhou (pelos
+    // pontos que existem) e o resto da jornada vira falta, igual um dia normal. Só não desconta
+    // se tiver abono pra esse dia — assim você decide, o sistema não assume sozinho
     diasTrabalhados++;
     horasTrabalhadasTotal += calc.horasTrabalhadas;
     // domingo ou feriado: todas as horas trabalhadas nesse dia pagam 100% (dobra), não entram
@@ -6253,7 +6286,35 @@ function renderFuncionariaDetalhe(funcionariaId) {
           <button class="toggle-btn ${(window.__holeriteModoExtras || f.modoCompensacaoPadrao) === 'banco' ? 'active-pink' : ''}" data-holerite-modo-extras="banco">🏦 Banco de horas</button>
         </div>
         <div class="form-hint" style="margin-top:10px">Horas faltantes não abonadas sempre viram débito no banco de horas — ela paga trabalhando depois.</div>
-        <div class="form-row" style="margin-top:10px">
+
+        <div class="form-hint" style="margin-top:14px;margin-bottom:2px">💸 Adiantamento/vale (desconta automático do holerite desse mês)</div>
+        ${(() => {
+          const adiantamentosDoMes = state.adiantamentos.filter((a) => a.funcionariaId === funcionariaId && a.data.slice(0, 7) === mesHolerite).sort((a, b) => a.data.localeCompare(b.data));
+          const totalAdiantamentosDoMes = adiantamentosDoMes.reduce((acc, a) => acc + a.valor, 0);
+          return `
+            ${adiantamentosDoMes.length > 0 ? `
+              <div class="prod-breakdown">
+                ${adiantamentosDoMes.map((a) => `<div class="prod-breakdown-item"><span>${dataFmt(a.data)}${a.motivo ? ` — ${esc(a.motivo)}` : ''}</span><span>${fmt(a.valor)} <button class="trash-btn" data-remover-adiantamento="${a.id}" style="margin-left:6px">🗑</button></span></div>`).join('')}
+                <div class="prod-breakdown-item"><span><strong>Total já adiantado esse mês</strong></span><span><strong>${fmt(totalAdiantamentosDoMes)}</strong></span></div>
+              </div>
+            ` : `<div class="form-hint" style="color:var(--text-muted)">Nenhum adiantamento lançado em ${mesLabelHolerite(mesHolerite)} ainda.</div>`}
+            <button class="entrada-btn" type="button" id="toggleNovoAdiantamento" style="margin-top:6px">＋ Registrar adiantamento/vale</button>
+            ${state.showNovoAdiantamento ? `
+              <div class="form-row" style="margin-top:8px">
+                <input type="text" id="novoAdiantamentoValor" placeholder="Valor (ex: 100,00)" />
+                <input type="date" id="novoAdiantamentoData" value="${todayStr()}" />
+              </div>
+              <input type="text" id="novoAdiantamentoMotivo" placeholder="Motivo (opcional)" style="margin-top:6px" />
+              <div class="form-row" style="margin-top:6px">
+                <button class="confirm-btn" id="salvarNovoAdiantamento" data-funcionaria="${funcionariaId}">Salvar adiantamento</button>
+                <button class="toggle-btn" id="cancelarNovoAdiantamento">Cancelar</button>
+              </div>
+            ` : ''}
+          `;
+        })()}
+
+        <div class="form-hint" style="margin-top:14px;margin-bottom:2px">VT/VR do mês</div>
+        <div class="form-row">
           <input type="text" id="holeriteVt" placeholder="VT mensal fixo" value="${resumoHolerite.valorVt.toFixed(2).replace('.', ',')}" />
           <input type="text" id="holeriteVr" placeholder="VR mensal fixo" value="${resumoHolerite.valorVr.toFixed(2).replace('.', ',')}" />
         </div>
@@ -6556,8 +6617,9 @@ function attachRHHandlers(c) {
         const modoHorasExtras = window.__holeriteModoExtras || funcionaria.modoCompensacaoPadrao;
         const valorVt = parseBRNumber(document.getElementById('holeriteVt').value) || 0;
         const valorVr = parseBRNumber(document.getElementById('holeriteVr').value) || 0;
-        const totalPagar = resumo.salarioBase + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras : 0) + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras100 : 0) + valorVt + valorVr;
-        window.__previaHoleriteData = { modoHorasExtras, valorVt, valorVr, totalPagar };
+        const totalAdiantamentosMes = state.adiantamentos.filter((a) => a.funcionariaId === funcionariaId && a.data.slice(0, 7) === mesKey).reduce((acc, a) => acc + a.valor, 0);
+        const totalPagar = resumo.salarioBase + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras : 0) + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras100 : 0) + valorVt + valorVr - totalAdiantamentosMes;
+        window.__previaHoleriteData = { modoHorasExtras, valorVt, valorVr, totalPagar, totalAdiantamentosMes };
         state.showPreviaHolerite = true;
         render();
       });
@@ -6586,9 +6648,10 @@ function attachRHHandlers(c) {
       const valorVt = parseBRNumber(document.getElementById('holeriteVt').value) || 0;
       const valorVr = parseBRNumber(document.getElementById('holeriteVr').value) || 0;
       const dataPagamento = document.getElementById('holeriteDataPagamento')?.value || todayStr();
-      const totalPagar = resumo.salarioBase + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras : 0) + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras100 : 0) + valorVt + valorVr;
+      const totalAdiantamentosMes = state.adiantamentos.filter((a) => a.funcionariaId === funcionariaId && a.data.slice(0, 7) === mesKey).reduce((acc, a) => acc + a.valor, 0);
+      const totalPagar = resumo.salarioBase + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras : 0) + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras100 : 0) + valorVt + valorVr - totalAdiantamentosMes;
       const dataPagamentoFmt = new Date(dataPagamento + 'T00:00:00').toLocaleDateString('pt-BR');
-      if (!confirm(`Fechar o holerite de ${funcionaria.nome}?\n\nTotal a pagar: ${fmt(totalPagar)}\nData do lançamento: ${dataPagamentoFmt}\n\nIsso lança a saída no Financeiro e movimenta o banco de horas. Confirma?`)) return;
+      if (!confirm(`Fechar o holerite de ${funcionaria.nome}?\n\nTotal a pagar: ${fmt(totalPagar)}${totalAdiantamentosMes > 0 ? ` (já descontado ${fmt(totalAdiantamentosMes)} de adiantamento)` : ''}\nData do lançamento: ${dataPagamentoFmt}\n\nIsso lança a saída no Financeiro e movimenta o banco de horas. Confirma?`)) return;
       await fecharHolerite(funcionaria, mesKey, resumo, modoHorasExtras, valorVt, valorVr, dataPagamento);
       window.__holeriteModoExtras = null;
       await loadData();
