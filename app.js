@@ -640,7 +640,7 @@ async function loadData() {
   state.produtos = (produtos || []).map(mapProdutoFromDb);
   state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0), taxaFaixas: Array.isArray(p.taxa_faixas) ? p.taxa_faixas : [] }));
   state.costureiras = (costureiras || []).map((c) => ({ id: c.id, nome: c.nome, ativa: c.ativa, metaSemanal: c.meta_semanal || 0 }));
-  state.producoes = (producoes || []).map((p) => ({ id: p.id, costureiraId: p.costureira_id, produtoId: p.produto_id, quantidade: p.quantidade, data: p.data, pago: p.pago, varianteId: p.variante_id || null, abateVarianteId: 'abate_variante_id' in p ? p.abate_variante_id : undefined, motivoDefeito: p.motivo_defeito || null, valorAjuste: p.valor_ajuste != null ? Number(p.valor_ajuste) : null }));
+  state.producoes = (producoes || []).map((p) => ({ id: p.id, costureiraId: p.costureira_id, produtoId: p.produto_id, quantidade: p.quantidade, data: p.data, pago: p.pago, varianteId: p.variante_id || null, abateVarianteId: 'abate_variante_id' in p ? p.abate_variante_id : undefined, motivoDefeito: p.motivo_defeito || null, valorAjuste: p.valor_ajuste != null ? Number(p.valor_ajuste) : null, abateDistribuicoes: Array.isArray(p.abate_distribuicoes) ? p.abate_distribuicoes.map((x) => ({ distribuicaoId: x.distribuicaoId, quantidade: x.quantidade })) : null }));
   state.variantes = (variantes || []).map((v) => ({ id: v.id, produtoId: v.produto_id, nome: v.nome, estoqueAtual: v.estoque_atual, skuVariante: v.sku_variante }));
   state.materiaPrima = (materiaPrima || []).map((m) => ({ id: m.id, cor: m.cor, rolosDisponiveis: m.rolos_disponiveis, custoMedioRolo: Number(m.custo_medio_rolo || 0) }));
   state.ordensCorte = (ordensCorte || []).map((o) => ({ id: o.id, cor: o.cor, quantidadeRolos: o.quantidade_rolos, valorTecido: Number(o.valor_tecido), dataEnvio: o.data_envio, status: o.status, dataConclusao: o.data_conclusao, tipo: o.tipo || 'principal', valorCorte: Number(o.valor_corte || 0), transacaoCorteId: o.transacao_corte_id || null, grupoId: o.grupo_id || null }));
@@ -1430,22 +1430,47 @@ function gerarEspelhoPontoPDF(funcionaria, mesKey) {
   }
 }
 // baixa automática (FIFO) do que a costureira tem em mãos, quando ela devolve peças prontas
+// abate as distribuições (levas) mais antigas primeiro (FIFO), e devolve exatamente de QUAIS
+// levas tirou e quanto de cada — isso é guardado no lançamento, pra se ele for excluído depois,
+// a devolução saber exatamente aonde devolver, em vez de adivinhar "a mais recente" (que pode
+// ser uma leva diferente da que foi usada de verdade, se a costureira tiver mais de uma leva
+// aberta do mesmo produto/cor ao mesmo tempo)
 async function baixarDistribuicoesFIFO(costureiraId, produtoId, varianteId, quantidadeDevolvida) {
   let restante = quantidadeDevolvida;
+  const abatidoPorDistribuicao = [];
   const abertas = state.distribuicoes
     .filter((d) => d.costureiraId === costureiraId && d.produtoId === produtoId && (d.varianteId || null) === (varianteId || null) && d.quantidadeDevolvida < d.quantidadeDistribuida)
-    .sort((a, b) => a.data.localeCompare(b.data));
+    .sort((a, b) => a.data.localeCompare(b.data) || a.id.localeCompare(b.id));
   for (const d of abertas) {
     if (restante <= 0) break;
     const disponivel = d.quantidadeDistribuida - d.quantidadeDevolvida;
     const abate = Math.min(disponivel, restante);
     const { error } = await sb.from('distribuicoes').update({ quantidade_devolvida: d.quantidadeDevolvida + abate }).eq('id', d.id);
-    if (error) { console.error('Erro ao abater distribuição:', error); alert('Erro ao atualizar "peças em mãos": ' + error.message); return; }
+    if (error) { console.error('Erro ao abater distribuição:', error); alert('Erro ao atualizar "peças em mãos": ' + error.message); return abatidoPorDistribuicao; }
+    abatidoPorDistribuicao.push({ distribuicaoId: d.id, quantidade: abate });
     restante -= abate;
   }
+  return abatidoPorDistribuicao;
 }
-// desfaz devoluções já registradas (das mais recentes pra trás), pra "devolver" peças às mãos da costureira
-async function restaurarDistribuicoesLIFO(costureiraId, produtoId, varianteId, quantidadeARestaurar) {
+// desfaz devoluções já registradas. Se receber um "breakdown" (de qual lançamento exato ele
+// veio), devolve EXATAMENTE pras mesmas levas, na mesma quantidade — sem adivinhar. Só cai na
+// adivinhação "mais recente primeiro" (LIFO) pra lançamentos antigos, de antes desse controle
+// existir, que não têm essa informação salva
+async function restaurarDistribuicoesLIFO(costureiraId, produtoId, varianteId, quantidadeARestaurar, breakdown) {
+  if (breakdown && breakdown.length > 0) {
+    let restanteBreakdown = quantidadeARestaurar;
+    for (const item of breakdown) {
+      if (restanteBreakdown <= 0) break;
+      const d = state.distribuicoes.find((x) => x.id === item.distribuicaoId);
+      if (!d) continue; // leva foi excluída de vez, não tem como devolver nela — pula
+      const restaura = Math.min(item.quantidade, d.quantidadeDevolvida, restanteBreakdown);
+      if (restaura <= 0) continue;
+      const { error } = await sb.from('distribuicoes').update({ quantidade_devolvida: d.quantidadeDevolvida - restaura }).eq('id', d.id);
+      if (error) { console.error('Erro ao restaurar distribuição:', error); alert('Erro ao devolver peças pra "em mãos": ' + error.message); return restanteBreakdown; }
+      restanteBreakdown -= restaura;
+    }
+    return restanteBreakdown;
+  }
   let restante = quantidadeARestaurar;
   const comDevolucao = state.distribuicoes
     .filter((d) => d.costureiraId === costureiraId && d.produtoId === produtoId && (d.varianteId || null) === (varianteId || null) && d.quantidadeDevolvida > 0)
@@ -2601,7 +2626,7 @@ async function removeCostureira(id) {
 // null explícito = abater da leva "sem cor" (produto sem variante)
 async function registrarProducao(costureiraId, produtoId, quantidade, data, varianteId, jaPago, origemVarianteId, motivoDefeito, valorAjuste) {
   const varianteParaAbater = origemVarianteId !== undefined ? origemVarianteId : varianteId;
-  const { error } = await sb.from('producoes').insert({ costureira_id: costureiraId, produto_id: produtoId, quantidade, data, pago: !!jaPago, variante_id: varianteId || null, abate_variante_id: varianteParaAbater || null, motivo_defeito: motivoDefeito || null, valor_ajuste: valorAjuste !== undefined ? valorAjuste : null });
+  const { data: linhaCriada, error } = await sb.from('producoes').insert({ costureira_id: costureiraId, produto_id: produtoId, quantidade, data, pago: !!jaPago, variante_id: varianteId || null, abate_variante_id: varianteParaAbater || null, motivo_defeito: motivoDefeito || null, valor_ajuste: valorAjuste !== undefined ? valorAjuste : null }).select('id').single();
   if (error) { alert('Erro ao registrar produção: ' + error.message); return; }
   // só peça BOA entregue (quantidade > 0) entra no estoque de venda — defeito nunca chegou a
   // virar peça vendável, então não pode tirar estoque que nunca foi somado
@@ -2615,8 +2640,16 @@ async function registrarProducao(costureiraId, produtoId, quantidade, data, vari
     }
   }
   // já a fila de "peças em mãos" da costureira desconta sempre, seja peça boa ou defeito — nos
-  // dois casos a peça saiu das mãos dela (ou virou produto, ou foi descartada como defeito)
-  if (quantidade !== 0) await baixarDistribuicoesFIFO(costureiraId, produtoId, varianteParaAbater, Math.abs(quantidade));
+  // dois casos a peça saiu das mãos dela (ou virou produto, ou foi descartada como defeito).
+  // guarda de QUAIS levas tirou, pra se esse lançamento for excluído depois, saber devolver
+  // certinho pra elas — sem precisar adivinhar
+  if (quantidade !== 0 && linhaCriada) {
+    const breakdown = await baixarDistribuicoesFIFO(costureiraId, produtoId, varianteParaAbater, Math.abs(quantidade));
+    if (breakdown && breakdown.length > 0) {
+      const { error: errBreakdown } = await sb.from('producoes').update({ abate_distribuicoes: breakdown }).eq('id', linhaCriada.id);
+      if (errBreakdown) console.error('Erro ao salvar de qual leva veio o abate:', errBreakdown);
+    }
+  }
   // peças de verdade entregues (não defeito) já consomem os insumos de "produção" da ficha técnica, tipo etiqueta
   if (quantidade > 0) await baixarInsumosProducao(produtoId, quantidade, data);
 }
@@ -2644,14 +2677,13 @@ async function removeProducao(id) {
       }
     }
     // devolve a peça pra fila de "em mãos" da costureira (desfaz o abate feito no lançamento) —
-    // usa a variante que foi abatida de verdade (pode ser diferente da variante da peça, se veio
-    // de uma leva de cor mista). Lançamentos de ANTES dessa coluna existir não têm essa info
-    // salva — em vez de adivinhar (arriscado, pode devolver pra leva errada), a gente pula o
-    // ajuste automático e avisa pra conferir na mão
-    if (p.abateVarianteId === undefined) {
+    // se souber exatamente de quais levas ele tirou (abateDistribuicoes), devolve certinho pra
+    // elas, sem adivinhar. Lançamentos de ANTES dessa coluna existir não têm essa info salva —
+    // nesse caso cai no aviso manual (pra não arriscar devolver pra leva errada)
+    if (p.abateVarianteId === undefined && !p.abateDistribuicoes) {
       avisoManual = true;
     } else if (p.quantidade !== 0) {
-      await restaurarDistribuicoesLIFO(p.costureiraId, p.produtoId, p.abateVarianteId, Math.abs(p.quantidade));
+      await restaurarDistribuicoesLIFO(p.costureiraId, p.produtoId, p.abateVarianteId, Math.abs(p.quantidade), p.abateDistribuicoes);
     }
   }
   const { error } = await sb.from('producoes').delete().eq('id', id);
@@ -2669,7 +2701,7 @@ async function updateProducao(id, novo) {
   // lançamento de antes da coluna abate_variante_id existir: não dá pra saber com certeza de
   // qual leva ele tirou, então não mexe na fila de "em mãos" pra não arriscar bagunçar a leva
   // errada — só avisa pra conferir na mão
-  if (antigo.abateVarianteId === undefined) {
+  if (antigo.abateVarianteId === undefined && !antigo.abateDistribuicoes) {
     if (novo.quantidade !== antigo.quantidade) {
       alert('Quantidade atualizada, mas esse lançamento é de antes de eu conseguir salvar de qual leva ele veio — não mexi na fila de "peças em mãos" pra não arriscar. Confere e ajusta na mão se precisar.');
     }
@@ -2679,11 +2711,11 @@ async function updateProducao(id, novo) {
       // mesma "chave" de distribuição (produto + variante abatida não muda) — só ajusta a diferença
       const delta = novo.quantidade - antigo.quantidade;
       if (delta > 0) await baixarDistribuicoesFIFO(antigo.costureiraId, antigo.produtoId, varianteAbatida, delta);
-      else if (delta < 0) await restaurarDistribuicoesLIFO(antigo.costureiraId, antigo.produtoId, varianteAbatida, Math.abs(delta));
+      else if (delta < 0) await restaurarDistribuicoesLIFO(antigo.costureiraId, antigo.produtoId, varianteAbatida, Math.abs(delta), antigo.abateDistribuicoes);
     } else {
       // trocou de produto: desfaz tudo do produto antigo e refaz no novo (só produtos sem cor
       // trocam de produto na edição, então não tem variante abatida específica pra manter)
-      if (antigo.quantidade !== 0) await restaurarDistribuicoesLIFO(antigo.costureiraId, antigo.produtoId, varianteAbatida, Math.abs(antigo.quantidade));
+      if (antigo.quantidade !== 0) await restaurarDistribuicoesLIFO(antigo.costureiraId, antigo.produtoId, varianteAbatida, Math.abs(antigo.quantidade), antigo.abateDistribuicoes);
       if (novo.quantidade !== 0) await baixarDistribuicoesFIFO(antigo.costureiraId, novo.produtoId, null, Math.abs(novo.quantidade));
     }
   }
