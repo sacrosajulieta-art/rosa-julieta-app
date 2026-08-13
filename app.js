@@ -2089,7 +2089,8 @@ async function registrarPonto(funcionariaId, tipo) {
   const { error } = await sb.from('pontos').insert({
     funcionaria_id: funcionariaId, data: todayStr(), tipo, horario: agora.toISOString(), origem: 'propria',
   });
-  if (error) alert('Erro ao bater ponto: ' + error.message);
+  if (error) { alert('Erro ao bater ponto: ' + error.message); return false; }
+  return true;
 }
 async function updatePonto(id, horarioISO) {
   const { error } = await sb.from('pontos').update({ horario: horarioISO, origem: 'manual' }).eq('id', id);
@@ -3519,9 +3520,22 @@ function renderModoPonto(app) {
 
   const baterBtn = document.getElementById('baterPonto');
   if (baterBtn) baterBtn.addEventListener('click', async () => {
+    if (baterBtn.disabled) return; // já está processando, ignora clique duplicado
     const tipo = baterBtn.dataset.tipo;
-    if (!confirm(`Confirmar ${LABEL_PONTO[tipo]} agora (${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })})?`)) return;
-    await registrarPonto(funcionaria.id, tipo);
+    if (tiposJaBatidos.has(tipo)) {
+      const jaBatido = pontosHoje.find((p) => p.tipo === tipo);
+      const horaJaBatida = jaBatido ? new Date(jaBatido.horario).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+      if (!confirm(`Você já registrou ${LABEL_PONTO[tipo]} hoje às ${horaJaBatida}.\n\nTem certeza que quer registrar de novo? Isso vai criar um segundo registro do mesmo tipo.`)) return;
+    } else if (!confirm(`Confirmar ${LABEL_PONTO[tipo]} agora (${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })})?`)) return;
+    baterBtn.disabled = true;
+    const textoOriginal = baterBtn.textContent;
+    baterBtn.textContent = 'Registrando...';
+    const sucesso = await registrarPonto(funcionaria.id, tipo);
+    if (!sucesso) {
+      baterBtn.disabled = false;
+      baterBtn.textContent = textoOriginal;
+      return;
+    }
     await loadData();
   });
 
