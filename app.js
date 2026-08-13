@@ -662,7 +662,7 @@ async function loadData() {
   state.pontos = (pontos || []).map((p) => ({ id: p.id, funcionariaId: p.funcionaria_id, data: p.data, tipo: p.tipo, horario: p.horario, origem: p.origem || 'propria' }));
   state.solicitacoesPonto = (solicitacoesPonto || []).map((s) => ({ id: s.id, funcionariaId: s.funcionaria_id, data: s.data, tipo: s.tipo, horarioSolicitado: s.horario_solicitado, motivo: s.motivo || '', status: s.status, createdAt: s.created_at }));
   state.horasExtrasLiquidadas = (horasExtrasLiquidadas || []).map((h) => ({ id: h.id, funcionariaId: h.funcionaria_id, data: h.data, horas: Number(h.horas), modo: h.modo, valorPago: h.valor_pago != null ? Number(h.valor_pago) : null }));
-  state.bancoHorasLancamentos = (bancoHorasLancamentos || []).map((b) => ({ id: b.id, funcionariaId: b.funcionaria_id, data: b.data, tipo: b.tipo, horas: Number(b.horas), descricao: b.descricao || '' }));
+  state.bancoHorasLancamentos = (bancoHorasLancamentos || []).map((b) => ({ id: b.id, funcionariaId: b.funcionaria_id, data: b.data, tipo: b.tipo, horas: Number(b.horas), descricao: b.descricao || '', mesReferencia: b.mes_referencia || null }));
   state.emprestimos = (emprestimos || []).map((e) => ({ id: e.id, descricao: e.descricao, instituicao: e.instituicao || '', valorRecebido: Number(e.valor_recebido), numeroParcelas: e.numero_parcelas, valorParcela: Number(e.valor_parcela), dataRecebimento: e.data_recebimento, dataPrimeiraParcela: e.data_primeira_parcela, transacaoRecebimentoId: e.transacao_recebimento_id || null }));
   state.emprestimoParcelas = (emprestimoParcelas || []).map((p) => ({ id: p.id, emprestimoId: p.emprestimo_id, numero: p.numero, valor: Number(p.valor), dataVencimento: p.data_vencimento, transacaoId: p.transacao_id || null }));
   state.cartoesCredito = (cartoesCredito || []).map((c) => ({ id: c.id, nome: c.nome, limite: Number(c.limite || 0), diaFechamento: c.dia_fechamento, diaVencimento: c.dia_vencimento, ativo: c.ativo !== false }));
@@ -2150,7 +2150,7 @@ async function salvarAbono(funcionariaId, data, tipo, motivo, horasParciais) {
   if (horasParciais > 0) {
     const dataFmt = new Date(data + 'T00:00:00').toLocaleDateString('pt-BR');
     const { error: errBanco } = await sb.from('banco_horas_lancamentos').insert({
-      funcionaria_id: funcionariaId, data: todayStr(), tipo: 'debito', horas: -horasParciais,
+      funcionaria_id: funcionariaId, data: todayStr(), mes_referencia: data.slice(0, 7), tipo: 'debito', horas: -horasParciais,
       descricao: `${formatarHorasMin(horasParciais)} usadas do saldo em ${dataFmt}${motivo ? ' — ' + motivo : ''}`,
     });
     if (errBanco) console.error(errBanco);
@@ -2161,9 +2161,9 @@ async function removeAbono(id) {
   if (error) alert('Erro ao remover abono: ' + error.message);
 }
 // edita um lançamento manual do banco de horas (corrige tipo/horas/descrição de algo já lançado)
-async function updateBancoHorasLancamento(id, tipo, horas, descricao) {
+async function updateBancoHorasLancamento(id, tipo, horas, descricao, mesReferencia) {
   const { error } = await sb.from('banco_horas_lancamentos').update({
-    tipo, horas: tipo === 'debito' ? -Math.abs(horas) : Math.abs(horas), descricao: descricao || null,
+    tipo, horas: tipo === 'debito' ? -Math.abs(horas) : Math.abs(horas), descricao: descricao || null, mes_referencia: mesReferencia || null,
   }).eq('id', id);
   if (error) alert('Erro ao editar lançamento: ' + error.message);
 }
@@ -2236,7 +2236,7 @@ async function fecharHolerite(funcionaria, mesKey, resumo, modoHorasExtras, valo
 
   if (modoHorasExtras === 'banco' && resumo.horasExtras > 0) {
     const { error } = await sb.from('banco_horas_lancamentos').insert({
-      funcionaria_id: funcionaria.id, data: dataLancamento, tipo: 'credito', horas: resumo.horasExtras,
+      funcionaria_id: funcionaria.id, data: dataLancamento, mes_referencia: mesKey, tipo: 'credito', horas: resumo.horasExtras,
       descricao: `Horas extras de ${mesLabelTexto} convertidas em banco de horas`,
     });
     if (error) console.error(error);
@@ -2244,14 +2244,14 @@ async function fecharHolerite(funcionaria, mesKey, resumo, modoHorasExtras, valo
   if (modoHorasExtras === 'banco' && resumo.horasExtras100 > 0) {
     // domingo/feriado credita em dobro no banco de horas (1h trabalhada = 2h de folga depois)
     const { error } = await sb.from('banco_horas_lancamentos').insert({
-      funcionaria_id: funcionaria.id, data: dataLancamento, tipo: 'credito', horas: resumo.horasExtras100 * 2,
+      funcionaria_id: funcionaria.id, data: dataLancamento, mes_referencia: mesKey, tipo: 'credito', horas: resumo.horasExtras100 * 2,
       descricao: `Horas de domingo/feriado de ${mesLabelTexto} convertidas em banco de horas (em dobro)`,
     });
     if (error) console.error(error);
   }
   if (resumo.horasFaltantes > 0) {
     const { error } = await sb.from('banco_horas_lancamentos').insert({
-      funcionaria_id: funcionaria.id, data: dataLancamento, tipo: 'debito', horas: -resumo.horasFaltantes,
+      funcionaria_id: funcionaria.id, data: dataLancamento, mes_referencia: mesKey, tipo: 'debito', horas: -resumo.horasFaltantes,
       descricao: `Faltas não abonadas de ${mesLabelTexto} — a compensar trabalhando`,
     });
     if (error) console.error(error);
@@ -2480,8 +2480,13 @@ function calcularExtratoBancoHoras(funcionariaId, mesKey) {
   const [ano, mes] = mesKey.split('-').map(Number);
   const ultimoDiaMes = `${mesKey}-${String(new Date(ano, mes, 0).getDate()).padStart(2, '0')}`;
   const lancamentos = state.bancoHorasLancamentos.filter((b) => b.funcionariaId === funcionariaId);
-  const saldoAnterior = lancamentos.filter((b) => b.data < primeiroDiaMes).reduce((a, b) => a + b.horas, 0);
-  const doMes = lancamentos.filter((b) => b.data >= primeiroDiaMes && b.data <= ultimoDiaMes);
+  // usa o "mês de referência" quando ele existir (guardado separado da data real do
+  // lançamento) — assim um saldo de julho que só foi lançado em agosto (ex: fechamento de
+  // folha feito com atraso) continua contando como "de julho", sem precisar mexer na data
+  // real do registro (que fica intacta, pra auditoria)
+  const chaveMes = (b) => b.mesReferencia || b.data.slice(0, 7);
+  const saldoAnterior = lancamentos.filter((b) => chaveMes(b) < mesKey).reduce((a, b) => a + b.horas, 0);
+  const doMes = lancamentos.filter((b) => chaveMes(b) === mesKey);
   const produzido = doMes.filter((b) => b.horas > 0).reduce((a, b) => a + b.horas, 0);
   const consumido = doMes.filter((b) => b.horas < 0).reduce((a, b) => a + Math.abs(b.horas), 0);
   const saldoFinal = saldoAnterior + produzido - consumido;
@@ -3484,10 +3489,11 @@ function renderModoPonto(app) {
       `}
 
       ${(() => {
-        const saldoBanco = state.bancoHorasLancamentos.filter((b) => b.funcionariaId === funcionaria.id).reduce((a, b) => a + b.horas, 0);
         const mesAtual = todayStr().slice(0, 7);
         const resumoMes = calcularResumoHolerite(funcionaria, mesAtual);
         const saldoMes = resumoMes.horasExtras + resumoMes.horasExtras100 - resumoMes.horasFaltantes;
+        const extratoBancoMesPonto = calcularExtratoBancoHoras(funcionaria.id, mesAtual);
+        const saldoTempoRealPonto = extratoBancoMesPonto.saldoAnterior + saldoMes;
         return `
           <div class="stats-grid" style="margin-bottom:24px">
             <div class="stat-card">
@@ -3496,9 +3502,10 @@ function renderModoPonto(app) {
               <div class="stat-value" style="color:${saldoMes >= 0 ? 'var(--teal)' : 'var(--red)'}">${saldoMes >= 0 ? '+' : '-'}${formatarHorasMin(saldoMes)}</div>
             </div>
             <div class="stat-card">
-              <div class="stat-icon" style="background:${saldoBanco >= 0 ? 'rgba(0,212,160,0.1)' : 'rgba(255,71,87,0.1)'}">🏦</div>
-              <div class="stat-label">Banco de horas</div>
-              <div class="stat-value" style="color:${saldoBanco >= 0 ? 'var(--teal)' : 'var(--red)'}">${saldoBanco >= 0 ? '+' : '-'}${formatarHorasMin(saldoBanco)}</div>
+              <div class="stat-icon" style="background:${saldoTempoRealPonto >= 0 ? 'rgba(0,212,160,0.1)' : 'rgba(255,71,87,0.1)'}">🏦</div>
+              <div class="stat-label">Banco de horas (total)</div>
+              <div class="stat-value" style="color:${saldoTempoRealPonto >= 0 ? 'var(--teal)' : 'var(--red)'}">${saldoTempoRealPonto >= 0 ? '+' : '-'}${formatarHorasMin(saldoTempoRealPonto)}</div>
+              <div class="form-hint" style="margin-top:2px;font-size:10px">Já soma o saldo de meses anteriores + esse mês, em tempo real</div>
             </div>
           </div>
         `;
@@ -6197,6 +6204,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
                     <input type="text" id="editBancoHorasM-${b.id}" placeholder="Minutos" value="${mEdit}" inputmode="numeric" />
                   </div>
                   <input type="text" id="editBancoDescricao-${b.id}" placeholder="Descrição" value="${esc(b.descricao || '')}" />
+                  <input type="month" id="editBancoMesRef-${b.id}" value="${b.mesReferencia || b.data.slice(0, 7)}" style="margin-top:8px" />
                   <div class="form-row" style="margin-top:8px">
                     <button class="confirm-btn" data-salvar-edit-banco="${b.id}">Salvar</button>
                     <button class="toggle-btn" data-cancelar-edit-banco="1">Cancelar</button>
@@ -6209,7 +6217,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
               <div class="tx-dot" style="background:${b.horas >= 0 ? 'var(--teal)' : 'var(--red)'}"></div>
               <div style="flex:1">
                 <div class="tx-categoria">${b.tipo === 'credito' ? '➕ Crédito' : '➖ Débito'}${b.descricao ? ` — ${esc(b.descricao)}` : ''}</div>
-                <div class="tx-date">${new Date(b.data + 'T00:00:00').toLocaleDateString('pt-BR')}</div>
+                <div class="tx-date">${new Date(b.data + 'T00:00:00').toLocaleDateString('pt-BR')}${b.mesReferencia && b.mesReferencia !== b.data.slice(0, 7) ? ` · referente a ${new Date(b.mesReferencia + '-01T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}` : ''}</div>
               </div>
               <div class="tx-valor" style="margin-right:6px;color:${b.horas >= 0 ? 'var(--teal)' : 'var(--red)'}">${b.horas >= 0 ? '+' : '-'}${formatarHorasMin(b.horas)}</div>
               <button class="trash-btn" data-editar-banco="${b.id}">✏️</button>
@@ -6231,6 +6239,8 @@ function renderFuncionariaDetalhe(funcionariaId) {
           <input type="text" id="lancBancoHorasM" placeholder="Minutos (ex: 54)" inputmode="numeric" />
         </div>
         <input type="text" id="lancBancoDescricao" placeholder="Descrição (ex: saldo de junho, antes do sistema)" />
+        <input type="month" id="lancBancoMesRef" value="${todayStr().slice(0, 7)}" style="margin-top:8px" />
+        <div class="form-hint" style="margin-top:-4px">De qual mês é esse saldo? A data de hoje fica guardada certinho (não mexe nisso), só o "mês de referência" que muda — assim, se for saldo de um mês anterior, ele entra certo na conta do "saldo de antes" sem precisar alterar a data real do lançamento.</div>
         <button class="confirm-btn" style="margin-top:8px" data-salvar-lanc-banco="${funcionariaId}">Lançar</button>
       </div>
     ` : ''}
@@ -6520,8 +6530,9 @@ function attachRHHandlers(c) {
         const m = Number(document.getElementById(`editBancoHorasM-${id}`).value) || 0;
         const horas = h + m / 60;
         const descricao = document.getElementById(`editBancoDescricao-${id}`).value.trim();
+        const mesRefEdit = document.getElementById(`editBancoMesRef-${id}`)?.value || original.mesReferencia || original.data.slice(0, 7);
         if (!horas || horas <= 0) { alert('Informe as horas ou minutos.'); return; }
-        await updateBancoHorasLancamento(id, tipo, horas, descricao);
+        await updateBancoHorasLancamento(id, tipo, horas, descricao, mesRefEdit);
         state.editingBancoHorasId = null;
         window.__editBancoTipo = null;
         await loadData();
@@ -6593,11 +6604,12 @@ function attachRHHandlers(c) {
       const mLanc = Number(document.getElementById('lancBancoHorasM').value) || 0;
       const horasDigitadas = hLanc + mLanc / 60;
       const descricao = document.getElementById('lancBancoDescricao').value.trim();
+      const mesRefLanc = document.getElementById('lancBancoMesRef')?.value || todayStr().slice(0, 7);
       const tipo = window.__tipoLancBanco || 'credito';
       if (!horasDigitadas || horasDigitadas <= 0) { alert('Informe a quantidade de horas ou minutos.'); return; }
       const horas = tipo === 'debito' ? -horasDigitadas : horasDigitadas;
       const { error } = await sb.from('banco_horas_lancamentos').insert({
-        funcionaria_id: funcionariaId, data: todayStr(), tipo, horas, descricao: descricao || null,
+        funcionaria_id: funcionariaId, data: todayStr(), mes_referencia: mesRefLanc, tipo, horas, descricao: descricao || null,
       });
       if (error) { alert('Erro ao lançar: ' + error.message); return; }
       state.showLancamentoBanco = false;
