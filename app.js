@@ -1462,6 +1462,30 @@ async function baixarDistribuicoesFIFO(costureiraId, produtoId, varianteId, quan
   }
   return abatidoPorDistribuicao;
 }
+// abate de UMA leva específica, escolhida na mão (por id) — pra quando a costureira tem mais
+// de uma leva aberta da mesma cor/combinação, e a pessoa lançando sabe exatamente de qual
+// veio essa peça (em vez de deixar o FIFO decidir sozinho, que pega sempre a mais antiga e
+// pode escolher a leva errada quando tem mais de uma em aberto)
+async function baixarDeDistribuicaoEspecifica(distribuicaoId, quantidade) {
+  const d = state.distribuicoes.find((x) => x.id === distribuicaoId);
+  if (!d) return [];
+  const disponivel = d.quantidadeDistribuida - d.quantidadeDevolvida;
+  const abate = Math.min(disponivel, quantidade);
+  const abatidoPorDistribuicao = [];
+  if (abate > 0) {
+    const { error } = await sb.from('distribuicoes').update({ quantidade_devolvida: d.quantidadeDevolvida + abate }).eq('id', d.id);
+    if (error) { console.error('Erro ao abater distribuição específica:', error); alert('Erro ao atualizar "peças em mãos": ' + error.message); return abatidoPorDistribuicao; }
+    abatidoPorDistribuicao.push({ distribuicaoId: d.id, quantidade: abate });
+  }
+  const restante = quantidade - abate;
+  if (restante > 0) {
+    // sobrou mais do que essa leva específica tinha disponível — completa o resto pela fila
+    // normal (FIFO), nas outras levas da mesma cor
+    const breakdownExtra = await baixarDistribuicoesFIFO(d.costureiraId, d.produtoId, d.varianteId, restante);
+    return [...abatidoPorDistribuicao, ...breakdownExtra];
+  }
+  return abatidoPorDistribuicao;
+}
 // desfaz devoluções já registradas. Se receber um "breakdown" (de qual lançamento exato ele
 // veio), devolve EXATAMENTE pras mesmas levas, na mesma quantidade — sem adivinhar. Só cai na
 // adivinhação "mais recente primeiro" (LIFO) pra lançamentos antigos, de antes desse controle
@@ -2668,7 +2692,7 @@ async function removeCostureira(id) {
 // veio de um corte de cor mista (ex: "Preto + Marrom" cortado junto), dá pra passar a cor da
 // LEVA em mãos (diferente da cor da peça em si), e o abate da fila de "em mãos" usa essa —
 // null explícito = abater da leva "sem cor" (produto sem variante)
-async function registrarProducao(costureiraId, produtoId, quantidade, data, varianteId, jaPago, origemVarianteId, motivoDefeito, valorAjuste) {
+async function registrarProducao(costureiraId, produtoId, quantidade, data, varianteId, jaPago, origemVarianteId, motivoDefeito, valorAjuste, origemDistribuicaoId) {
   const varianteParaAbater = origemVarianteId !== undefined ? origemVarianteId : varianteId;
   const { data: linhaCriada, error } = await sb.from('producoes').insert({ costureira_id: costureiraId, produto_id: produtoId, quantidade, data, pago: !!jaPago, variante_id: varianteId || null, abate_variante_id: varianteParaAbater || null, motivo_defeito: motivoDefeito || null, valor_ajuste: valorAjuste !== undefined ? valorAjuste : null }).select('id').single();
   if (error) { alert('Erro ao registrar produção: ' + error.message); return; }
@@ -2686,9 +2710,12 @@ async function registrarProducao(costureiraId, produtoId, quantidade, data, vari
   // já a fila de "peças em mãos" da costureira desconta sempre, seja peça boa ou defeito — nos
   // dois casos a peça saiu das mãos dela (ou virou produto, ou foi descartada como defeito).
   // guarda de QUAIS levas tirou, pra se esse lançamento for excluído depois, saber devolver
-  // certinho pra elas — sem precisar adivinhar
+  // certinho pra elas — sem precisar adivinhar. Se a pessoa escolheu uma leva ESPECÍFICA (por
+  // data, quando tem mais de uma leva aberta da mesma cor), abate exatamente dessa, sem FIFO
   if (quantidade !== 0 && linhaCriada) {
-    const breakdown = await baixarDistribuicoesFIFO(costureiraId, produtoId, varianteParaAbater, Math.abs(quantidade));
+    const breakdown = origemDistribuicaoId
+      ? await baixarDeDistribuicaoEspecifica(origemDistribuicaoId, Math.abs(quantidade))
+      : await baixarDistribuicoesFIFO(costureiraId, produtoId, varianteParaAbater, Math.abs(quantidade));
     if (breakdown && breakdown.length > 0) {
       const { error: errBreakdown } = await sb.from('producoes').update({ abate_distribuicoes: breakdown }).eq('id', linhaCriada.id);
       if (errBreakdown) console.error('Erro ao salvar de qual leva veio o abate:', errBreakdown);
@@ -3178,7 +3205,7 @@ function renderCostureiraDetalhe(costureiraId) {
     const nome = `${produto?.nome || 'Produto removido'}${variante ? ' — ' + variante.nome : ''}`;
     if (!emMaosMap[chaveId]) emMaosMap[chaveId] = { nome, qtd: 0, produtoId: d.produtoId, varianteId: d.varianteId || null, lotes: [] };
     emMaosMap[chaveId].qtd += restante;
-    emMaosMap[chaveId].lotes.push({ data: d.data, qtd: restante });
+    emMaosMap[chaveId].lotes.push({ data: d.data, qtd: restante, distribuicaoId: d.id });
   });
   Object.values(emMaosMap).forEach((item) => item.lotes.sort((a, b) => b.data.localeCompare(a.data)));
   const emMaosLista = Object.values(emMaosMap).sort((a, b) => b.qtd - a.qtd);
@@ -3335,12 +3362,23 @@ function renderCostureiraDetalhe(costureiraId) {
           if (!window.__prodFormProdutoId) return '';
           const emMaosDoProduto = emMaosLista.filter((item) => item.produtoId === window.__prodFormProdutoId);
           if (emMaosDoProduto.length === 0) return '';
+          // cada LEVA individual vira uma opção própria (não o grupo somado) — assim, se a
+          // costureira tiver mais de um corte de cor mista em aberto do mesmo produto, dá pra
+          // escolher exatamente qual leva/data abater, em vez do sistema decidir sozinho pela
+          // mais antiga (o que podia abater da leva errada quando tinha mais de uma aberta)
+          const lotesFlat = [];
+          emMaosDoProduto.forEach((item) => {
+            item.lotes.forEach((lote) => {
+              lotesFlat.push({ ...lote, nome: item.nome });
+            });
+          });
+          lotesFlat.sort((a, b) => b.data.localeCompare(a.data));
           return `
             <select id="detalheOrigemDistribuicao">
               <option value="">Abater automático (mesma cor que a peça)</option>
-              ${emMaosDoProduto.map((item) => `<option value="${item.varianteId || '__sem_cor__'}">Abater de: ${esc(item.nome)} (${item.qtd} em mãos)</option>`).join('')}
+              ${lotesFlat.map((lote) => `<option value="lote:${lote.distribuicaoId}">Abater de: ${esc(lote.nome)} — ${lote.qtd} em mãos, corte de ${new Date(lote.data + 'T00:00:00').toLocaleDateString('pt-BR')}</option>`).join('')}
             </select>
-            <div class="form-hint" style="margin-top:-4px">Se essa peça veio de um corte de cor mista (ex: cortou "Preto + Marrom" junto e agora tá devolvendo só o Marrom), escolhe aqui a leva certa pra abater — mesmo lançando a peça na cor pura.</div>
+            <div class="form-hint" style="margin-top:-4px">Se essa peça veio de um corte de cor mista (ex: cortou "Preto + Marrom" junto e agora tá devolvendo só o Marrom), escolhe aqui a leva certa pra abater — mesmo lançando a peça na cor pura. Se tiver mais de um corte da mesma combinação em datas diferentes, escolhe a data certa.</div>
           `;
         })()}
         <input type="text" id="detalheQuantidade" placeholder="Quantidade de peças" inputmode="numeric" />
@@ -9552,7 +9590,8 @@ function attachProducaoHandlers(c) {
       const jaPago = document.getElementById('detalheJaPago')?.checked;
       const origemSelect = document.getElementById('detalheOrigemDistribuicao');
       const origemValor = origemSelect ? origemSelect.value : '';
-      const origemVarianteId = origemValor === '__sem_cor__' ? null : (origemValor || undefined);
+      const origemDistribuicaoId = origemValor.startsWith('lote:') ? origemValor.slice(5) : null;
+      const origemVarianteId = origemDistribuicaoId ? undefined : (origemValor === '__sem_cor__' ? null : (origemValor || undefined));
       if (!produtoId || !quantidade || quantidade <= 0) { alert('Selecione o produto e informe a quantidade.'); return; }
       // pra peça boa precisa saber a cor (vai somar estoque dela). Pra defeito não precisa —
       // não mexe em estoque de cor nenhuma, e às vezes nem dá pra saber qual cor deu defeito
@@ -9575,7 +9614,7 @@ function attachProducaoHandlers(c) {
       const textoOriginalBtn = salvarDetalhe.textContent;
       salvarDetalhe.disabled = true;
       salvarDetalhe.textContent = 'Salvando...';
-      await registrarProducao(costureiraId, produtoId, quantidade, data, varianteId || null, jaPago, origemVarianteId, motivoDefeito, valorAjuste);
+      await registrarProducao(costureiraId, produtoId, quantidade, data, varianteId || null, jaPago, origemVarianteId, motivoDefeito, valorAjuste, origemDistribuicaoId);
       state.showProducaoForm = false;
       window.__prodDetalheTipo = 'producao';
       window.__prodFormProdutoId = null;
