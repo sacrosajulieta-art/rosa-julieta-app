@@ -233,7 +233,13 @@ function guessVarianteTextoField(row) {
   return null;
 }
 function guessSkuField(row) {
-  const candidates = ['nº de referência do sku principal', 'sku principal', 'número de referência sku', 'sku', 'referência sku', 'referencia sku'];
+  // "sku" primeiro: em relatórios "por variante" (ex: Sales by Variant da Shopee), a coluna
+  // "SKU" já traz o código específico da cor (ex: BLUSA-ZAR-Preto-Unico), enquanto "SKU
+  // Principal" traz só o código genérico do produto (ex: BLUSA-ZAR), igual pra todas as
+  // cores. Se "SKU Principal" viesse primeiro, toda venda cairia no genérico e o sistema
+  // nunca saberia de qual cor descontar — foi exatamente o bug que zerava a baixa de estoque
+  // por cor em produtos como a Blusa Zara.
+  const candidates = ['sku', 'nº de referência do sku principal', 'sku principal', 'número de referência sku', 'referência sku', 'referencia sku'];
   for (const c of candidates) if (row[c]) return String(row[c]).trim();
   return null;
 }
