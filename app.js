@@ -455,6 +455,7 @@ const state = {
   costureiras: [],
   producoes: [],
   showCostureiraForm: false,
+  mostrarResumoPorDia: false,
   showProducaoForm: false,
   costureiraDetalheId: null,
   showValoresPecaForm: false,
@@ -3472,8 +3473,11 @@ function renderCostureiraDetalhe(costureiraId) {
       <button class="icon-btn-ghost" id="filtroLimpar" style="flex:1">✕ Limpar período</button>
     </div>
 
-    <div class="section-title-wrap"><div><div class="section-title">Resumo por dia</div></div></div>
-    ${resumoPorDia.length === 0 ? `<div class="empty-state">Nenhum lançamento no filtro selecionado.</div>` : `
+    <div class="section-title-wrap">
+      <div><div class="section-title">Resumo por dia</div></div>
+      <button class="icon-btn-ghost" id="toggleResumoPorDia">${state.mostrarResumoPorDia ? '▲ Ocultar' : '▼ Exibir'}</button>
+    </div>
+    ${state.mostrarResumoPorDia ? (resumoPorDia.length === 0 ? `<div class="empty-state">Nenhum lançamento no filtro selecionado.</div>` : `
       <div class="tx-list" style="margin-bottom:28px">
         ${resumoPorDia.map(([dia, info]) => `
           <div class="tx-row">
@@ -3483,7 +3487,7 @@ function renderCostureiraDetalhe(costureiraId) {
           </div>
         `).join('')}
       </div>
-    `}
+    `) : ''}
 
     <div class="section-title-wrap"><div><div class="section-title">Detalhado</div></div></div>
     ${entradasFiltradas.length === 0 ? `<div class="empty-state">Nenhum lançamento no filtro selecionado.</div>` : `
@@ -3520,7 +3524,7 @@ function renderCostureiraDetalhe(costureiraId) {
               <div style="flex:1">
                 <div class="tx-categoria">${esc(produto?.nome || 'Produto removido')}${p.varianteId ? ` — ${esc(state.variantes.find((v) => v.id === p.varianteId)?.nome || '')}` : ''}${ehDefeito ? ` ⚠️ Defeito${p.motivoDefeito ? ` (${esc(LABELS_MOTIVO_DEFEITO[p.motivoDefeito] || p.motivoDefeito)})` : ''}` : ''}</div>
                 <div class="tx-desc">${p.quantidade} peças · ${fmt(valor)}${p.pago ? ' · pago' : ' · pendente'}</div>
-                <div class="tx-date">${p.data}</div>
+                <div class="tx-date" style="display:inline-block;margin-top:2px;padding:2px 7px;border-radius:4px;background:rgba(255,214,10,0.16);color:#ffd60a;font-weight:600">${p.data}</div>
               </div>
               <button class="trash-btn" data-editar-producao="${p.id}">✏️</button>
               <button class="trash-btn" data-remover-producao="${p.id}">🗑</button>
@@ -9759,6 +9763,9 @@ function attachProducaoHandlers(c) {
     state.showValoresPecaForm = false;
     await loadData();
   });
+
+  const toggleResumo = document.getElementById('toggleResumoPorDia');
+  if (toggleResumo) toggleResumo.addEventListener('click', () => { state.mostrarResumoPorDia = !state.mostrarResumoPorDia; render(); });
 
   const toggleForm = document.getElementById('toggleCostureiraForm');
   if (toggleForm) toggleForm.addEventListener('click', () => { state.showCostureiraForm = !state.showCostureiraForm; render(); });
