@@ -6137,18 +6137,19 @@ function renderFuncionariaDetalhe(funcionariaId) {
     <div class="section-title-wrap"><div><div class="section-title">Lançar batida manual</div></div></div>
     <div class="form-card">
       <input type="date" id="ptManualData" value="${todayStr()}" />
-      <div class="form-hint" style="margin-top:8px;margin-bottom:2px">Preenche os horários do dia — deixa em branco o que não bateu (ex: só trabalhou meio período)</div>
+      <div class="form-hint" style="margin-top:8px;margin-bottom:2px">Lança só o horário que preencher — os outros campos ficam intocados. Use o botão ✓ ao lado pra lançar só aquele horário isolado, ou preenche vários e usa "Lançar todos preenchidos" no fim.</div>
       ${ORDEM_PONTOS.map((t) => {
         const padrao = f ? { entrada: f.jornadaEntrada, saida_almoco: f.jornadaSaidaAlmoco, volta_almoco: f.jornadaVoltaAlmoco, saida: f.jornadaSaida }[t] : '';
         return `
           <div class="form-row" style="align-items:center;margin-top:6px">
             <div style="flex:1;font-size:13px">${LABEL_PONTO[t]}</div>
             <input type="time" id="ptManual-${t}" value="${padrao || ''}" style="max-width:140px" />
+            <button class="confirm-btn" style="width:auto;padding:8px 12px" title="Lançar só ${esc(LABEL_PONTO[t])}" data-lancar-ponto-unico="${t}" data-funcionaria="${funcionariaId}">✓</button>
           </div>
         `;
       }).join('')}
       <button class="icon-btn-ghost" style="margin-top:8px" id="ptManualLimparAlmoco">🕐 Meio período (limpar Saída/Volta Almoço)</button>
-      <button class="confirm-btn" style="margin-top:10px" data-lancar-ponto-manual="${funcionariaId}">Lançar</button>
+      <button class="confirm-btn" style="margin-top:10px" data-lancar-ponto-manual="${funcionariaId}">Lançar todos preenchidos</button>
     </div>
 
     <div class="section-title-wrap"><div><div class="section-title">Abonar um dia (ou período)</div><div class="section-subtitle">Atestado, folga, ou liberou mais cedo e não quer descontar — qualquer data, inclusive de meses passados</div></div></div>
@@ -6870,6 +6871,28 @@ function attachRHHandlers(c) {
       const voltaAlmocoInput = document.getElementById('ptManual-volta_almoco');
       if (saidaAlmocoInput) saidaAlmocoInput.value = '';
       if (voltaAlmocoInput) voltaAlmocoInput.value = '';
+    });
+
+    document.querySelectorAll('[data-lancar-ponto-unico]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const tipo = btn.dataset.lancarPontoUnico;
+        const funcionariaId = btn.dataset.funcionaria;
+        const data = document.getElementById('ptManualData').value;
+        if (!data) { alert('Preencha a data.'); return; }
+        const hora = document.getElementById(`ptManual-${tipo}`)?.value;
+        if (!hora) { alert(`Preencha o horário de "${LABEL_PONTO[tipo]}" antes de lançar.`); return; }
+        const { error } = await sb.from('pontos').insert({
+          funcionaria_id: funcionariaId, data, tipo, horario: new Date(`${data}T${hora}:00`).toISOString(), origem: 'manual',
+        });
+        if (error) { alert('Erro ao lançar ponto: ' + error.message); return; }
+        const inicioAtual = state.rhFiltroInicio || todayStr().slice(0, 8) + '01';
+        const fimAtual = state.rhFiltroFim || todayStr();
+        if (data < inicioAtual) state.rhFiltroInicio = data;
+        if (data > fimAtual) state.rhFiltroFim = data;
+        salvarRhFiltro(state.rhFiltroInicio, state.rhFiltroFim);
+        await loadData();
+        alert(`${LABEL_PONTO[tipo]} lançada em ${new Date(data + 'T00:00:00').toLocaleDateString('pt-BR')} às ${hora}. Os outros horários não foram tocados.`);
+      });
     });
 
     const lancarManual = document.querySelector('[data-lancar-ponto-manual]');
