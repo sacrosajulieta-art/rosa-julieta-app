@@ -2727,8 +2727,8 @@ async function addCostureira(nome) {
   const { error } = await sb.from('costureiras').insert({ nome, ativa: true, numero_identificacao: numeroIdentificacao });
   if (error) alert('Erro ao adicionar costureira: ' + error.message);
 }
-async function updateCostureira(id, nome, ativa, metaSemanal) {
-  const { error } = await sb.from('costureiras').update({ nome, ativa, meta_semanal: metaSemanal }).eq('id', id);
+async function updateCostureira(id, nome, ativa, metaSemanal, numeroIdentificacao) {
+  const { error } = await sb.from('costureiras').update({ nome, ativa, meta_semanal: metaSemanal, numero_identificacao: numeroIdentificacao || null }).eq('id', id);
   if (error) alert('Erro ao atualizar costureira: ' + error.message);
 }
 // só pra costureiras antigas, cadastradas antes dessa função existir, que ficaram sem
@@ -3150,7 +3150,8 @@ function renderProducaoDono(c) {
             return `
               <div class="form-card" style="grid-column:1 / -1">
                 <input type="text" id="editCostNome-${cost.id}" placeholder="Nome da costureira" value="${esc(cost.nome)}" />
-                <div class="form-hint">Número de identificação: <strong style="color:var(--text)">${cost.numeroIdentificacao ? esc(cost.numeroIdentificacao) : 'ainda não gerado'}</strong> (gerado automaticamente; fica livre pra reaproveitar se essa costureira ficar inativa)</div>
+                <div class="form-hint">Número de identificação (usado nas fichas de corte):</div>
+                <input type="text" id="editCostNumero-${cost.id}" placeholder="ex: 02" value="${esc(cost.numeroIdentificacao || '')}" />
                 <input type="text" id="editCostMeta-${cost.id}" placeholder="Meta de peças por semana (ex: 1500)" value="${cost.metaSemanal || ''}" inputmode="numeric" />
                 <label class="checkbox-label"><input type="checkbox" id="editCostAtiva-${cost.id}" ${cost.ativa ? 'checked' : ''} /> Costureira ativa</label>
                 <div class="form-row">
@@ -9839,10 +9840,15 @@ function attachProducaoHandlers(c) {
       e.stopPropagation();
       const id = btn.dataset.salvarEditCostureira;
       const nome = document.getElementById(`editCostNome-${id}`).value.trim();
+      const numero = document.getElementById(`editCostNumero-${id}`).value.trim();
       const meta = Number(document.getElementById(`editCostMeta-${id}`).value) || 0;
       const ativa = document.getElementById(`editCostAtiva-${id}`).checked;
       if (!nome) { alert('Informe o nome da costureira.'); return; }
-      await updateCostureira(id, nome, ativa, meta);
+      if (numero && ativa) {
+        const conflito = state.costureiras.find((c) => c.id !== id && c.ativa && c.numeroIdentificacao === numero);
+        if (conflito && !confirm(`O número "${numero}" já está em uso por ${conflito.nome} (ativa). Se continuar, as duas vão compartilhar o mesmo número nas fichas — isso não quebra o sistema (o número de série de cada ficha continua único), mas pode confundir na hora de identificar de olho qual costureira é qual. Continuar mesmo assim?`)) return;
+      }
+      await updateCostureira(id, nome, ativa, meta, numero);
       state.editingCostureiraId = null;
       await loadData();
     });
