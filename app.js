@@ -653,14 +653,14 @@ async function loadData() {
   state.tx = (tx || []).map(mapTxFromDb);
   state.produtos = (produtos || []).map(mapProdutoFromDb);
   state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0), taxaFaixas: Array.isArray(p.taxa_faixas) ? p.taxa_faixas : [] }));
-  state.costureiras = (costureiras || []).map((c) => ({ id: c.id, nome: c.nome, ativa: c.ativa, metaSemanal: c.meta_semanal || 0 }));
+  state.costureiras = (costureiras || []).map((c) => ({ id: c.id, nome: c.nome, ativa: c.ativa, metaSemanal: c.meta_semanal || 0, numeroIdentificacao: c.numero_identificacao || null }));
   state.producoes = (producoes || []).map((p) => ({ id: p.id, costureiraId: p.costureira_id, produtoId: p.produto_id, quantidade: p.quantidade, data: p.data, pago: p.pago, varianteId: p.variante_id || null, abateVarianteId: 'abate_variante_id' in p ? p.abate_variante_id : undefined, motivoDefeito: p.motivo_defeito || null, valorAjuste: p.valor_ajuste != null ? Number(p.valor_ajuste) : null, abateDistribuicoes: Array.isArray(p.abate_distribuicoes) ? p.abate_distribuicoes.map((x) => ({ distribuicaoId: x.distribuicaoId, quantidade: x.quantidade })) : null }));
   state.variantes = (variantes || []).map((v) => ({ id: v.id, produtoId: v.produto_id, nome: v.nome, estoqueAtual: v.estoque_atual, skuVariante: v.sku_variante }));
   state.materiaPrima = (materiaPrima || []).map((m) => ({ id: m.id, cor: m.cor, rolosDisponiveis: m.rolos_disponiveis, custoMedioRolo: Number(m.custo_medio_rolo || 0) }));
   state.ordensCorte = (ordensCorte || []).map((o) => ({ id: o.id, cor: o.cor, quantidadeRolos: o.quantidade_rolos, valorTecido: Number(o.valor_tecido), dataEnvio: o.data_envio, status: o.status, dataConclusao: o.data_conclusao, tipo: o.tipo || 'principal', valorCorte: Number(o.valor_corte || 0), transacaoCorteId: o.transacao_corte_id || null, grupoId: o.grupo_id || null }));
   state.ordensCorteItens = (ordensCorteItens || []).map((i) => ({ id: i.id, ordemId: i.ordem_id, produtoId: i.produto_id, quantidade: i.quantidade, varianteId: i.variante_id || null }));
   state.insumos = (insumos || []).map((i) => ({ id: i.id, nome: i.nome, unidade: i.unidade, quantidadeDisponivel: Number(i.quantidade_disponivel), custoMedioUnitario: Number(i.custo_medio_unitario), usadoNoEnvio: !!i.usado_no_envio, qtdVendaManual: Number(i.qtd_venda_manual ?? 1) }));
-  state.distribuicoes = (distribuicoes || []).map((d) => ({ id: d.id, ordemItemId: d.ordem_item_id, produtoId: d.produto_id, varianteId: d.variante_id || null, costureiraId: d.costureira_id, quantidadeDistribuida: d.quantidade_distribuida, quantidadeDevolvida: d.quantidade_devolvida, data: d.data }));
+  state.distribuicoes = (distribuicoes || []).map((d) => ({ id: d.id, ordemItemId: d.ordem_item_id, produtoId: d.produto_id, varianteId: d.variante_id || null, costureiraId: d.costureira_id, quantidadeDistribuida: d.quantidade_distribuida, quantidadeDevolvida: d.quantidade_devolvida, data: d.data, numeroSerie: d.numero_serie || null }));
   state.fichaTecnicaItens = (fichaTecnicaItens || []).map((f) => ({ id: f.id, produtoId: f.produto_id, tipoItem: f.tipo_item, insumoId: f.insumo_id || null, componenteProdutoId: f.componente_produto_id || null, quantidade: Number(f.quantidade), momento: f.momento || 'venda' }));
   state.insumoPlataformaQtd = (insumoPlataformaQtd || []).map((q) => ({ id: q.id, insumoId: q.insumo_id, plataformaId: q.plataforma_id, quantidade: Number(q.quantidade) }));
   state.funcionarias = (funcionarias || []).map((f) => ({ id: f.id, nome: f.nome, pin: f.pin, ativa: f.ativa, jornadaEntrada: (f.jornada_entrada || '08:00').slice(0, 5), jornadaSaidaAlmoco: (f.jornada_saida_almoco || '12:00').slice(0, 5), jornadaVoltaAlmoco: (f.jornada_volta_almoco || '13:00').slice(0, 5), jornadaSaida: (f.jornada_saida || '17:00').slice(0, 5), valorHora: Number(f.valor_hora || 0), dataAdmissao: f.data_admissao || null, jornadaSemanal: f.jornada_semanal || {}, percentualHoraExtra: Number(f.percentual_hora_extra != null ? f.percentual_hora_extra : 50), modoCompensacaoPadrao: f.modo_compensacao_padrao || 'dinheiro', tipoPagamento: f.tipo_pagamento || 'hora', salarioMensal: Number(f.salario_mensal || 0), valorVtDia: Number(f.valor_vt_dia || 0), valorVrDia: Number(f.valor_vr_dia || 0), horasCompensacaoSemanal: Number(f.horas_compensacao_semanal || 0), cpf: f.cpf || '', cargo: f.cargo || '', matricula: f.matricula || '' }));
@@ -1069,10 +1069,35 @@ async function removeInsumo(id) {
 }
 
 // ---- Distribuição de peças cortadas pras costureiras ----
+// gera o próximo número de série da ficha pra essa costureira, no formato
+// [numeroIdentificacao].[sequencial]/[ano] — ex: "02.001/26". O sequencial é próprio de
+// cada NÚMERO (não da costureira em si) e reinicia a cada ano novo — isso garante que o
+// número de série nunca se repete mesmo se um número de identificação for reaproveitado
+// por outra costureira depois (ex: "02" era da Fernanda, hoje é da Joélia — a sequência
+// continua de onde parou, nunca gerando duas fichas "02.001/26" diferentes). Se a
+// costureira não tem número de identificação cadastrado ainda, não gera nada (fica null)
+function proximoNumeroSerieFicha(costureiraId, data) {
+  const costureira = state.costureiras.find((c) => c.id === costureiraId);
+  if (!costureira || !costureira.numeroIdentificacao) return null;
+  const anoCompleto = data.slice(0, 4);
+  const anoCurto = data.slice(2, 4);
+  const prefixo = costureira.numeroIdentificacao + '.';
+  let maiorSequencial = 0;
+  state.distribuicoes.forEach((d) => {
+    if (!d.numeroSerie || !d.data || d.data.slice(0, 4) !== anoCompleto) return;
+    if (!d.numeroSerie.startsWith(prefixo)) return;
+    const m = d.numeroSerie.match(/\.(\d+)\//);
+    if (m) maiorSequencial = Math.max(maiorSequencial, Number(m[1]));
+  });
+  const sequencial = String(maiorSequencial + 1).padStart(3, '0');
+  return `${costureira.numeroIdentificacao}.${sequencial}/${anoCurto}`;
+}
 async function distribuirPecas(ordemItemId, produtoId, varianteId, costureiraId, quantidade, data) {
+  const numeroSerie = proximoNumeroSerieFicha(costureiraId, data);
   const { error } = await sb.from('distribuicoes').insert({
     ordem_item_id: ordemItemId, produto_id: produtoId, variante_id: varianteId || null,
     costureira_id: costureiraId, quantidade_distribuida: quantidade, quantidade_devolvida: 0, data,
+    numero_serie: numeroSerie,
   });
   if (error) alert('Erro ao distribuir peças: ' + error.message);
 }
@@ -1111,7 +1136,8 @@ function gerarFichaCortePDF(distribuicao, ordem) {
 
     doc.setFontSize(13);
     doc.setFont(undefined, 'bold');
-    doc.text('FICHA DE CORTE – ROSA JULIETA', margemEsq, y);
+    const tituloFicha = distribuicao.numeroSerie ? `${distribuicao.numeroSerie} - FICHA DE CORTE – ROSA JULIETA` : 'FICHA DE CORTE – ROSA JULIETA';
+    doc.text(tituloFicha, margemEsq, y);
     doc.setFont(undefined, 'normal');
     y += 9;
 
@@ -1178,7 +1204,8 @@ function gerarFichaCortePDF(distribuicao, ordem) {
   doc.addPage();
   desenharVia('2ª via — Expedição', true);
 
-  const nomeArquivo = `ficha-corte-${(costureira?.nome || 'costureira').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${distribuicao.data}.pdf`;
+  const prefixoSerie = distribuicao.numeroSerie ? distribuicao.numeroSerie.replace(/[^a-z0-9]+/gi, '-') + '-' : '';
+  const nomeArquivo = `ficha-corte-${prefixoSerie}${(costureira?.nome || 'costureira').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${distribuicao.data}.pdf`;
   doc.save(nomeArquivo);
   } catch (err) {
     console.error(err);
@@ -2682,13 +2709,33 @@ async function rejeitarSolicitacaoPonto(id) {
 }
 
 // ---- Costureiras & Produção ----
+// acha o menor número de identificação livre entre as costureiras ATIVAS no momento — se
+// uma costureira sai (fica inativa), o número dela volta a ficar disponível pra uma nova
+// costureira, evitando uma lista de números que só cresce. A unicidade que realmente
+// importa (nunca duas fichas com o mesmo número de série) fica garantida em
+// proximoNumeroSerieFicha, que olha pelo texto do número + ano, não pela costureira em si —
+// então mesmo reaproveitando "02" pra outra pessoa, as fichas nunca colidem
+function proximoNumeroIdentificacaoDisponivel() {
+  const usados = new Set(state.costureiras.filter((c) => c.ativa && c.numeroIdentificacao).map((c) => c.numeroIdentificacao));
+  let n = 1;
+  while (usados.has(String(n).padStart(2, '0'))) n++;
+  return String(n).padStart(2, '0');
+}
 async function addCostureira(nome) {
-  const { error } = await sb.from('costureiras').insert({ nome, ativa: true });
+  const numeroIdentificacao = proximoNumeroIdentificacaoDisponivel();
+  const { error } = await sb.from('costureiras').insert({ nome, ativa: true, numero_identificacao: numeroIdentificacao });
   if (error) alert('Erro ao adicionar costureira: ' + error.message);
 }
 async function updateCostureira(id, nome, ativa, metaSemanal) {
   const { error } = await sb.from('costureiras').update({ nome, ativa, meta_semanal: metaSemanal }).eq('id', id);
   if (error) alert('Erro ao atualizar costureira: ' + error.message);
+}
+// só pra costureiras antigas, cadastradas antes dessa função existir, que ficaram sem
+// número — gera um novo automaticamente, igual seria se ela tivesse acabado de ser criada
+async function gerarNumeroIdentificacaoRetroativo(costureiraId) {
+  const numeroIdentificacao = proximoNumeroIdentificacaoDisponivel();
+  const { error } = await sb.from('costureiras').update({ numero_identificacao: numeroIdentificacao }).eq('id', costureiraId);
+  if (error) alert('Erro ao gerar número: ' + error.message);
 }
 async function removeCostureira(id) {
   const { error } = await sb.from('costureiras').delete().eq('id', id);
@@ -3080,6 +3127,7 @@ function renderProducaoDono(c) {
     ${state.showCostureiraForm ? `
       <div class="form-card">
         <input type="text" id="novaCostureiraNome" placeholder="Nome da costureira" />
+        <div class="form-hint">O número de identificação (usado nas fichas de corte) é gerado automaticamente ao salvar.</div>
         <button class="confirm-btn" id="salvarCostureira">Adicionar</button>
       </div>
     ` : ''}
@@ -3091,6 +3139,7 @@ function renderProducaoDono(c) {
             return `
               <div class="form-card" style="grid-column:1 / -1">
                 <input type="text" id="editCostNome-${cost.id}" placeholder="Nome da costureira" value="${esc(cost.nome)}" />
+                <div class="form-hint">Número de identificação: <strong style="color:var(--text)">${cost.numeroIdentificacao ? esc(cost.numeroIdentificacao) : 'ainda não gerado'}</strong> (gerado automaticamente; fica livre pra reaproveitar se essa costureira ficar inativa)</div>
                 <input type="text" id="editCostMeta-${cost.id}" placeholder="Meta de peças por semana (ex: 1500)" value="${cost.metaSemanal || ''}" inputmode="numeric" />
                 <label class="checkbox-label"><input type="checkbox" id="editCostAtiva-${cost.id}" ${cost.ativa ? 'checked' : ''} /> Costureira ativa</label>
                 <div class="form-row">
@@ -3108,9 +3157,10 @@ function renderProducaoDono(c) {
               <div class="produto-header">
                 <div style="display:flex;align-items:center;gap:8px">
                   <div class="tx-dot" style="background:${cost.ativa ? 'var(--teal)' : 'var(--text-muted)'}"></div>
-                  <div class="produto-nome">${esc(cost.nome)}</div>
+                  <div class="produto-nome">${cost.numeroIdentificacao ? `<span style="color:var(--text-muted)">${esc(cost.numeroIdentificacao)} —</span> ` : ''}${esc(cost.nome)}</div>
                 </div>
                 <div style="display:flex;gap:2px">
+                  ${!cost.numeroIdentificacao ? `<button class="trash-btn" title="Gerar número de identificação" data-gerar-numero-costureira="${cost.id}">🔢</button>` : ''}
                   <button class="trash-btn" data-editar-costureira="${cost.id}">✏️</button>
                   <button class="trash-btn" data-remover-costureira="${cost.id}">🗑</button>
                 </div>
@@ -3211,7 +3261,7 @@ function renderCostureiraDetalhe(costureiraId) {
     const nome = `${produto?.nome || 'Produto removido'}${variante ? ' — ' + variante.nome : ''}`;
     if (!emMaosMap[chaveId]) emMaosMap[chaveId] = { nome, qtd: 0, produtoId: d.produtoId, varianteId: d.varianteId || null, lotes: [] };
     emMaosMap[chaveId].qtd += restante;
-    emMaosMap[chaveId].lotes.push({ data: d.data, qtd: restante, distribuicaoId: d.id });
+    emMaosMap[chaveId].lotes.push({ data: d.data, qtd: restante, distribuicaoId: d.id, numeroSerie: d.numeroSerie });
   });
   Object.values(emMaosMap).forEach((item) => item.lotes.sort((a, b) => b.data.localeCompare(a.data)));
   const emMaosLista = Object.values(emMaosMap).sort((a, b) => b.qtd - a.qtd);
@@ -3255,7 +3305,7 @@ function renderCostureiraDetalhe(costureiraId) {
             <div class="tx-dot" style="background:var(--amber)"></div>
             <div style="flex:1">
               <div class="tx-categoria">${esc(item.nome)}</div>
-              <div class="tx-desc">${item.lotes.map((l) => `${l.qtd} em ${new Date(l.data + 'T00:00:00').toLocaleDateString('pt-BR')}`).join(' · ')}</div>
+              <div class="tx-desc">${item.lotes.map((l) => `${l.qtd} em ${new Date(l.data + 'T00:00:00').toLocaleDateString('pt-BR')}${l.numeroSerie ? ` <strong style="color:var(--text)">· ficha ${esc(l.numeroSerie)}</strong>` : ''}`).join(' · ')}</div>
             </div>
             ${editando ? `
               <input type="text" id="editEmMaosQtd" value="${item.qtd}" style="width:70px;margin-right:6px" />
@@ -3382,7 +3432,7 @@ function renderCostureiraDetalhe(costureiraId) {
           return `
             <select id="detalheOrigemDistribuicao">
               <option value="">Abater automático (mesma cor que a peça)</option>
-              ${lotesFlat.map((lote) => `<option value="lote:${lote.distribuicaoId}">Abater de: ${esc(lote.nome)} — ${lote.qtd} em mãos, corte de ${new Date(lote.data + 'T00:00:00').toLocaleDateString('pt-BR')}</option>`).join('')}
+              ${lotesFlat.map((lote) => `<option value="lote:${lote.distribuicaoId}">Abater de: ${esc(lote.nome)} — ${lote.qtd} em mãos, corte de ${new Date(lote.data + 'T00:00:00').toLocaleDateString('pt-BR')}${lote.numeroSerie ? ` (ficha ${esc(lote.numeroSerie)})` : ''}</option>`).join('')}
             </select>
             <div class="form-hint" style="margin-top:-4px">Se essa peça veio de um corte de cor mista (ex: cortou "Preto + Marrom" junto e agora tá devolvendo só o Marrom), escolhe aqui a leva certa pra abater — mesmo lançando a peça na cor pura. Se tiver mais de um corte da mesma combinação em datas diferentes, escolhe a data certa.</div>
           `;
@@ -9737,6 +9787,14 @@ function attachProducaoHandlers(c) {
         await removeCostureira(btn.dataset.removerCostureira);
         await loadData();
       }
+    });
+  });
+
+  document.querySelectorAll('[data-gerar-numero-costureira]').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await gerarNumeroIdentificacaoRetroativo(btn.dataset.gerarNumeroCostureira);
+      await loadData();
     });
   });
 
