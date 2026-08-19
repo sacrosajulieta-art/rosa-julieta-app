@@ -9642,6 +9642,9 @@ function attachProducaoHandlers(c) {
     const toggleDetalheForm = document.getElementById('toggleDetalheForm');
     if (toggleDetalheForm) toggleDetalheForm.addEventListener('click', () => { state.showProducaoForm = !state.showProducaoForm; render(); });
 
+    const toggleResumo = document.getElementById('toggleResumoPorDia');
+    if (toggleResumo) toggleResumo.addEventListener('click', () => { state.mostrarResumoPorDia = !state.mostrarResumoPorDia; render(); });
+
     document.querySelectorAll('[data-prod-detalhe-tipo]').forEach((btn) => {
       btn.addEventListener('click', () => { window.__prodDetalheTipo = btn.dataset.prodDetalheTipo; window.__prodFormMotivoDefeito = null; render(); });
     });
@@ -9778,9 +9781,6 @@ function attachProducaoHandlers(c) {
     state.showValoresPecaForm = false;
     await loadData();
   });
-
-  const toggleResumo = document.getElementById('toggleResumoPorDia');
-  if (toggleResumo) toggleResumo.addEventListener('click', () => { state.mostrarResumoPorDia = !state.mostrarResumoPorDia; render(); });
 
   const toggleForm = document.getElementById('toggleCostureiraForm');
   if (toggleForm) toggleForm.addEventListener('click', () => { state.showCostureiraForm = !state.showCostureiraForm; render(); });
