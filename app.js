@@ -3017,6 +3017,16 @@ function renderProducaoDono(c) {
   const totalPecasEmProducao = state.distribuicoes.reduce((a, d) => a + Math.max(0, d.quantidadeDistribuida - d.quantidadeDevolvida), 0);
   const totalPrevisaoPagamento = Object.values(porCostureira).reduce((a, info) => a + info.valor, 0);
 
+  // peças em mãos (cortadas, distribuídas, ainda não devolvidas prontas) POR costureira —
+  // pra dar um alerta visual rápido de quem já ficou sem material pra costurar e precisa
+  // receber corte novo, sem precisar entrar no histórico de cada uma pra descobrir
+  const emMaosPorCostureira = {};
+  state.distribuicoes.forEach((d) => {
+    const restante = d.quantidadeDistribuida - d.quantidadeDevolvida;
+    if (restante <= 0) return;
+    emMaosPorCostureira[d.costureiraId] = (emMaosPorCostureira[d.costureiraId] || 0) + restante;
+  });
+
   // produção boa (não defeito) desta semana, por costureira — pra comparar com a meta semanal
   const inicioSemanaAtual = inicioDaSemana(todayStr());
   const producaoSemanaPorCostureira = {};
@@ -3151,6 +3161,7 @@ function renderProducaoDono(c) {
             `;
           }
           const producaoSemana = producaoSemanaPorCostureira[cost.id] || 0;
+          const emMaosCost = emMaosPorCostureira[cost.id] || 0;
           const meta = cost.metaSemanal || 0;
           const pct = meta > 0 ? Math.round((producaoSemana / meta) * 100) : null;
           return `
@@ -3166,6 +3177,10 @@ function renderProducaoDono(c) {
                   <button class="trash-btn" data-remover-costureira="${cost.id}">🗑</button>
                 </div>
               </div>
+              ${cost.ativa ? (emMaosCost > 0
+                ? `<div style="margin-top:8px;display:inline-block;padding:3px 10px;border-radius:6px;background:rgba(0,212,160,0.14);color:var(--teal);font-size:12px;font-weight:700">📦 ${emMaosCost} peças em mãos</div>`
+                : `<div style="margin-top:8px;display:inline-block;padding:3px 10px;border-radius:6px;background:rgba(255,71,87,0.16);color:var(--red);font-size:12px;font-weight:700">⚠️ Sem peças — precisa de corte</div>`
+              ) : ''}
               ${meta > 0 ? `
                 <div class="custo-bar" style="margin-top:8px">
                   <div class="custo-bar-fill" style="width:${Math.min(100, pct)}%;background:${pct >= 100 ? 'var(--teal)' : 'var(--pink)'}"></div>
