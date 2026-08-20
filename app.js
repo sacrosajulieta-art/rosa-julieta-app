@@ -458,6 +458,8 @@ const state = {
   mostrarResumoPorDia: false,
   showProducaoForm: false,
   costureiraDetalheId: null,
+  mostrarPecasPorModelo: false,
+  modeloExpandido: null,
   showValoresPecaForm: false,
   editingProducaoId: null,
   prodFiltroStatus: 'todos',
@@ -2994,9 +2996,67 @@ function valorProducaoItem(p) {
   const produto = state.produtos.find((x) => x.id === p.produtoId);
   return p.quantidade * (produto ? produto.valorMaoObra : 0);
 }
+// tela agregada: quanto tem em produção (em mãos de QUALQUER costureira, cortado e ainda
+// não devolvido pronto) por modelo + cor — pra ver de cara "500 - Top Joy GG - Preto" sem
+// precisar abrir costureira por costureira somando na cabeça
+function renderPecasPorModelo() {
+  const porModelo = {};
+  state.distribuicoes.forEach((d) => {
+    const restante = d.quantidadeDistribuida - d.quantidadeDevolvida;
+    if (restante <= 0) return;
+    const produto = state.produtos.find((p) => p.id === d.produtoId);
+    const variante = d.varianteId ? state.variantes.find((v) => v.id === d.varianteId) : null;
+    const chave = `${d.produtoId}||${d.varianteId || 'sem-cor'}`;
+    if (!porModelo[chave]) {
+      porModelo[chave] = { nomeProduto: produto?.nome || 'Produto removido', nomeVariante: variante?.nome || null, qtd: 0, porCostureira: {} };
+    }
+    porModelo[chave].qtd += restante;
+    const costureira = state.costureiras.find((cc) => cc.id === d.costureiraId);
+    const nomeCost = costureira?.nome || 'Costureira removida';
+    porModelo[chave].porCostureira[nomeCost] = (porModelo[chave].porCostureira[nomeCost] || 0) + restante;
+  });
+  const lista = Object.values(porModelo).sort((a, b) => b.qtd - a.qtd);
+  const totalGeral = lista.reduce((a, m) => a + m.qtd, 0);
+
+  return `
+    <div class="section-title-wrap"><button class="icon-btn-ghost" id="voltarPecasPorModelo">← Voltar</button></div>
+    <div class="section-title-wrap">
+      <div>
+        <div class="section-title">Peças em produção por modelo</div>
+        <div class="section-subtitle">${totalGeral} peças no total, somando todas as costureiras</div>
+      </div>
+    </div>
+    ${lista.length === 0 ? `<div class="empty-state">Nenhuma peça em produção no momento.</div>` : `
+      <div class="tx-list">
+        ${lista.map((m, idx) => `
+          <div class="tx-row" style="cursor:pointer;flex-direction:column;align-items:stretch" data-toggle-modelo="${idx}">
+            <div style="display:flex;align-items:center;gap:10px;width:100%">
+              <div class="tx-dot" style="background:var(--teal)"></div>
+              <div style="flex:1">
+                <div class="tx-categoria">${esc(m.nomeProduto)}${m.nomeVariante ? ` — ${esc(m.nomeVariante)}` : ''}</div>
+                <div class="tx-desc">${Object.keys(m.porCostureira).length} costureira(s) com essa peça em mãos</div>
+              </div>
+              <div class="tx-valor" style="color:var(--teal)">${m.qtd}</div>
+            </div>
+            ${state.modeloExpandido === idx ? `
+              <div style="margin-top:8px;padding-left:24px;display:flex;flex-direction:column;gap:5px;border-left:2px solid var(--border)">
+                ${Object.entries(m.porCostureira).sort((a, b) => b[1] - a[1]).map(([nome, qtd]) => `
+                  <div style="display:flex;justify-content:space-between;padding-left:10px;font-size:13px;color:var(--text-muted)">
+                    <span>${esc(nome)}</span><span>${qtd}</span>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
+          </div>
+        `).join('')}
+      </div>
+    `}
+  `;
+}
 // ---- Produção (visão do dono) ----
 function renderProducaoDono(c) {
   if (state.costureiraDetalheId) return renderCostureiraDetalhe(state.costureiraDetalheId);
+  if (state.mostrarPecasPorModelo) return renderPecasPorModelo();
 
   const naoPagas = state.producoes.filter((p) => !p.pago);
   const porCostureira = {};
@@ -3052,7 +3112,7 @@ function renderProducaoDono(c) {
 
   return `
     <div class="stats-grid">
-      <div class="stat-card">
+      <div class="stat-card" style="cursor:pointer" id="abrirPecasPorModelo">
         <div class="stat-icon" style="background:rgba(255,182,39,0.1)">🧵</div>
         <div class="stat-label">Peças em produção</div>
         <div class="stat-value">${totalPecasEmProducao}</div>
@@ -9785,7 +9845,24 @@ function attachProducaoHandlers(c) {
     return;
   }
 
+  // ---- Tela de peças em produção por modelo/cor ----
+  if (state.mostrarPecasPorModelo) {
+    const voltar = document.getElementById('voltarPecasPorModelo');
+    if (voltar) voltar.addEventListener('click', () => { state.mostrarPecasPorModelo = false; state.modeloExpandido = null; render(); });
+    document.querySelectorAll('[data-toggle-modelo]').forEach((row) => {
+      row.addEventListener('click', () => {
+        const idx = Number(row.dataset.toggleModelo);
+        state.modeloExpandido = state.modeloExpandido === idx ? null : idx;
+        render();
+      });
+    });
+    return;
+  }
+
   // ---- Tela principal de Produção ----
+  const abrirPecasPorModelo = document.getElementById('abrirPecasPorModelo');
+  if (abrirPecasPorModelo) abrirPecasPorModelo.addEventListener('click', () => { state.mostrarPecasPorModelo = true; render(); });
+
   const toggleTotalDefeitos = document.getElementById('toggleTotalDefeitos');
   if (toggleTotalDefeitos) toggleTotalDefeitos.addEventListener('click', () => { state.showTotalDefeitos = !state.showTotalDefeitos; render(); });
 
