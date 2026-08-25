@@ -1265,7 +1265,7 @@ function gerarHoleritePDF(funcionaria, mesKey, dados) {
       const partes = [];
       if (ocorrencias.diasAtestado > 0) partes.push(`${ocorrencias.diasAtestado} atestado(s)`);
       if (ocorrencias.diasAbono > 0) partes.push(`${ocorrencias.diasAbono} abono(s)/folga(s)`);
-      if (ocorrencias.diasFerias > 0) partes.push(`${ocorrencias.diasFerias} dia(s) de férias`);
+      if (ocorrencias.diasFerias > 0) partes.push(`${ocorrencias.diasFerias} dia(s) de recesso`);
       doc.text(`Ocorrências: ${partes.join(', ')}`, margemEsq, y); y += 6;
     }
     y += 4;
@@ -1287,8 +1287,8 @@ function gerarHoleritePDF(funcionaria, mesKey, dados) {
     linha(funcionaria.tipoPagamento === 'mensal' ? 'Salário mensal' : `Salário (${dados.horasTrabalhadasTotal.toFixed(1)}h trabalhadas)`, dados.salarioBase);
     if (dados.horasExtras > 0) linha(`Horas extras (${formatarHorasMin(dados.horasExtras)} + ${funcionaria.percentualHoraExtra}%)`, dados.modoHorasExtras === 'banco' ? 0 : dados.valorHorasExtras);
     if (dados.horasExtras100 > 0) linha(`Horas domingo/feriado (${formatarHorasMin(dados.horasExtras100)} + 100%)`, dados.modoHorasExtras === 'banco' ? 0 : dados.valorHorasExtras100);
-    if (dados.valorVt > 0) linha('Vale-transporte (VT)', dados.valorVt);
-    if (dados.valorVr > 0) linha('Vale-refeição/alimentação (VR)', dados.valorVr);
+    if (dados.valorVt > 0) linha('Auxílio Transporte', dados.valorVt);
+    if (dados.valorVr > 0) linha('Auxílio Alimentação', dados.valorVr);
 
     y += 2;
     doc.line(margemEsq, y, margemEsq + largura, y);
@@ -2296,16 +2296,16 @@ async function fecharHolerite(funcionaria, mesKey, resumo, modoHorasExtras, valo
   if (valorBeneficios > 0) {
     await addTx({
       tipo: 'saida', valor: valorBeneficios, categoria: 'Funcionários — encargos/benefícios', natureza: 'fixo',
-      descricao: `VT + VR ${funcionaria.nome} — ${mesLabelTexto}`, data: dataLancamento,
+      descricao: `Auxílio Transporte + Alimentação ${funcionaria.nome} — ${mesLabelTexto}`, data: dataLancamento,
     });
   }
   if (valorFeriasComTerco + valorAbonoComTerco > 0) {
     const partes = [];
-    if (valorFeriasComTerco > 0) partes.push(`${resumoFerias.diasGozados} dia(s) de férias`);
-    if (valorAbonoComTerco > 0) partes.push(`${resumoFerias.diasVendidos} dia(s) vendido(s) (abono)`);
+    if (valorFeriasComTerco > 0) partes.push(`${resumoFerias.diasGozados} dia(s) de recesso`);
+    if (valorAbonoComTerco > 0) partes.push(`${resumoFerias.diasVendidos} dia(s) vendido(s)`);
     await addTx({
-      tipo: 'saida', valor: valorFeriasComTerco + valorAbonoComTerco, categoria: 'Funcionários — férias/abono', natureza: 'fixo',
-      descricao: `Férias ${funcionaria.nome} — ${partes.join(' + ')}, com 1/3 constitucional — ${mesLabelTexto}`, data: dataLancamento,
+      tipo: 'saida', valor: valorFeriasComTerco + valorAbonoComTerco, categoria: 'Funcionários — recesso/dias vendidos', natureza: 'fixo',
+      descricao: `Recesso ${funcionaria.nome} — ${partes.join(' + ')}, com adicional — ${mesLabelTexto}`, data: dataLancamento,
     });
   }
 
@@ -2359,13 +2359,13 @@ async function addFeriasTirada(funcionariaId, dataInicio, dataFim, diasVendidos,
     funcionaria_id: funcionariaId, data_inicio: dataInicio, data_fim: dataFim,
     dias_vendidos: diasVendidos || 0, mes_referencia_pagamento: mesReferenciaPagamento || null,
   });
-  if (error) alert('Erro ao registrar férias: ' + error.message);
+  if (error) alert('Erro ao registrar recesso: ' + error.message);
 }
 async function updateFeriasTirada(id, dataInicio, dataFim, diasVendidos, mesReferenciaPagamento) {
   const { error } = await sb.from('ferias_tiradas').update({
     data_inicio: dataInicio, data_fim: dataFim, dias_vendidos: diasVendidos || 0, mes_referencia_pagamento: mesReferenciaPagamento || null,
   }).eq('id', id);
-  if (error) alert('Erro ao atualizar férias: ' + error.message);
+  if (error) alert('Erro ao atualizar recesso: ' + error.message);
 }
 // valor do dia pra cálculo de férias/abono — mensalista usa salário÷30 (padrão CLT); por
 // hora usa a média de horas dos dias que ela trabalha na semana (pra não pegar só um dia
@@ -2398,7 +2398,7 @@ function calcularValorFerias(funcionaria, mesKey) {
 }
 async function removeFeriasTirada(id) {
   const { error } = await sb.from('ferias_tiradas').delete().eq('id', id);
-  if (error) alert('Erro ao remover registro de férias: ' + error.message);
+  if (error) alert('Erro ao remover registro de recesso: ' + error.message);
 }
 // calcula o ciclo de férias (CLT: 12 meses pra adquirir direito + 12 meses de prazo pra conceder).
 // o ciclo reinicia a partir do dia seguinte ao fim da última férias tirada (se houver).
@@ -2435,10 +2435,10 @@ function calcularStatusFerias(funcionaria) {
   return { inicioCiclo, fimPeriodoAquisitivo, prazoLimite, diasParaPrazoLimite, diasParaAdquirirDireito, status };
 }
 const FERIAS_STATUS_LABEL = {
-  'aquisitivo': { label: '🔵 Adquirindo direito', color: 'var(--text-muted)' },
+  'aquisitivo': { label: '🔵 Acumulando', color: 'var(--text-muted)' },
   'em-dia': { label: '🟢 Em dia', color: 'var(--teal)' },
   'vencendo': { label: '🟡 Vencendo em breve', color: 'var(--amber)' },
-  'vencidas': { label: '🔴 Vencidas', color: 'var(--red)' },
+  'vencidas': { label: '🔴 Atrasadas', color: 'var(--red)' },
 };
 const DIAS_SEMANA = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 function renderLinhaJornadaDia(prefixo, dia, cfgExistente, jornadaPadrao) {
@@ -5897,7 +5897,7 @@ function renderHoleritesLote() {
                   ${jaFechado ? `
                     <div class="alert-meta" style="color:var(--teal)">✅ Já fechado — ${fmt(jaFechado.totalPagar)} · ${jaFechado.assinadoEm ? '✍️ assinado' : '⏳ aguardando assinatura'}</div>
                   ` : `
-                    <div class="alert-meta">${resumo.diasTrabalhados} dias · base ${fmt(resumo.salarioBase)} · extras ${formatarHorasMin(resumo.horasExtras)} (${f.modoCompensacaoPadrao === 'banco' ? '🏦 banco' : fmt(resumo.valorHorasExtras)})${resumo.horasExtras100 > 0 ? ` · 🗓️ ${formatarHorasMin(resumo.horasExtras100)} 100%` : ''} · faltas ${formatarHorasMin(resumo.horasFaltantes)}${resumo.valorVt > 0 ? ` · VT ${fmt(resumo.valorVt)}` : ''}${resumo.valorVr > 0 ? ` · VR ${fmt(resumo.valorVr)}` : ''}</div>
+                    <div class="alert-meta">${resumo.diasTrabalhados} dias · base ${fmt(resumo.salarioBase)} · extras ${formatarHorasMin(resumo.horasExtras)} (${f.modoCompensacaoPadrao === 'banco' ? '🏦 banco' : fmt(resumo.valorHorasExtras)})${resumo.horasExtras100 > 0 ? ` · 🗓️ ${formatarHorasMin(resumo.horasExtras100)} 100%` : ''} · faltas ${formatarHorasMin(resumo.horasFaltantes)}${resumo.valorVt > 0 ? ` · Aux. Transporte ${fmt(resumo.valorVt)}` : ''}${resumo.valorVr > 0 ? ` · Aux. Alimentação ${fmt(resumo.valorVr)}` : ''}</div>
                   `}
                 </div>
                 ${!jaFechado ? `<button class="confirm-btn" style="width:auto;padding:8px 14px" data-fechar-holerite-lote="${f.id}" data-mes="${mesKey}">Fechar</button>` : ''}
@@ -6012,7 +6012,7 @@ function renderRH(c) {
       <div class="form-card">
         <input type="text" id="funcNome" placeholder="Nome da funcionária" />
         <input type="text" id="funcPin" placeholder="PIN pessoal (ex: 4 dígitos)" inputmode="numeric" />
-        <div class="form-hint" style="margin-bottom:2px">Data de admissão (usada pra calcular as férias)</div>
+        <div class="form-hint" style="margin-bottom:2px">Data de admissão (usada pra calcular o recesso)</div>
         <input type="date" id="funcAdmissao" />
         <div class="form-hint">Jornada de trabalho — marque os dias que ela trabalha e o horário de cada um (dá pra deixar diferente por dia, ex: compensar sábado)</div>
         ${renderEditorJornadaSemanal('func', {}, { entrada: '08:00', saidaAlmoco: '12:00', voltaAlmoco: '13:00', saida: '17:00' })}
@@ -6054,8 +6054,8 @@ function renderRH(c) {
                   <button class="toggle-btn ${(window.__editFuncModoComp?.[f.id] || f.modoCompensacaoPadrao) === 'banco' ? 'active-pink' : ''}" data-edit-func-modo-comp="${f.id}" data-valor="banco">🏦 Banco de horas</button>
                 </div>
                 <div class="form-row">
-                  <input type="text" id="editFuncVtDia-${f.id}" placeholder="VT mensal (valor fixo)" value="${f.valorVtDia ? f.valorVtDia.toFixed(2).replace('.', ',') : ''}" />
-                  <input type="text" id="editFuncVrDia-${f.id}" placeholder="VR mensal (valor fixo)" value="${f.valorVrDia ? f.valorVrDia.toFixed(2).replace('.', ',') : ''}" />
+                  <input type="text" id="editFuncVtDia-${f.id}" placeholder="Auxílio Transporte mensal (valor fixo)" value="${f.valorVtDia ? f.valorVtDia.toFixed(2).replace('.', ',') : ''}" />
+                  <input type="text" id="editFuncVrDia-${f.id}" placeholder="Auxílio Alimentação mensal (valor fixo)" value="${f.valorVrDia ? f.valorVrDia.toFixed(2).replace('.', ',') : ''}" />
                 </div>
                 <div class="form-hint" style="margin-bottom:2px">Horas por semana que ela não trabalha e devem ser compensadas no fim do mês, descontando do saldo de horas extras (ex: sábado não trabalhado = 4h). Deixa em 0 se a jornada semanal abaixo já embutir isso nos horários de cada dia.</div>
                 <input type="text" id="editFuncCompSabado-${f.id}" placeholder="Horas de compensação por semana (ex: 4)" value="${f.horasCompensacaoSemanal || ''}" inputmode="decimal" />
@@ -6225,27 +6225,27 @@ function renderFuncionariaDetalhe(funcionariaId) {
     })()}
 
     <div class="section-title-wrap">
-      <div><div class="section-title">Férias</div></div>
-      <button class="icon-btn-ghost" id="toggleFeriasForm">🏖️ Registrar férias</button>
+      <div><div class="section-title">Recesso</div></div>
+      <button class="icon-btn-ghost" id="toggleFeriasForm">🏖️ Registrar recesso</button>
     </div>
-    ${!f?.dataAdmissao ? `<div class="empty-state">Cadastre a data de admissão dela (✏️ na lista) pra calcular o ciclo de férias.</div>` : `
+    ${!f?.dataAdmissao ? `<div class="empty-state">Cadastre a data de admissão dela (✏️ na lista) pra calcular o ciclo de recesso.</div>` : `
       <div class="form-card">
         <div class="produto-meta" style="margin-left:0">Status: <strong style="color:${FERIAS_STATUS_LABEL[statusFerias.status].color}">${FERIAS_STATUS_LABEL[statusFerias.status].label}</strong></div>
-        <div class="produto-meta" style="margin-left:0;margin-top:4px">Período aquisitivo começou em: <strong style="color:var(--text)">${statusFerias.inicioCiclo.toLocaleDateString('pt-BR')}</strong></div>
-        <div class="produto-meta" style="margin-left:0;margin-top:4px">${statusFerias.diasParaAdquirirDireito > 0 ? `Direito adquirido em: <strong style="color:var(--text)">${statusFerias.fimPeriodoAquisitivo.toLocaleDateString('pt-BR')}</strong> (faltam ${statusFerias.diasParaAdquirirDireito} dias)` : `Prazo limite pra conceder: <strong style="color:var(--text)">${statusFerias.prazoLimite.toLocaleDateString('pt-BR')}</strong> (${statusFerias.diasParaPrazoLimite >= 0 ? `faltam ${statusFerias.diasParaPrazoLimite} dias` : `venceu há ${Math.abs(statusFerias.diasParaPrazoLimite)} dias`})`}</div>
+        <div class="produto-meta" style="margin-left:0;margin-top:4px">Ciclo atual começou em: <strong style="color:var(--text)">${statusFerias.inicioCiclo.toLocaleDateString('pt-BR')}</strong></div>
+        <div class="produto-meta" style="margin-left:0;margin-top:4px">${statusFerias.diasParaAdquirirDireito > 0 ? `Liberado a partir de: <strong style="color:var(--text)">${statusFerias.fimPeriodoAquisitivo.toLocaleDateString('pt-BR')}</strong> (faltam ${statusFerias.diasParaAdquirirDireito} dias)` : `Prazo limite pra usar: <strong style="color:var(--text)">${statusFerias.prazoLimite.toLocaleDateString('pt-BR')}</strong> (${statusFerias.diasParaPrazoLimite >= 0 ? `faltam ${statusFerias.diasParaPrazoLimite} dias` : `venceu há ${Math.abs(statusFerias.diasParaPrazoLimite)} dias`})`}</div>
       </div>
     `}
 
     ${state.showFeriasForm ? `
       <div class="form-card">
-        <div class="form-hint">Registrar um período de férias já tirado (ou já agendado) — isso reinicia o ciclo automaticamente.</div>
+        <div class="form-hint">Registrar um período de recesso já tirado (ou já agendado) — isso reinicia o ciclo automaticamente.</div>
         <div class="form-row">
           <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Início</div><input type="date" id="feriasInicio" /></div>
           <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Fim</div><input type="date" id="feriasFim" /></div>
         </div>
-        <div class="form-hint" style="margin-top:8px;margin-bottom:2px">Vendeu dias (abono pecuniário)? Quantos:</div>
+        <div class="form-hint" style="margin-top:8px;margin-bottom:2px">Vendeu dias do recesso? Quantos:</div>
         <input type="text" id="feriasDiasVendidos" placeholder="Dias vendidos (ex: 15) — deixe em branco se não vendeu nada" inputmode="numeric" />
-        <div class="form-hint" style="margin-top:8px;margin-bottom:2px">Mês que paga essa férias/abono no holerite (padrão: mês em que ela começa):</div>
+        <div class="form-hint" style="margin-top:8px;margin-bottom:2px">Mês que paga esse recesso/dias vendidos no holerite (padrão: mês em que ele começa):</div>
         <input type="month" id="feriasMesPagamento" />
         <button class="confirm-btn" style="margin-top:8px" data-salvar-ferias="${funcionariaId}">Salvar</button>
       </div>
@@ -6261,7 +6261,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
                   <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Início</div><input type="date" id="editFeriasInicio-${v.id}" value="${v.dataInicio}" /></div>
                   <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Fim</div><input type="date" id="editFeriasFim-${v.id}" value="${v.dataFim}" /></div>
                 </div>
-                <div class="form-hint" style="margin-top:8px;margin-bottom:2px">Dias vendidos (abono pecuniário):</div>
+                <div class="form-hint" style="margin-top:8px;margin-bottom:2px">Dias vendidos:</div>
                 <input type="text" id="editFeriasDiasVendidos-${v.id}" value="${v.diasVendidos || ''}" placeholder="ex: 15" inputmode="numeric" />
                 <div class="form-hint" style="margin-top:8px;margin-bottom:2px">Mês que paga no holerite:</div>
                 <input type="month" id="editFeriasMesPagamento-${v.id}" value="${v.mesReferenciaPagamento || v.dataInicio.slice(0, 7)}" />
@@ -6277,7 +6277,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
               <div class="tx-dot" style="background:var(--teal)"></div>
               <div style="flex:1">
                 <div class="tx-categoria">${dataFmt(v.dataInicio)} → ${dataFmt(v.dataFim)}</div>
-                ${v.diasVendidos > 0 ? `<div class="tx-desc">💰 ${v.diasVendidos} dia(s) vendido(s) (abono) · paga em ${mesLabelHolerite(v.mesReferenciaPagamento || v.dataInicio.slice(0, 7))}</div>` : ''}
+                ${v.diasVendidos > 0 ? `<div class="tx-desc">💰 ${v.diasVendidos} dia(s) vendido(s) · paga em ${mesLabelHolerite(v.mesReferenciaPagamento || v.dataInicio.slice(0, 7))}</div>` : ''}
               </div>
               <button class="trash-btn" data-remover-ferias="${v.id}">🗑</button>
             </div>
@@ -6427,7 +6427,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
     ` : ''}
 
     <div class="section-title-wrap" style="margin-top:24px">
-      <div><div class="section-title">Holerite</div><div class="section-subtitle">Fecha o pagamento do mês — salário, horas extras, VT e VR</div></div>
+      <div><div class="section-title">Holerite</div><div class="section-subtitle">Fecha o pagamento do mês — salário, horas extras, Auxílio Transporte e Alimentação</div></div>
       <button class="icon-btn-ghost" data-baixar-espelho-ponto="${funcionariaId}">🗓️ Espelho de ponto (PDF)</button>
     </div>
 
@@ -6536,10 +6536,10 @@ function renderFuncionariaDetalhe(funcionariaId) {
           <div class="prod-breakdown-item"><span>Horas faltantes não abonadas</span><span>${formatarHorasMin(holeriteExistente.horasFaltantes)} 🏦 débito no banco</span></div>
           ${horasBancoUsadasFechado > 0 ? `<div class="prod-breakdown-item"><span>🏦 Banco de horas usado nesse mês</span><span style="color:var(--amber)">-${formatarHorasMin(horasBancoUsadasFechado)}</span></div>` : ''}
           ${horasBancoPagasDinheiroFechado > 0 ? `<div class="prod-breakdown-item"><span>💰 Banco de horas pago em dinheiro</span><span style="color:var(--teal)">${formatarHorasMin(horasBancoPagasDinheiroFechado)} · ${fmt(valorBancoPagoDinheiroFechado)}</span></div>` : ''}
-          <div class="prod-breakdown-item"><span>VT</span><span>${fmt(holeriteExistente.valorVt)}</span></div>
-          <div class="prod-breakdown-item"><span>VR</span><span>${fmt(holeriteExistente.valorVr)}</span></div>
-          ${holeriteExistente.diasFeriasGozados > 0 ? `<div class="prod-breakdown-item"><span>🏖️ Férias (${holeriteExistente.diasFeriasGozados} dias + 1/3)</span><span>${fmt(holeriteExistente.valorFerias * (4 / 3))}</span></div>` : ''}
-          ${holeriteExistente.diasVendidos > 0 ? `<div class="prod-breakdown-item"><span>💰 Abono pecuniário (${holeriteExistente.diasVendidos} dias vendidos + 1/3)</span><span>${fmt(holeriteExistente.valorAbonoPecuniario * (4 / 3))}</span></div>` : ''}
+          <div class="prod-breakdown-item"><span>Auxílio Transporte</span><span>${fmt(holeriteExistente.valorVt)}</span></div>
+          <div class="prod-breakdown-item"><span>Auxílio Alimentação</span><span>${fmt(holeriteExistente.valorVr)}</span></div>
+          ${holeriteExistente.diasFeriasGozados > 0 ? `<div class="prod-breakdown-item"><span>🏖️ Recesso (${holeriteExistente.diasFeriasGozados} dias + adicional)</span><span>${fmt(holeriteExistente.valorFerias * (4 / 3))}</span></div>` : ''}
+          ${holeriteExistente.diasVendidos > 0 ? `<div class="prod-breakdown-item"><span>💰 Dias vendidos (${holeriteExistente.diasVendidos} dias + adicional)</span><span>${fmt(holeriteExistente.valorAbonoPecuniario * (4 / 3))}</span></div>` : ''}
         </div>
         <div class="produto-vendido" style="margin-top:8px">💰 Total pago: ${fmt(holeriteExistente.totalPagar)}</div>
         ${extratoBancoMes && (extratoBancoMes.saldoAnterior !== 0 || extratoBancoMes.produzido !== 0 || extratoBancoMes.consumido !== 0) ? `
@@ -6574,8 +6574,8 @@ function renderFuncionariaDetalhe(funcionariaId) {
           ${resumoHolerite.horasBancoUsadas > 0 ? `<div class="prod-breakdown-item"><span>🏦 Banco de horas usado nesse mês</span><span style="color:var(--amber)">-${formatarHorasMin(resumoHolerite.horasBancoUsadas)}</span></div>` : ''}
           ${resumoHolerite.horasBancoPagasDinheiro > 0 ? `<div class="prod-breakdown-item"><span>💰 Banco de horas pago em dinheiro (já lançado, não soma no total)</span><span style="color:var(--teal)">${formatarHorasMin(resumoHolerite.horasBancoPagasDinheiro)} · ${fmt(resumoHolerite.valorBancoPagoDinheiro)}</span></div>` : ''}
           <div class="prod-breakdown-item"><span>Horas faltantes não abonadas</span><span style="color:var(--red)">${formatarHorasMin(resumoHolerite.horasFaltantes)}</span></div>
-          ${resumoFerias && resumoFerias.diasGozados > 0 ? `<div class="prod-breakdown-item"><span>🏖️ Férias (${resumoFerias.diasGozados} dias + 1/3)</span><span>${fmt(resumoFerias.valorFeriasGozadas + resumoFerias.tercoFerias)}</span></div>` : ''}
-          ${resumoFerias && resumoFerias.diasVendidos > 0 ? `<div class="prod-breakdown-item"><span>💰 Abono pecuniário (${resumoFerias.diasVendidos} dias vendidos + 1/3)</span><span>${fmt(resumoFerias.valorAbono + resumoFerias.tercoAbono)}</span></div>` : ''}
+          ${resumoFerias && resumoFerias.diasGozados > 0 ? `<div class="prod-breakdown-item"><span>🏖️ Recesso (${resumoFerias.diasGozados} dias + adicional)</span><span>${fmt(resumoFerias.valorFeriasGozadas + resumoFerias.tercoFerias)}</span></div>` : ''}
+          ${resumoFerias && resumoFerias.diasVendidos > 0 ? `<div class="prod-breakdown-item"><span>💰 Dias vendidos (${resumoFerias.diasVendidos} dias + adicional)</span><span>${fmt(resumoFerias.valorAbono + resumoFerias.tercoAbono)}</span></div>` : ''}
         </div>
         ${extratoBancoMes && (extratoBancoMes.saldoAnterior !== 0 || extratoBancoMes.produzido !== 0 || extratoBancoMes.consumido !== 0) ? `
           <div class="form-hint" style="margin-top:10px;margin-bottom:2px">Extrato do banco de horas desse mês</div>
@@ -6619,10 +6619,10 @@ function renderFuncionariaDetalhe(funcionariaId) {
           `;
         })()}
 
-        <div class="form-hint" style="margin-top:14px;margin-bottom:2px">VT/VR do mês</div>
+        <div class="form-hint" style="margin-top:14px;margin-bottom:2px">Auxílio Transporte/Alimentação do mês</div>
         <div class="form-row">
-          <input type="text" id="holeriteVt" placeholder="VT mensal fixo" value="${resumoHolerite.valorVt.toFixed(2).replace('.', ',')}" />
-          <input type="text" id="holeriteVr" placeholder="VR mensal fixo" value="${resumoHolerite.valorVr.toFixed(2).replace('.', ',')}" />
+          <input type="text" id="holeriteVt" placeholder="Auxílio Transporte mensal fixo" value="${resumoHolerite.valorVt.toFixed(2).replace('.', ',')}" />
+          <input type="text" id="holeriteVr" placeholder="Auxílio Alimentação mensal fixo" value="${resumoHolerite.valorVr.toFixed(2).replace('.', ',')}" />
         </div>
         <div class="form-hint" style="margin-top:10px;margin-bottom:2px">Data do pagamento (é a data que vai aparecer no Financeiro)</div>
         <input type="date" id="holeriteDataPagamento" value="${state.holeriteDataPagamento || (() => { const [anoH, mesH] = mesHolerite.split('-').map(Number); const ultimoDiaH = new Date(anoH, mesH, 0).getDate(); const hojeReal = todayStr(); const candidato = `${mesHolerite}-${String(ultimoDiaH).padStart(2, '0')}`; return candidato <= hojeReal ? candidato : hojeReal; })()}" />
@@ -6657,7 +6657,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
                 const partes = [];
                 if (oc.diasAtestado > 0) partes.push(`${oc.diasAtestado} atestado(s)`);
                 if (oc.diasAbono > 0) partes.push(`${oc.diasAbono} abono(s)/folga(s)`);
-                if (oc.diasFerias > 0) partes.push(`${oc.diasFerias} dia(s) de férias`);
+                if (oc.diasFerias > 0) partes.push(`${oc.diasFerias} dia(s) de recesso`);
                 return `<div>Ocorrências: <strong>${partes.join(', ')}</strong></div>`;
               })()}
             </div>
@@ -6665,8 +6665,8 @@ function renderFuncionariaDetalhe(funcionariaId) {
               <div class="prod-breakdown-item"><span>${f.tipoPagamento === 'mensal' ? 'Salário mensal' : `Salário (${resumoHolerite.horasTrabalhadasTotal.toFixed(1)}h)`}</span><span>${fmt(resumoHolerite.salarioBase)}</span></div>
               ${resumoHolerite.horasExtras > 0 ? `<div class="prod-breakdown-item"><span>Horas extras (${formatarHorasMin(resumoHolerite.horasExtras)} + ${f.percentualHoraExtra}%)</span><span>${d.modoHorasExtras === 'banco' ? '🏦 banco de horas' : fmt(resumoHolerite.valorHorasExtras)}</span></div>` : ''}
               ${resumoHolerite.horasExtras100 > 0 ? `<div class="prod-breakdown-item"><span>🗓️ Domingo/feriado — 100%</span><span>${d.modoHorasExtras === 'banco' ? '🏦 banco de horas' : fmt(resumoHolerite.valorHorasExtras100)}</span></div>` : ''}
-              ${d.valorVt > 0 ? `<div class="prod-breakdown-item"><span>Vale-transporte (VT)</span><span>${fmt(d.valorVt)}</span></div>` : ''}
-              ${d.valorVr > 0 ? `<div class="prod-breakdown-item"><span>Vale-refeição/alimentação (VR)</span><span>${fmt(d.valorVr)}</span></div>` : ''}
+              ${d.valorVt > 0 ? `<div class="prod-breakdown-item"><span>Auxílio Transporte</span><span>${fmt(d.valorVt)}</span></div>` : ''}
+              ${d.valorVr > 0 ? `<div class="prod-breakdown-item"><span>Auxílio Alimentação</span><span>${fmt(d.valorVr)}</span></div>` : ''}
             </div>
             <div class="produto-vendido" style="margin-top:10px">💰 Total líquido: ${fmt(d.totalPagar)}</div>
             ${resumoHolerite.horasFaltantes > 0 ? `<div class="form-hint" style="margin-top:8px;color:var(--red)">${formatarHorasMin(resumoHolerite.horasFaltantes)} de falta não abonada — vira débito no banco de horas.</div>` : ''}
@@ -7009,7 +7009,7 @@ function attachRHHandlers(c) {
       const fim = document.getElementById('feriasFim').value;
       const diasVendidos = Number(document.getElementById('feriasDiasVendidos').value) || 0;
       const mesReferenciaPagamento = document.getElementById('feriasMesPagamento').value || null;
-      if (!inicio || !fim) { alert('Preencha início e fim das férias.'); return; }
+      if (!inicio || !fim) { alert('Preencha início e fim do recesso.'); return; }
       if (fim < inicio) { alert('A data de fim precisa ser depois da data de início.'); return; }
       await addFeriasTirada(funcionariaId, inicio, fim, diasVendidos, mesReferenciaPagamento);
       state.showFeriasForm = false;
@@ -7030,7 +7030,7 @@ function attachRHHandlers(c) {
         const fim = document.getElementById(`editFeriasFim-${id}`).value;
         const diasVendidos = Number(document.getElementById(`editFeriasDiasVendidos-${id}`).value) || 0;
         const mesReferenciaPagamento = document.getElementById(`editFeriasMesPagamento-${id}`).value || null;
-        if (!inicio || !fim) { alert('Preencha início e fim das férias.'); return; }
+        if (!inicio || !fim) { alert('Preencha início e fim do recesso.'); return; }
         if (fim < inicio) { alert('A data de fim precisa ser depois da data de início.'); return; }
         await updateFeriasTirada(id, inicio, fim, diasVendidos, mesReferenciaPagamento);
         state.editandoFeriasId = null;
@@ -7041,7 +7041,7 @@ function attachRHHandlers(c) {
     document.querySelectorAll('[data-remover-ferias]').forEach((btn) => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (confirm('Remover esse registro de férias? O ciclo volta a contar a partir do registro anterior (ou da admissão).')) {
+        if (confirm('Remover esse registro de recesso? O ciclo volta a contar a partir do registro anterior (ou da admissão).')) {
           await removeFeriasTirada(btn.dataset.removerFerias);
           await loadData();
         }
