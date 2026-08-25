@@ -199,7 +199,7 @@ function parseCSV(text) {
 }
 function guessValueField(row) {
   // prioriza valores por item de linha (evita duplicar o total do pedido quando há várias variações)
-  const candidates = ['subtotal do produto', 'valor total', 'pagamentos recebidos', 'valor de vendas válidas', 'valor total de vendas', 'valor da nota fiscal', 'valor', 'total', 'preço total', 'preco total', 'valor do produto', 'receita'];
+  const candidates = ['subtotal do produto', 'valor total', 'pagamentos recebidos', 'valor de vendas válidas', 'valor de vendas', 'valor total de vendas', 'valor da nota fiscal', 'valor', 'total', 'preço total', 'preco total', 'valor do produto', 'receita'];
   // usa a PRIMEIRA coluna candidata que existir na planilha, mesmo que o valor seja 0 — antes,
   // um R$0,00 de verdade (ex: pedido cancelado, sem repasse) era tratado como "não tem essa
   // coluna" e caía pra próxima candidata, ou pulava a linha inteira sem nem contar como pedido
