@@ -2571,6 +2571,24 @@ function calcularResumoOcorrencias(funcionariaId, mesKey) {
     }, 0);
   return { diasAtestado, diasAbono, diasFerias };
 }
+// conta quantos sábados caem entre duas datas (inclusive) e calcula o débito de
+// compensação — NUNCA desconta um sábado que ainda não aconteceu (mesmo que já esteja
+// dentro do mês corrente), só os que já passaram até hoje. Assim o valor não fica
+// artificialmente mais negativo por causa de um sábado futuro que nem chegou ainda
+function calcularDebitoCompensacaoSabado(funcionaria, dataInicioStr, dataFimStr) {
+  if (!funcionaria.horasCompensacaoSemanal || funcionaria.horasCompensacaoSemanal <= 0) return 0;
+  const hoje = todayStr();
+  const fimReal = dataFimStr > hoje ? hoje : dataFimStr;
+  if (fimReal < dataInicioStr) return 0;
+  let numSabados = 0;
+  const cursor = new Date(dataInicioStr + 'T00:00:00');
+  const fim = new Date(fimReal + 'T00:00:00');
+  while (cursor <= fim) {
+    if (cursor.getDay() === 6) numSabados++;
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return numSabados * funcionaria.horasCompensacaoSemanal;
+}
 function calcularResumoHolerite(funcionaria, mesKey) {
   const [ano, mes] = mesKey.split('-').map(Number);
   const ultimoDia = new Date(ano, mes, 0).getDate();
@@ -2622,14 +2640,10 @@ function calcularResumoHolerite(funcionaria, mesKey) {
   horasFaltantes = Math.max(0, horasFaltantesBrutas - horasExtrasBrutas);
 
   // compensação de sábado (ou outro dia não trabalhado) acertada no fim do mês, em vez de
-  // embutida na jornada de cada dia — desconta do líquido de extra/falta já calculado
-  let debitoCompensacaoSabado = 0;
-  if (funcionaria.horasCompensacaoSemanal > 0) {
-    let numSabados = 0;
-    for (let dia = 1; dia <= ultimoDia; dia++) {
-      if (new Date(ano, mes - 1, dia).getDay() === 6) numSabados++;
-    }
-    debitoCompensacaoSabado = numSabados * funcionaria.horasCompensacaoSemanal;
+  // embutida na jornada de cada dia — desconta do líquido de extra/falta já calculado.
+  // Só conta os sábados que já passaram (nunca um sábado futuro dentro do mês corrente)
+  const debitoCompensacaoSabado = calcularDebitoCompensacaoSabado(funcionaria, `${mesKey}-01`, `${mesKey}-${String(ultimoDia).padStart(2, '0')}`);
+  if (debitoCompensacaoSabado > 0) {
     const liquido = horasExtras - horasFaltantes - debitoCompensacaoSabado;
     horasExtras = Math.max(0, liquido);
     horasFaltantes = Math.max(0, -liquido);
@@ -6310,14 +6324,15 @@ function renderFuncionariaDetalhe(funcionariaId) {
           <div class="stat-value" style="color:var(--red)">-${formatarHorasMin(totalFalta)}</div>
         </div>
         ${extratoBancoMes ? (() => {
-          const saldoTempoReal = extratoBancoMes.saldoAnterior + totalExtra - totalFalta;
+          const debitoCompensacaoSabadoPeriodo = f ? calcularDebitoCompensacaoSabado(f, inicio, fim) : 0;
+          const saldoTempoReal = extratoBancoMes.saldoAnterior + totalExtra - totalFalta - debitoCompensacaoSabadoPeriodo;
           const periodoBateComMesHolerite = inicio === `${mesHolerite}-01` && monthKey(fim) === mesHolerite;
           return `
             <div class="stat-card">
               <div class="stat-icon" style="background:${saldoTempoReal >= 0 ? 'rgba(0,212,160,0.1)' : 'rgba(255,71,87,0.1)'}">📡</div>
               <div class="stat-label">Saldo total em tempo real</div>
               <div class="stat-value" style="color:${saldoTempoReal >= 0 ? 'var(--teal)' : 'var(--red)'}">${saldoTempoReal >= 0 ? '+' : '-'}${formatarHorasMin(saldoTempoReal)}</div>
-              <div class="form-hint" style="margin-top:2px">${extratoBancoMes.saldoAnterior >= 0 ? '+' : '-'}${formatarHorasMin(extratoBancoMes.saldoAnterior)} de antes + esse período, sem esperar fechar o holerite${!periodoBateComMesHolerite ? ` ⚠️ o período acima (dias) não é o mês inteiro de ${mesLabelHolerite(mesHolerite)} — ajusta o filtro de data pra esse número ficar preciso` : ''}</div>
+              <div class="form-hint" style="margin-top:2px">${extratoBancoMes.saldoAnterior >= 0 ? '+' : '-'}${formatarHorasMin(extratoBancoMes.saldoAnterior)} de antes + esse período${debitoCompensacaoSabadoPeriodo > 0 ? ` − ${formatarHorasMin(debitoCompensacaoSabadoPeriodo)} de compensação de sábado` : ''}, sem esperar fechar o holerite${!periodoBateComMesHolerite ? ` ⚠️ o período acima (dias) não é o mês inteiro de ${mesLabelHolerite(mesHolerite)} — ajusta o filtro de data pra esse número ficar preciso` : ''}</div>
             </div>
           `;
         })() : ''}
