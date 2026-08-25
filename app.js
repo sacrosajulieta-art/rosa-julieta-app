@@ -6621,8 +6621,8 @@ function renderFuncionariaDetalhe(funcionariaId) {
 
         <div class="form-hint" style="margin-top:14px;margin-bottom:2px">Auxílio Transporte/Alimentação do mês</div>
         <div class="form-row">
-          <input type="text" id="holeriteVt" placeholder="Auxílio Transporte mensal fixo" value="${resumoHolerite.valorVt.toFixed(2).replace('.', ',')}" />
-          <input type="text" id="holeriteVr" placeholder="Auxílio Alimentação mensal fixo" value="${resumoHolerite.valorVr.toFixed(2).replace('.', ',')}" />
+          <input type="text" id="holeriteVt" placeholder="Auxílio Transporte mensal fixo" value="${window.__holeriteVtOverride != null ? window.__holeriteVtOverride : resumoHolerite.valorVt.toFixed(2).replace('.', ',')}" />
+          <input type="text" id="holeriteVr" placeholder="Auxílio Alimentação mensal fixo" value="${window.__holeriteVrOverride != null ? window.__holeriteVrOverride : resumoHolerite.valorVr.toFixed(2).replace('.', ',')}" />
         </div>
         <div class="form-hint" style="margin-top:10px;margin-bottom:2px">Data do pagamento (é a data que vai aparecer no Financeiro)</div>
         <input type="date" id="holeriteDataPagamento" value="${state.holeriteDataPagamento || (() => { const [anoH, mesH] = mesHolerite.split('-').map(Number); const ultimoDiaH = new Date(anoH, mesH, 0).getDate(); const hojeReal = todayStr(); const candidato = `${mesHolerite}-${String(ultimoDiaH).padStart(2, '0')}`; return candidato <= hojeReal ? candidato : hojeReal; })()}" />
@@ -6757,7 +6757,7 @@ function attachRHHandlers(c) {
 
   if (state.rhFuncionariaDetalheId) {
     const voltar = document.getElementById('voltarFuncionarias');
-    if (voltar) voltar.addEventListener('click', () => { state.rhFuncionariaDetalheId = null; state.editingPontoId = null; state.showFeriasForm = false; state.showAbonarId = null; state.showPreviaHolerite = false; window.__previaHoleriteData = null; state.holeriteDataPagamento = null; render(); });
+    if (voltar) voltar.addEventListener('click', () => { state.rhFuncionariaDetalheId = null; state.editingPontoId = null; state.showFeriasForm = false; state.showAbonarId = null; state.showPreviaHolerite = false; window.__previaHoleriteData = null; state.holeriteDataPagamento = null; window.__holeriteVtOverride = null; window.__holeriteVrOverride = null; render(); });
 
     document.querySelectorAll('[data-abrir-abonar]').forEach((btn) => {
       btn.addEventListener('click', () => { state.showAbonarId = btn.dataset.abrirAbonar; render(); });
@@ -6899,7 +6899,15 @@ function attachRHHandlers(c) {
     });
 
     const holeriteMesSelect = document.getElementById('holeriteMesSelect');
-    if (holeriteMesSelect) holeriteMesSelect.addEventListener('change', (e) => { state.holeriteMes = e.target.value; state.showPreviaHolerite = false; state.holeriteDataPagamento = null; render(); });
+    if (holeriteMesSelect) holeriteMesSelect.addEventListener('change', (e) => { state.holeriteMes = e.target.value; state.showPreviaHolerite = false; state.holeriteDataPagamento = null; window.__holeriteVtOverride = null; window.__holeriteVrOverride = null; render(); });
+
+    // guarda o que a pessoa digitou nesses dois campos pra não perder o valor quando outra
+    // ação da mesma tela (ex: "Visualizar prévia", trocar modo de hora extra) causar um
+    // novo render — antes, o campo sempre voltava pro valor cadastrado da funcionária
+    const holeriteVtInput = document.getElementById('holeriteVt');
+    if (holeriteVtInput) holeriteVtInput.addEventListener('input', (e) => { window.__holeriteVtOverride = e.target.value; });
+    const holeriteVrInput = document.getElementById('holeriteVr');
+    if (holeriteVrInput) holeriteVrInput.addEventListener('input', (e) => { window.__holeriteVrOverride = e.target.value; });
 
     const holeriteDataPagamentoInput = document.getElementById('holeriteDataPagamento');
     if (holeriteDataPagamentoInput) holeriteDataPagamentoInput.addEventListener('change', (e) => { state.holeriteDataPagamento = e.target.value; });
@@ -6964,6 +6972,8 @@ function attachRHHandlers(c) {
       if (!confirm(`Fechar o holerite de ${funcionaria.nome}?\n\nTotal a pagar: ${fmt(totalPagar)}${totalAdiantamentosMes > 0 ? ` (já descontado ${fmt(totalAdiantamentosMes)} de adiantamento)` : ''}\nData do lançamento: ${dataPagamentoFmt}\n\nIsso lança a saída no Financeiro e movimenta o banco de horas. Confirma?`)) return;
       await fecharHolerite(funcionaria, mesKey, resumo, modoHorasExtras, valorVt, valorVr, dataPagamento);
       window.__holeriteModoExtras = null;
+      window.__holeriteVtOverride = null;
+      window.__holeriteVrOverride = null;
       await loadData();
     });
 
