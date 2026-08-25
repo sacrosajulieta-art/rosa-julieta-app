@@ -460,6 +460,7 @@ const state = {
   costureiraDetalheId: null,
   mostrarPecasPorModelo: false,
   editandoFeriasId: null,
+  showNovoAdiantamento: false,
   modeloExpandido: null,
   showValoresPecaForm: false,
   editingProducaoId: null,
@@ -6757,7 +6758,7 @@ function attachRHHandlers(c) {
 
   if (state.rhFuncionariaDetalheId) {
     const voltar = document.getElementById('voltarFuncionarias');
-    if (voltar) voltar.addEventListener('click', () => { state.rhFuncionariaDetalheId = null; state.editingPontoId = null; state.showFeriasForm = false; state.showAbonarId = null; state.showPreviaHolerite = false; window.__previaHoleriteData = null; state.holeriteDataPagamento = null; window.__holeriteVtOverride = null; window.__holeriteVrOverride = null; render(); });
+    if (voltar) voltar.addEventListener('click', () => { state.rhFuncionariaDetalheId = null; state.editingPontoId = null; state.showFeriasForm = false; state.showAbonarId = null; state.showPreviaHolerite = false; window.__previaHoleriteData = null; state.holeriteDataPagamento = null; window.__holeriteVtOverride = null; window.__holeriteVrOverride = null; state.showNovoAdiantamento = false; render(); });
 
     document.querySelectorAll('[data-abrir-abonar]').forEach((btn) => {
       btn.addEventListener('click', () => { state.showAbonarId = btn.dataset.abrirAbonar; render(); });
@@ -6908,6 +6909,35 @@ function attachRHHandlers(c) {
     if (holeriteVtInput) holeriteVtInput.addEventListener('input', (e) => { window.__holeriteVtOverride = e.target.value; });
     const holeriteVrInput = document.getElementById('holeriteVr');
     if (holeriteVrInput) holeriteVrInput.addEventListener('input', (e) => { window.__holeriteVrOverride = e.target.value; });
+
+    const toggleNovoAdiantamento = document.getElementById('toggleNovoAdiantamento');
+    if (toggleNovoAdiantamento) toggleNovoAdiantamento.addEventListener('click', () => { state.showNovoAdiantamento = !state.showNovoAdiantamento; render(); });
+
+    const cancelarNovoAdiantamento = document.getElementById('cancelarNovoAdiantamento');
+    if (cancelarNovoAdiantamento) cancelarNovoAdiantamento.addEventListener('click', () => { state.showNovoAdiantamento = false; render(); });
+
+    const salvarNovoAdiantamento = document.getElementById('salvarNovoAdiantamento');
+    if (salvarNovoAdiantamento) salvarNovoAdiantamento.addEventListener('click', async () => {
+      const funcionariaId = salvarNovoAdiantamento.dataset.funcionaria;
+      const valor = parseBRNumber(document.getElementById('novoAdiantamentoValor').value);
+      const data = document.getElementById('novoAdiantamentoData').value;
+      const motivo = document.getElementById('novoAdiantamentoMotivo').value.trim();
+      if (!valor || valor <= 0) { alert('Informe o valor do adiantamento.'); return; }
+      if (!data) { alert('Informe a data do adiantamento.'); return; }
+      await registrarAdiantamento(funcionariaId, data, valor, motivo);
+      state.showNovoAdiantamento = false;
+      await loadData();
+    });
+
+    document.querySelectorAll('[data-remover-adiantamento]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        if (confirm('Remover esse adiantamento? Isso também remove o lançamento correspondente no Financeiro.')) {
+          await removerAdiantamento(btn.dataset.removerAdiantamento);
+          await loadData();
+        }
+      });
+    });
+
 
     const holeriteDataPagamentoInput = document.getElementById('holeriteDataPagamento');
     if (holeriteDataPagamentoInput) holeriteDataPagamentoInput.addEventListener('change', (e) => { state.holeriteDataPagamento = e.target.value; });
