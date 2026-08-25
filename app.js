@@ -459,6 +459,7 @@ const state = {
   showProducaoForm: false,
   costureiraDetalheId: null,
   mostrarPecasPorModelo: false,
+  editandoFeriasId: null,
   modeloExpandido: null,
   showValoresPecaForm: false,
   editingProducaoId: null,
@@ -667,7 +668,7 @@ async function loadData() {
   state.fichaTecnicaItens = (fichaTecnicaItens || []).map((f) => ({ id: f.id, produtoId: f.produto_id, tipoItem: f.tipo_item, insumoId: f.insumo_id || null, componenteProdutoId: f.componente_produto_id || null, quantidade: Number(f.quantidade), momento: f.momento || 'venda' }));
   state.insumoPlataformaQtd = (insumoPlataformaQtd || []).map((q) => ({ id: q.id, insumoId: q.insumo_id, plataformaId: q.plataforma_id, quantidade: Number(q.quantidade) }));
   state.funcionarias = (funcionarias || []).map((f) => ({ id: f.id, nome: f.nome, pin: f.pin, ativa: f.ativa, jornadaEntrada: (f.jornada_entrada || '08:00').slice(0, 5), jornadaSaidaAlmoco: (f.jornada_saida_almoco || '12:00').slice(0, 5), jornadaVoltaAlmoco: (f.jornada_volta_almoco || '13:00').slice(0, 5), jornadaSaida: (f.jornada_saida || '17:00').slice(0, 5), valorHora: Number(f.valor_hora || 0), dataAdmissao: f.data_admissao || null, jornadaSemanal: f.jornada_semanal || {}, percentualHoraExtra: Number(f.percentual_hora_extra != null ? f.percentual_hora_extra : 50), modoCompensacaoPadrao: f.modo_compensacao_padrao || 'dinheiro', tipoPagamento: f.tipo_pagamento || 'hora', salarioMensal: Number(f.salario_mensal || 0), valorVtDia: Number(f.valor_vt_dia || 0), valorVrDia: Number(f.valor_vr_dia || 0), horasCompensacaoSemanal: Number(f.horas_compensacao_semanal || 0), cpf: f.cpf || '', cargo: f.cargo || '', matricula: f.matricula || '' }));
-  state.feriasTiradas = (feriasTiradas || []).map((v) => ({ id: v.id, funcionariaId: v.funcionaria_id, dataInicio: v.data_inicio, dataFim: v.data_fim }));
+  state.feriasTiradas = (feriasTiradas || []).map((v) => ({ id: v.id, funcionariaId: v.funcionaria_id, dataInicio: v.data_inicio, dataFim: v.data_fim, diasVendidos: Number(v.dias_vendidos || 0), mesReferenciaPagamento: v.mes_referencia_pagamento || null }));
   state.pontos = (pontos || []).map((p) => ({ id: p.id, funcionariaId: p.funcionaria_id, data: p.data, tipo: p.tipo, horario: p.horario, origem: p.origem || 'propria' }));
   state.solicitacoesPonto = (solicitacoesPonto || []).map((s) => ({ id: s.id, funcionariaId: s.funcionaria_id, data: s.data, tipo: s.tipo, horarioSolicitado: s.horario_solicitado, motivo: s.motivo || '', status: s.status, createdAt: s.created_at }));
   state.horasExtrasLiquidadas = (horasExtrasLiquidadas || []).map((h) => ({ id: h.id, funcionariaId: h.funcionaria_id, data: h.data, horas: Number(h.horas), modo: h.modo, valorPago: h.valor_pago != null ? Number(h.valor_pago) : null }));
@@ -678,7 +679,7 @@ async function loadData() {
   state.vendasSkuPendentes = (vendasSkuPendentes || []).map((v) => ({ id: v.id, sku: v.sku, quantidade: Number(v.quantidade), faturamento: Number(v.faturamento), ultimaData: v.ultima_data, plataformaNome: v.plataforma_nome || null, descricao: v.descricao || null, varianteTexto: v.variante_texto || null, pedidos: Number(v.pedidos || v.quantidade || 1), taxa: Number(v.taxa || 0) }));
   state.vendasDetalhe = (vendasDetalhe || []).map((v) => ({ id: v.id, produtoId: v.produto_id, varianteId: v.variante_id || null, plataformaId: v.plataforma_id, plataformaNome: v.plataforma_nome || null, sku: v.sku || null, quantidade: Number(v.quantidade), valor: Number(v.valor), data: v.data, pedidos: Number(v.pedidos || 1), taxa: Number(v.taxa || 0) }));
   state.abonosPonto = (abonosPonto || []).map((a) => ({ id: a.id, funcionariaId: a.funcionaria_id, data: a.data, tipo: a.tipo, motivo: a.motivo || '', horas: a.horas != null ? Number(a.horas) : null }));
-  state.holerites = (holerites || []).map((h) => ({ id: h.id, funcionariaId: h.funcionaria_id, mes: h.mes, diasTrabalhados: Number(h.dias_trabalhados), salarioBase: Number(h.salario_base), horasExtras: Number(h.horas_extras), valorHorasExtras: Number(h.valor_horas_extras), horasExtras100: Number(h.horas_extras_100 || 0), valorHorasExtras100: Number(h.valor_horas_extras_100 || 0), modoHorasExtras: h.modo_horas_extras, horasFaltantes: Number(h.horas_faltantes), valorVt: Number(h.valor_vt), valorVr: Number(h.valor_vr), totalPagar: Number(h.total_pagar), assinadoEm: h.assinado_em || null, assinaturaImagem: h.assinatura_imagem || null, createdAt: h.created_at, numeroRecibo: h.numero_recibo || null, emitidoPor: h.emitido_por || null }));
+  state.holerites = (holerites || []).map((h) => ({ id: h.id, funcionariaId: h.funcionaria_id, mes: h.mes, diasTrabalhados: Number(h.dias_trabalhados), salarioBase: Number(h.salario_base), horasExtras: Number(h.horas_extras), valorHorasExtras: Number(h.valor_horas_extras), horasExtras100: Number(h.horas_extras_100 || 0), valorHorasExtras100: Number(h.valor_horas_extras_100 || 0), modoHorasExtras: h.modo_horas_extras, horasFaltantes: Number(h.horas_faltantes), valorVt: Number(h.valor_vt), valorVr: Number(h.valor_vr), totalPagar: Number(h.total_pagar), assinadoEm: h.assinado_em || null, assinaturaImagem: h.assinatura_imagem || null, createdAt: h.created_at, numeroRecibo: h.numero_recibo || null, emitidoPor: h.emitido_por || null, valorFerias: Number(h.valor_ferias || 0), valorAbonoPecuniario: Number(h.valor_abono_pecuniario || 0), diasFeriasGozados: Number(h.dias_ferias_gozados || 0), diasVendidos: Number(h.dias_vendidos || 0) }));
   state.feriados = (feriados || []).map((f) => ({ id: f.id, data: f.data, nome: f.nome || '' }));
   state.empresaConfig = { cnpj: empresaConfig?.cnpj || '', razaoSocial: empresaConfig?.razao_social || '', nomeFantasia: empresaConfig?.nome_fantasia || '', endereco: empresaConfig?.endereco || '', telefone: empresaConfig?.telefone || '' };
   state.importacoesVendas = (importacoesVendas || []).map((i) => ({ id: i.id, nomeArquivo: i.nome_arquivo || 'Importação', transacaoIds: i.transacao_ids || [], vendasDetalheIds: i.vendas_detalhe_ids || [], skuPendenteIds: i.sku_pendente_ids || [], desfeita: i.desfeita, createdAt: i.created_at }));
@@ -2259,16 +2260,21 @@ async function fecharHolerite(funcionaria, mesKey, resumo, modoHorasExtras, valo
   // adiantamento/vale já pago nesse mês desconta do total — já saiu da conta antes, não pode
   // sair de novo no fechamento
   const totalAdiantamentosMes = state.adiantamentos.filter((a) => a.funcionariaId === funcionaria.id && a.data.slice(0, 7) === mesKey).reduce((acc, a) => acc + a.valor, 0);
+  const resumoFerias = calcularValorFerias(funcionaria, mesKey);
+  const valorFeriasComTerco = resumoFerias.valorFeriasGozadas + resumoFerias.tercoFerias;
+  const valorAbonoComTerco = resumoFerias.valorAbono + resumoFerias.tercoAbono;
   const totalPagar = resumo.salarioBase
     + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras : 0)
     + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras100 : 0)
-    + valorVtFinal + valorVrFinal - totalAdiantamentosMes;
+    + valorVtFinal + valorVrFinal + valorFeriasComTerco + valorAbonoComTerco - totalAdiantamentosMes;
   const { error: errHolerite } = await sb.from('holerites').upsert({
     funcionaria_id: funcionaria.id, mes: mesKey, dias_trabalhados: resumo.diasTrabalhados,
     salario_base: resumo.salarioBase, horas_extras: resumo.horasExtras, valor_horas_extras: resumo.valorHorasExtras,
     horas_extras_100: resumo.horasExtras100, valor_horas_extras_100: resumo.valorHorasExtras100,
     modo_horas_extras: modoHorasExtras, horas_faltantes: resumo.horasFaltantes,
     valor_vt: valorVtFinal, valor_vr: valorVrFinal, total_pagar: totalPagar,
+    valor_ferias: resumoFerias.valorFeriasGozadas, valor_abono_pecuniario: resumoFerias.valorAbono,
+    dias_ferias_gozados: resumoFerias.diasGozados, dias_vendidos: resumoFerias.diasVendidos,
     emitido_por: state.papel,
   }, { onConflict: 'funcionaria_id,mes' });
   if (errHolerite) { alert('Erro ao fechar holerite: ' + errHolerite.message); return; }
@@ -2291,6 +2297,15 @@ async function fecharHolerite(funcionaria, mesKey, resumo, modoHorasExtras, valo
     await addTx({
       tipo: 'saida', valor: valorBeneficios, categoria: 'Funcionários — encargos/benefícios', natureza: 'fixo',
       descricao: `VT + VR ${funcionaria.nome} — ${mesLabelTexto}`, data: dataLancamento,
+    });
+  }
+  if (valorFeriasComTerco + valorAbonoComTerco > 0) {
+    const partes = [];
+    if (valorFeriasComTerco > 0) partes.push(`${resumoFerias.diasGozados} dia(s) de férias`);
+    if (valorAbonoComTerco > 0) partes.push(`${resumoFerias.diasVendidos} dia(s) vendido(s) (abono)`);
+    await addTx({
+      tipo: 'saida', valor: valorFeriasComTerco + valorAbonoComTerco, categoria: 'Funcionários — férias/abono', natureza: 'fixo',
+      descricao: `Férias ${funcionaria.nome} — ${partes.join(' + ')}, com 1/3 constitucional — ${mesLabelTexto}`, data: dataLancamento,
     });
   }
 
@@ -2339,9 +2354,47 @@ async function confirmarAssinaturaHolerite(id, imagemBase64) {
   const { error } = await sb.from('holerites').update({ assinado_em: new Date().toISOString(), assinatura_imagem: imagemBase64 || null }).eq('id', id);
   if (error) alert('Erro ao confirmar: ' + error.message);
 }
-async function addFeriasTirada(funcionariaId, dataInicio, dataFim) {
-  const { error } = await sb.from('ferias_tiradas').insert({ funcionaria_id: funcionariaId, data_inicio: dataInicio, data_fim: dataFim });
+async function addFeriasTirada(funcionariaId, dataInicio, dataFim, diasVendidos, mesReferenciaPagamento) {
+  const { error } = await sb.from('ferias_tiradas').insert({
+    funcionaria_id: funcionariaId, data_inicio: dataInicio, data_fim: dataFim,
+    dias_vendidos: diasVendidos || 0, mes_referencia_pagamento: mesReferenciaPagamento || null,
+  });
   if (error) alert('Erro ao registrar férias: ' + error.message);
+}
+async function updateFeriasTirada(id, dataInicio, dataFim, diasVendidos, mesReferenciaPagamento) {
+  const { error } = await sb.from('ferias_tiradas').update({
+    data_inicio: dataInicio, data_fim: dataFim, dias_vendidos: diasVendidos || 0, mes_referencia_pagamento: mesReferenciaPagamento || null,
+  }).eq('id', id);
+  if (error) alert('Erro ao atualizar férias: ' + error.message);
+}
+// valor do dia pra cálculo de férias/abono — mensalista usa salário÷30 (padrão CLT); por
+// hora usa a média de horas dos dias que ela trabalha na semana (pra não pegar só um dia
+// específico que pode não ser representativo)
+function valorDiaFerias(funcionaria) {
+  if (funcionaria.tipoPagamento === 'mensal') return (funcionaria.salarioMensal || 0) / 30;
+  const dias = [0, 1, 2, 3, 4, 5, 6].filter((d) => (funcionaria.jornadaSemanal[d] ? funcionaria.jornadaSemanal[d].trabalha : (d >= 1 && d <= 5)));
+  if (dias.length === 0) return 0;
+  const totalMinutos = dias.reduce((a, d) => a + minutosEsperadosDoDiaSemana(funcionaria, d).minutos, 0);
+  const mediaHorasDia = (totalMinutos / dias.length) / 60;
+  return mediaHorasDia * (funcionaria.valorHora || 0);
+}
+// calcula férias gozadas + abono pecuniário (venda de dias) de um mês específico, cada um
+// com o 1/3 constitucional — usa o "mês de referência de pagamento" quando cadastrado,
+// senão cai no mês em que as férias começam (regra de pagar até 2 dias antes de começar)
+function calcularValorFerias(funcionaria, mesKey) {
+  const registros = state.feriasTiradas.filter((v) => v.funcionariaId === funcionaria.id && (v.mesReferenciaPagamento || v.dataInicio.slice(0, 7)) === mesKey);
+  const valorDia = valorDiaFerias(funcionaria);
+  let diasGozados = 0;
+  let diasVendidos = 0;
+  registros.forEach((v) => {
+    diasGozados += Math.round((new Date(v.dataFim + 'T00:00:00') - new Date(v.dataInicio + 'T00:00:00')) / 86400000) + 1;
+    diasVendidos += v.diasVendidos || 0;
+  });
+  const valorFeriasGozadas = diasGozados * valorDia;
+  const tercoFerias = valorFeriasGozadas / 3;
+  const valorAbono = diasVendidos * valorDia;
+  const tercoAbono = valorAbono / 3;
+  return { diasGozados, diasVendidos, valorDia, valorFeriasGozadas, tercoFerias, valorAbono, tercoAbono, total: valorFeriasGozadas + tercoFerias + valorAbono + tercoAbono };
 }
 async function removeFeriasTirada(id) {
   const { error } = await sb.from('ferias_tiradas').delete().eq('id', id);
@@ -2495,6 +2548,12 @@ function salvarRhFiltro(inicio, fim) {
 }
 function jornadaEsperadaDoDia(funcionaria, dataStr) {
   const diaSemana = new Date(dataStr + 'T00:00:00').getDay();
+  return minutosEsperadosDoDiaSemana(funcionaria, diaSemana);
+}
+// mesma lógica de jornadaEsperadaDoDia, mas recebe o dia da semana (0=domingo..6=sábado)
+// direto, sem precisar de uma data real — usado quando só importa "quanto ela trabalha
+// numa terça", não uma terça específica do calendário (ex: cálculo do valor do dia de férias)
+function minutosEsperadosDoDiaSemana(funcionaria, diaSemana) {
   const config = (funcionaria.jornadaSemanal || {})[diaSemana];
   if (config) {
     if (!config.trabalha) return { trabalha: false, minutos: 0 };
@@ -6063,6 +6122,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
   // ---- Holerite ----
   const mesHolerite = state.holeriteMes || todayStr().slice(0, 7);
   const resumoHolerite = f ? calcularResumoHolerite(f, mesHolerite) : null;
+  const resumoFerias = f ? calcularValorFerias(f, mesHolerite) : null;
   const holeriteExistente = state.holerites.find((h) => h.funcionariaId === funcionariaId && h.mes === mesHolerite);
   const horasBancoUsadasFechado = f ? state.abonosPonto.filter((a) => a.funcionariaId === funcionariaId && a.data.slice(0, 7) === mesHolerite && a.horas != null).reduce((acc, a) => acc + a.horas, 0) : 0;
   const horasBancoPagasDinheiroFechado = f ? state.bancoHorasLancamentos.filter((b) => b.funcionariaId === funcionariaId && b.data.slice(0, 7) === mesHolerite && b.descricao && b.descricao.startsWith('Pago em dinheiro')).reduce((acc, b) => acc + Math.abs(b.horas), 0) : 0;
@@ -6183,19 +6243,46 @@ function renderFuncionariaDetalhe(funcionariaId) {
           <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Início</div><input type="date" id="feriasInicio" /></div>
           <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Fim</div><input type="date" id="feriasFim" /></div>
         </div>
-        <button class="confirm-btn" data-salvar-ferias="${funcionariaId}">Salvar</button>
+        <div class="form-hint" style="margin-top:8px;margin-bottom:2px">Vendeu dias (abono pecuniário)? Quantos:</div>
+        <input type="text" id="feriasDiasVendidos" placeholder="Dias vendidos (ex: 15) — deixe em branco se não vendeu nada" inputmode="numeric" />
+        <div class="form-hint" style="margin-top:8px;margin-bottom:2px">Mês que paga essa férias/abono no holerite (padrão: mês em que ela começa):</div>
+        <input type="month" id="feriasMesPagamento" />
+        <button class="confirm-btn" style="margin-top:8px" data-salvar-ferias="${funcionariaId}">Salvar</button>
       </div>
     ` : ''}
 
     ${feriasDaFuncionaria.length > 0 ? `
       <div class="tx-list" style="margin-bottom:24px">
-        ${feriasDaFuncionaria.map((v) => `
-          <div class="tx-row">
-            <div class="tx-dot" style="background:var(--teal)"></div>
-            <div style="flex:1"><div class="tx-categoria">${dataFmt(v.dataInicio)} → ${dataFmt(v.dataFim)}</div></div>
-            <button class="trash-btn" data-remover-ferias="${v.id}">🗑</button>
-          </div>
-        `).join('')}
+        ${feriasDaFuncionaria.map((v) => {
+          if (state.editandoFeriasId === v.id) {
+            return `
+              <div class="form-card">
+                <div class="form-row">
+                  <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Início</div><input type="date" id="editFeriasInicio-${v.id}" value="${v.dataInicio}" /></div>
+                  <div style="flex:1"><div class="form-hint" style="margin-bottom:2px">Fim</div><input type="date" id="editFeriasFim-${v.id}" value="${v.dataFim}" /></div>
+                </div>
+                <div class="form-hint" style="margin-top:8px;margin-bottom:2px">Dias vendidos (abono pecuniário):</div>
+                <input type="text" id="editFeriasDiasVendidos-${v.id}" value="${v.diasVendidos || ''}" placeholder="ex: 15" inputmode="numeric" />
+                <div class="form-hint" style="margin-top:8px;margin-bottom:2px">Mês que paga no holerite:</div>
+                <input type="month" id="editFeriasMesPagamento-${v.id}" value="${v.mesReferenciaPagamento || v.dataInicio.slice(0, 7)}" />
+                <div class="form-row" style="margin-top:8px">
+                  <button class="confirm-btn" data-salvar-edit-ferias="${v.id}">Salvar</button>
+                  <button class="toggle-btn" data-cancelar-edit-ferias="1">Cancelar</button>
+                </div>
+              </div>
+            `;
+          }
+          return `
+            <div class="tx-row" style="cursor:pointer" data-editar-ferias="${v.id}">
+              <div class="tx-dot" style="background:var(--teal)"></div>
+              <div style="flex:1">
+                <div class="tx-categoria">${dataFmt(v.dataInicio)} → ${dataFmt(v.dataFim)}</div>
+                ${v.diasVendidos > 0 ? `<div class="tx-desc">💰 ${v.diasVendidos} dia(s) vendido(s) (abono) · paga em ${mesLabelHolerite(v.mesReferenciaPagamento || v.dataInicio.slice(0, 7))}</div>` : ''}
+              </div>
+              <button class="trash-btn" data-remover-ferias="${v.id}">🗑</button>
+            </div>
+          `;
+        }).join('')}
       </div>
     ` : ''}
 
@@ -6451,6 +6538,8 @@ function renderFuncionariaDetalhe(funcionariaId) {
           ${horasBancoPagasDinheiroFechado > 0 ? `<div class="prod-breakdown-item"><span>💰 Banco de horas pago em dinheiro</span><span style="color:var(--teal)">${formatarHorasMin(horasBancoPagasDinheiroFechado)} · ${fmt(valorBancoPagoDinheiroFechado)}</span></div>` : ''}
           <div class="prod-breakdown-item"><span>VT</span><span>${fmt(holeriteExistente.valorVt)}</span></div>
           <div class="prod-breakdown-item"><span>VR</span><span>${fmt(holeriteExistente.valorVr)}</span></div>
+          ${holeriteExistente.diasFeriasGozados > 0 ? `<div class="prod-breakdown-item"><span>🏖️ Férias (${holeriteExistente.diasFeriasGozados} dias + 1/3)</span><span>${fmt(holeriteExistente.valorFerias * (4 / 3))}</span></div>` : ''}
+          ${holeriteExistente.diasVendidos > 0 ? `<div class="prod-breakdown-item"><span>💰 Abono pecuniário (${holeriteExistente.diasVendidos} dias vendidos + 1/3)</span><span>${fmt(holeriteExistente.valorAbonoPecuniario * (4 / 3))}</span></div>` : ''}
         </div>
         <div class="produto-vendido" style="margin-top:8px">💰 Total pago: ${fmt(holeriteExistente.totalPagar)}</div>
         ${extratoBancoMes && (extratoBancoMes.saldoAnterior !== 0 || extratoBancoMes.produzido !== 0 || extratoBancoMes.consumido !== 0) ? `
@@ -6485,6 +6574,8 @@ function renderFuncionariaDetalhe(funcionariaId) {
           ${resumoHolerite.horasBancoUsadas > 0 ? `<div class="prod-breakdown-item"><span>🏦 Banco de horas usado nesse mês</span><span style="color:var(--amber)">-${formatarHorasMin(resumoHolerite.horasBancoUsadas)}</span></div>` : ''}
           ${resumoHolerite.horasBancoPagasDinheiro > 0 ? `<div class="prod-breakdown-item"><span>💰 Banco de horas pago em dinheiro (já lançado, não soma no total)</span><span style="color:var(--teal)">${formatarHorasMin(resumoHolerite.horasBancoPagasDinheiro)} · ${fmt(resumoHolerite.valorBancoPagoDinheiro)}</span></div>` : ''}
           <div class="prod-breakdown-item"><span>Horas faltantes não abonadas</span><span style="color:var(--red)">${formatarHorasMin(resumoHolerite.horasFaltantes)}</span></div>
+          ${resumoFerias && resumoFerias.diasGozados > 0 ? `<div class="prod-breakdown-item"><span>🏖️ Férias (${resumoFerias.diasGozados} dias + 1/3)</span><span>${fmt(resumoFerias.valorFeriasGozadas + resumoFerias.tercoFerias)}</span></div>` : ''}
+          ${resumoFerias && resumoFerias.diasVendidos > 0 ? `<div class="prod-breakdown-item"><span>💰 Abono pecuniário (${resumoFerias.diasVendidos} dias vendidos + 1/3)</span><span>${fmt(resumoFerias.valorAbono + resumoFerias.tercoAbono)}</span></div>` : ''}
         </div>
         ${extratoBancoMes && (extratoBancoMes.saldoAnterior !== 0 || extratoBancoMes.produzido !== 0 || extratoBancoMes.consumido !== 0) ? `
           <div class="form-hint" style="margin-top:10px;margin-bottom:2px">Extrato do banco de horas desse mês</div>
@@ -6831,11 +6922,12 @@ function attachRHHandlers(c) {
         const funcionaria = state.funcionarias.find((x) => x.id === funcionariaId);
         const mesKey = state.holeriteMes || todayStr().slice(0, 7);
         const resumo = calcularResumoHolerite(funcionaria, mesKey);
+        const resumoFeriasPrevia = calcularValorFerias(funcionaria, mesKey);
         const modoHorasExtras = window.__holeriteModoExtras || funcionaria.modoCompensacaoPadrao;
         const valorVt = parseBRNumber(document.getElementById('holeriteVt').value) || 0;
         const valorVr = parseBRNumber(document.getElementById('holeriteVr').value) || 0;
         const totalAdiantamentosMes = state.adiantamentos.filter((a) => a.funcionariaId === funcionariaId && a.data.slice(0, 7) === mesKey).reduce((acc, a) => acc + a.valor, 0);
-        const totalPagar = resumo.salarioBase + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras : 0) + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras100 : 0) + valorVt + valorVr - totalAdiantamentosMes;
+        const totalPagar = resumo.salarioBase + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras : 0) + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras100 : 0) + valorVt + valorVr + resumoFeriasPrevia.total - totalAdiantamentosMes;
         window.__previaHoleriteData = { modoHorasExtras, valorVt, valorVr, totalPagar, totalAdiantamentosMes };
         state.showPreviaHolerite = true;
         render();
@@ -6861,12 +6953,13 @@ function attachRHHandlers(c) {
       const funcionaria = state.funcionarias.find((x) => x.id === funcionariaId);
       const mesKey = state.holeriteMes || todayStr().slice(0, 7);
       const resumo = calcularResumoHolerite(funcionaria, mesKey);
+      const resumoFeriasFechar = calcularValorFerias(funcionaria, mesKey);
       const modoHorasExtras = window.__holeriteModoExtras || funcionaria.modoCompensacaoPadrao;
       const valorVt = parseBRNumber(document.getElementById('holeriteVt').value) || 0;
       const valorVr = parseBRNumber(document.getElementById('holeriteVr').value) || 0;
       const dataPagamento = document.getElementById('holeriteDataPagamento')?.value || todayStr();
       const totalAdiantamentosMes = state.adiantamentos.filter((a) => a.funcionariaId === funcionariaId && a.data.slice(0, 7) === mesKey).reduce((acc, a) => acc + a.valor, 0);
-      const totalPagar = resumo.salarioBase + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras : 0) + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras100 : 0) + valorVt + valorVr - totalAdiantamentosMes;
+      const totalPagar = resumo.salarioBase + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras : 0) + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras100 : 0) + valorVt + valorVr + resumoFeriasFechar.total - totalAdiantamentosMes;
       const dataPagamentoFmt = new Date(dataPagamento + 'T00:00:00').toLocaleDateString('pt-BR');
       if (!confirm(`Fechar o holerite de ${funcionaria.nome}?\n\nTotal a pagar: ${fmt(totalPagar)}${totalAdiantamentosMes > 0 ? ` (já descontado ${fmt(totalAdiantamentosMes)} de adiantamento)` : ''}\nData do lançamento: ${dataPagamentoFmt}\n\nIsso lança a saída no Financeiro e movimenta o banco de horas. Confirma?`)) return;
       await fecharHolerite(funcionaria, mesKey, resumo, modoHorasExtras, valorVt, valorVr, dataPagamento);
@@ -6914,15 +7007,40 @@ function attachRHHandlers(c) {
       const funcionariaId = salvarFerias.dataset.salvarFerias;
       const inicio = document.getElementById('feriasInicio').value;
       const fim = document.getElementById('feriasFim').value;
+      const diasVendidos = Number(document.getElementById('feriasDiasVendidos').value) || 0;
+      const mesReferenciaPagamento = document.getElementById('feriasMesPagamento').value || null;
       if (!inicio || !fim) { alert('Preencha início e fim das férias.'); return; }
       if (fim < inicio) { alert('A data de fim precisa ser depois da data de início.'); return; }
-      await addFeriasTirada(funcionariaId, inicio, fim);
+      await addFeriasTirada(funcionariaId, inicio, fim, diasVendidos, mesReferenciaPagamento);
       state.showFeriasForm = false;
       await loadData();
     });
 
+    document.querySelectorAll('[data-editar-ferias]').forEach((row) => {
+      row.addEventListener('click', () => { state.editandoFeriasId = row.dataset.editarFerias; render(); });
+    });
+    document.querySelectorAll('[data-cancelar-edit-ferias]').forEach((btn) => {
+      btn.addEventListener('click', () => { state.editandoFeriasId = null; render(); });
+    });
+    document.querySelectorAll('[data-salvar-edit-ferias]').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = btn.dataset.salvarEditFerias;
+        const inicio = document.getElementById(`editFeriasInicio-${id}`).value;
+        const fim = document.getElementById(`editFeriasFim-${id}`).value;
+        const diasVendidos = Number(document.getElementById(`editFeriasDiasVendidos-${id}`).value) || 0;
+        const mesReferenciaPagamento = document.getElementById(`editFeriasMesPagamento-${id}`).value || null;
+        if (!inicio || !fim) { alert('Preencha início e fim das férias.'); return; }
+        if (fim < inicio) { alert('A data de fim precisa ser depois da data de início.'); return; }
+        await updateFeriasTirada(id, inicio, fim, diasVendidos, mesReferenciaPagamento);
+        state.editandoFeriasId = null;
+        await loadData();
+      });
+    });
+
     document.querySelectorAll('[data-remover-ferias]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
         if (confirm('Remover esse registro de férias? O ciclo volta a contar a partir do registro anterior (ou da admissão).')) {
           await removeFeriasTirada(btn.dataset.removerFerias);
           await loadData();
