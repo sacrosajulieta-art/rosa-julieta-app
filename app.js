@@ -1290,6 +1290,10 @@ function gerarHoleritePDF(funcionaria, mesKey, dados) {
     if (dados.horasExtras100 > 0) linha(`Horas domingo/feriado (${formatarHorasMin(dados.horasExtras100)} + 100%)`, dados.modoHorasExtras === 'banco' ? 0 : dados.valorHorasExtras100);
     if (dados.valorVt > 0) linha('Auxílio Transporte', dados.valorVt);
     if (dados.valorVr > 0) linha('Auxílio Alimentação', dados.valorVr);
+    if (dados.diasFeriasGozados > 0) linha(`Recesso (${dados.diasFeriasGozados} dias + adicional)`, (dados.valorFerias || 0) * (4 / 3));
+    if (dados.diasVendidos > 0) linha(`Dias vendidos (${dados.diasVendidos} dias + adicional)`, (dados.valorAbonoPecuniario || 0) * (4 / 3));
+    const totalAdiantamentosPdf = state.adiantamentos.filter((a) => a.funcionariaId === funcionaria.id && a.data.slice(0, 7) === mesKey).reduce((acc, a) => acc + a.valor, 0);
+    if (totalAdiantamentosPdf > 0) linha('Adiantamento/vale descontado', -totalAdiantamentosPdf);
 
     y += 2;
     doc.line(margemEsq, y, margemEsq + largura, y);
@@ -6124,6 +6128,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
   const mesHolerite = state.holeriteMes || todayStr().slice(0, 7);
   const resumoHolerite = f ? calcularResumoHolerite(f, mesHolerite) : null;
   const resumoFerias = f ? calcularValorFerias(f, mesHolerite) : null;
+  const totalAdiantamentosDoMesHolerite = f ? state.adiantamentos.filter((a) => a.funcionariaId === funcionariaId && a.data.slice(0, 7) === mesHolerite).reduce((acc, a) => acc + a.valor, 0) : 0;
   const holeriteExistente = state.holerites.find((h) => h.funcionariaId === funcionariaId && h.mes === mesHolerite);
   const horasBancoUsadasFechado = f ? state.abonosPonto.filter((a) => a.funcionariaId === funcionariaId && a.data.slice(0, 7) === mesHolerite && a.horas != null).reduce((acc, a) => acc + a.horas, 0) : 0;
   const horasBancoPagasDinheiroFechado = f ? state.bancoHorasLancamentos.filter((b) => b.funcionariaId === funcionariaId && b.data.slice(0, 7) === mesHolerite && b.descricao && b.descricao.startsWith('Pago em dinheiro')).reduce((acc, b) => acc + Math.abs(b.horas), 0) : 0;
@@ -6541,6 +6546,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
           <div class="prod-breakdown-item"><span>Auxílio Alimentação</span><span>${fmt(holeriteExistente.valorVr)}</span></div>
           ${holeriteExistente.diasFeriasGozados > 0 ? `<div class="prod-breakdown-item"><span>🏖️ Recesso (${holeriteExistente.diasFeriasGozados} dias + adicional)</span><span>${fmt(holeriteExistente.valorFerias * (4 / 3))}</span></div>` : ''}
           ${holeriteExistente.diasVendidos > 0 ? `<div class="prod-breakdown-item"><span>💰 Dias vendidos (${holeriteExistente.diasVendidos} dias + adicional)</span><span>${fmt(holeriteExistente.valorAbonoPecuniario * (4 / 3))}</span></div>` : ''}
+          ${totalAdiantamentosDoMesHolerite > 0 ? `<div class="prod-breakdown-item"><span>💸 Adiantamento/vale descontado</span><span style="color:var(--red)">-${fmt(totalAdiantamentosDoMesHolerite)}</span></div>` : ''}
         </div>
         <div class="produto-vendido" style="margin-top:8px">💰 Total pago: ${fmt(holeriteExistente.totalPagar)}</div>
         ${extratoBancoMes && (extratoBancoMes.saldoAnterior !== 0 || extratoBancoMes.produzido !== 0 || extratoBancoMes.consumido !== 0) ? `
@@ -6577,6 +6583,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
           <div class="prod-breakdown-item"><span>Horas faltantes não abonadas</span><span style="color:var(--red)">${formatarHorasMin(resumoHolerite.horasFaltantes)}</span></div>
           ${resumoFerias && resumoFerias.diasGozados > 0 ? `<div class="prod-breakdown-item"><span>🏖️ Recesso (${resumoFerias.diasGozados} dias + adicional)</span><span>${fmt(resumoFerias.valorFeriasGozadas + resumoFerias.tercoFerias)}</span></div>` : ''}
           ${resumoFerias && resumoFerias.diasVendidos > 0 ? `<div class="prod-breakdown-item"><span>💰 Dias vendidos (${resumoFerias.diasVendidos} dias + adicional)</span><span>${fmt(resumoFerias.valorAbono + resumoFerias.tercoAbono)}</span></div>` : ''}
+          ${totalAdiantamentosDoMesHolerite > 0 ? `<div class="prod-breakdown-item"><span>💸 Adiantamento/vale descontado</span><span style="color:var(--red)">-${fmt(totalAdiantamentosDoMesHolerite)}</span></div>` : ''}
         </div>
         ${extratoBancoMes && (extratoBancoMes.saldoAnterior !== 0 || extratoBancoMes.produzido !== 0 || extratoBancoMes.consumido !== 0) ? `
           <div class="form-hint" style="margin-top:10px;margin-bottom:2px">Extrato do banco de horas desse mês</div>
@@ -6668,6 +6675,9 @@ function renderFuncionariaDetalhe(funcionariaId) {
               ${resumoHolerite.horasExtras100 > 0 ? `<div class="prod-breakdown-item"><span>🗓️ Domingo/feriado — 100%</span><span>${d.modoHorasExtras === 'banco' ? '🏦 banco de horas' : fmt(resumoHolerite.valorHorasExtras100)}</span></div>` : ''}
               ${d.valorVt > 0 ? `<div class="prod-breakdown-item"><span>Auxílio Transporte</span><span>${fmt(d.valorVt)}</span></div>` : ''}
               ${d.valorVr > 0 ? `<div class="prod-breakdown-item"><span>Auxílio Alimentação</span><span>${fmt(d.valorVr)}</span></div>` : ''}
+              ${d.resumoFerias && d.resumoFerias.diasGozados > 0 ? `<div class="prod-breakdown-item"><span>🏖️ Recesso (${d.resumoFerias.diasGozados} dias + adicional)</span><span>${fmt(d.resumoFerias.valorFeriasGozadas + d.resumoFerias.tercoFerias)}</span></div>` : ''}
+              ${d.resumoFerias && d.resumoFerias.diasVendidos > 0 ? `<div class="prod-breakdown-item"><span>💰 Dias vendidos (${d.resumoFerias.diasVendidos} dias + adicional)</span><span>${fmt(d.resumoFerias.valorAbono + d.resumoFerias.tercoAbono)}</span></div>` : ''}
+              ${d.totalAdiantamentosMes > 0 ? `<div class="prod-breakdown-item"><span>💸 Adiantamento/vale descontado</span><span style="color:var(--red)">-${fmt(d.totalAdiantamentosMes)}</span></div>` : ''}
             </div>
             <div class="produto-vendido" style="margin-top:10px">💰 Total líquido: ${fmt(d.totalPagar)}</div>
             ${resumoHolerite.horasFaltantes > 0 ? `<div class="form-hint" style="margin-top:8px;color:var(--red)">${formatarHorasMin(resumoHolerite.horasFaltantes)} de falta não abonada — vira débito no banco de horas.</div>` : ''}
@@ -6966,7 +6976,7 @@ function attachRHHandlers(c) {
         const valorVr = parseBRNumber(document.getElementById('holeriteVr').value) || 0;
         const totalAdiantamentosMes = state.adiantamentos.filter((a) => a.funcionariaId === funcionariaId && a.data.slice(0, 7) === mesKey).reduce((acc, a) => acc + a.valor, 0);
         const totalPagar = resumo.salarioBase + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras : 0) + (modoHorasExtras === 'dinheiro' ? resumo.valorHorasExtras100 : 0) + valorVt + valorVr + resumoFeriasPrevia.total - totalAdiantamentosMes;
-        window.__previaHoleriteData = { modoHorasExtras, valorVt, valorVr, totalPagar, totalAdiantamentosMes };
+        window.__previaHoleriteData = { modoHorasExtras, valorVt, valorVr, totalPagar, totalAdiantamentosMes, resumoFerias: resumoFeriasPrevia };
         state.showPreviaHolerite = true;
         render();
       });
