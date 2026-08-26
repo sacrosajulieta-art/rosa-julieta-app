@@ -1111,10 +1111,43 @@ async function removeDistribuicao(id) {
   if (error) alert('Erro ao remover distribuição: ' + error.message);
 }
 
+// carrega a biblioteca de gerar PDF sob demanda, tentando duas fontes diferentes — em vez
+// de só avisar "espera e tenta de novo", o sistema tenta buscar a biblioteca sozinho antes
+// de desistir. Isso resolve o caso em que a internet estava lenta bem no instante em que o
+// app abriu e a biblioteca não deu tempo de carregar junto com o resto
+let __jspdfLoadingPromise = null;
+function garantirJsPDF() {
+  if (window.jspdf && window.jspdf.jsPDF) return Promise.resolve();
+  if (__jspdfLoadingPromise) return __jspdfLoadingPromise;
+  const urls = [
+    'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
+    'https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js',
+  ];
+  __jspdfLoadingPromise = (async () => {
+    for (const url of urls) {
+      if (window.jspdf && window.jspdf.jsPDF) return;
+      try {
+        await new Promise((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = url;
+          script.onload = resolve;
+          script.onerror = reject;
+          document.head.appendChild(script);
+        });
+        if (window.jspdf && window.jspdf.jsPDF) return;
+      } catch (e) { /* tenta a próxima fonte */ }
+    }
+    __jspdfLoadingPromise = null;
+    throw new Error('não foi possível carregar a biblioteca de PDF');
+  })();
+  return __jspdfLoadingPromise;
+}
 // ---- Ficha de corte em PDF (duas vias: Costureira e Expedição) ----
-function gerarFichaCortePDF(distribuicao, ordem) {
-  if (!window.jspdf || !window.jspdf.jsPDF) {
-    alert('A biblioteca de PDF ainda não carregou. Aguarda alguns segundos e tenta de novo, ou feche e abra o app.');
+async function gerarFichaCortePDF(distribuicao, ordem) {
+  try {
+    await garantirJsPDF();
+  } catch (e) {
+    alert('Não consegui carregar a biblioteca de PDF. Confira sua internet e tenta de novo — se persistir, feche e abra o app.');
     return;
   }
   try {
@@ -1220,9 +1253,11 @@ function gerarFichaCortePDF(distribuicao, ordem) {
 // ---- Holerite em PDF ----
 // aceita tanto a prévia (dados calculados na hora, ainda não fechado) quanto um holerite
 // já fechado (com data/hora de assinatura, se a funcionária já confirmou)
-function gerarHoleritePDF(funcionaria, mesKey, dados) {
-  if (!window.jspdf || !window.jspdf.jsPDF) {
-    alert('A biblioteca de PDF ainda não carregou. Aguarda alguns segundos e tenta de novo, ou feche e abra o app.');
+async function gerarHoleritePDF(funcionaria, mesKey, dados) {
+  try {
+    await garantirJsPDF();
+  } catch (e) {
+    alert('Não consegui carregar a biblioteca de PDF. Confira sua internet e tenta de novo — se persistir, feche e abra o app.');
     return;
   }
   try {
@@ -1375,9 +1410,11 @@ function gerarHoleritePDF(funcionaria, mesKey, dados) {
   }
 }
 // ---- Espelho de ponto em PDF (batidas dia a dia do mês, separado do holerite) ----
-function gerarEspelhoPontoPDF(funcionaria, mesKey) {
-  if (!window.jspdf || !window.jspdf.jsPDF) {
-    alert('A biblioteca de PDF ainda não carregou. Aguarda alguns segundos e tenta de novo, ou feche e abra o app.');
+async function gerarEspelhoPontoPDF(funcionaria, mesKey) {
+  try {
+    await garantirJsPDF();
+  } catch (e) {
+    alert('Não consegui carregar a biblioteca de PDF. Confira sua internet e tenta de novo — se persistir, feche e abra o app.');
     return;
   }
   try {
