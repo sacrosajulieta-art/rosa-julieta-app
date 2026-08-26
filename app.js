@@ -542,8 +542,9 @@ const state = {
   holerites: [],
   feriados: [],
   showFeriadosForm: false,
-  empresaConfig: { cnpj: '', razaoSocial: '', nomeFantasia: '', endereco: '', telefone: '' },
+  empresaConfig: { cnpj: '', razaoSocial: '', nomeFantasia: '', endereco: '', telefone: '', emailjsServiceId: '', emailjsTemplateId: '', emailjsPublicKey: '' },
   showEmpresaConfigForm: false,
+  showEmailConfigForm: false,
   importacoesVendas: [],
   kitComponentes: [],
   showKitForm: false,
@@ -668,7 +669,7 @@ async function loadData() {
   state.distribuicoes = (distribuicoes || []).map((d) => ({ id: d.id, ordemItemId: d.ordem_item_id, produtoId: d.produto_id, varianteId: d.variante_id || null, costureiraId: d.costureira_id, quantidadeDistribuida: d.quantidade_distribuida, quantidadeDevolvida: d.quantidade_devolvida, data: d.data, numeroSerie: d.numero_serie || null }));
   state.fichaTecnicaItens = (fichaTecnicaItens || []).map((f) => ({ id: f.id, produtoId: f.produto_id, tipoItem: f.tipo_item, insumoId: f.insumo_id || null, componenteProdutoId: f.componente_produto_id || null, quantidade: Number(f.quantidade), momento: f.momento || 'venda' }));
   state.insumoPlataformaQtd = (insumoPlataformaQtd || []).map((q) => ({ id: q.id, insumoId: q.insumo_id, plataformaId: q.plataforma_id, quantidade: Number(q.quantidade) }));
-  state.funcionarias = (funcionarias || []).map((f) => ({ id: f.id, nome: f.nome, pin: f.pin, ativa: f.ativa, jornadaEntrada: (f.jornada_entrada || '08:00').slice(0, 5), jornadaSaidaAlmoco: (f.jornada_saida_almoco || '12:00').slice(0, 5), jornadaVoltaAlmoco: (f.jornada_volta_almoco || '13:00').slice(0, 5), jornadaSaida: (f.jornada_saida || '17:00').slice(0, 5), valorHora: Number(f.valor_hora || 0), dataAdmissao: f.data_admissao || null, jornadaSemanal: f.jornada_semanal || {}, percentualHoraExtra: Number(f.percentual_hora_extra != null ? f.percentual_hora_extra : 50), modoCompensacaoPadrao: f.modo_compensacao_padrao || 'dinheiro', tipoPagamento: f.tipo_pagamento || 'hora', salarioMensal: Number(f.salario_mensal || 0), valorVtDia: Number(f.valor_vt_dia || 0), valorVrDia: Number(f.valor_vr_dia || 0), horasCompensacaoSemanal: Number(f.horas_compensacao_semanal || 0), cpf: f.cpf || '', cargo: f.cargo || '', matricula: f.matricula || '' }));
+  state.funcionarias = (funcionarias || []).map((f) => ({ id: f.id, nome: f.nome, pin: f.pin, ativa: f.ativa, jornadaEntrada: (f.jornada_entrada || '08:00').slice(0, 5), jornadaSaidaAlmoco: (f.jornada_saida_almoco || '12:00').slice(0, 5), jornadaVoltaAlmoco: (f.jornada_volta_almoco || '13:00').slice(0, 5), jornadaSaida: (f.jornada_saida || '17:00').slice(0, 5), valorHora: Number(f.valor_hora || 0), dataAdmissao: f.data_admissao || null, jornadaSemanal: f.jornada_semanal || {}, percentualHoraExtra: Number(f.percentual_hora_extra != null ? f.percentual_hora_extra : 50), modoCompensacaoPadrao: f.modo_compensacao_padrao || 'dinheiro', tipoPagamento: f.tipo_pagamento || 'hora', salarioMensal: Number(f.salario_mensal || 0), valorVtDia: Number(f.valor_vt_dia || 0), valorVrDia: Number(f.valor_vr_dia || 0), horasCompensacaoSemanal: Number(f.horas_compensacao_semanal || 0), cpf: f.cpf || '', cargo: f.cargo || '', matricula: f.matricula || '', email: f.email || '' }));
   state.feriasTiradas = (feriasTiradas || []).map((v) => ({ id: v.id, funcionariaId: v.funcionaria_id, dataInicio: v.data_inicio, dataFim: v.data_fim, diasVendidos: Number(v.dias_vendidos || 0), mesReferenciaPagamento: v.mes_referencia_pagamento || null }));
   state.pontos = (pontos || []).map((p) => ({ id: p.id, funcionariaId: p.funcionaria_id, data: p.data, tipo: p.tipo, horario: p.horario, origem: p.origem || 'propria' }));
   state.solicitacoesPonto = (solicitacoesPonto || []).map((s) => ({ id: s.id, funcionariaId: s.funcionaria_id, data: s.data, tipo: s.tipo, horarioSolicitado: s.horario_solicitado, motivo: s.motivo || '', status: s.status, createdAt: s.created_at }));
@@ -682,7 +683,7 @@ async function loadData() {
   state.abonosPonto = (abonosPonto || []).map((a) => ({ id: a.id, funcionariaId: a.funcionaria_id, data: a.data, tipo: a.tipo, motivo: a.motivo || '', horas: a.horas != null ? Number(a.horas) : null }));
   state.holerites = (holerites || []).map((h) => ({ id: h.id, funcionariaId: h.funcionaria_id, mes: h.mes, diasTrabalhados: Number(h.dias_trabalhados), salarioBase: Number(h.salario_base), horasExtras: Number(h.horas_extras), valorHorasExtras: Number(h.valor_horas_extras), horasExtras100: Number(h.horas_extras_100 || 0), valorHorasExtras100: Number(h.valor_horas_extras_100 || 0), modoHorasExtras: h.modo_horas_extras, horasFaltantes: Number(h.horas_faltantes), valorVt: Number(h.valor_vt), valorVr: Number(h.valor_vr), totalPagar: Number(h.total_pagar), assinadoEm: h.assinado_em || null, assinaturaImagem: h.assinatura_imagem || null, createdAt: h.created_at, numeroRecibo: h.numero_recibo || null, emitidoPor: h.emitido_por || null, valorFerias: Number(h.valor_ferias || 0), valorAbonoPecuniario: Number(h.valor_abono_pecuniario || 0), diasFeriasGozados: Number(h.dias_ferias_gozados || 0), diasVendidos: Number(h.dias_vendidos || 0) }));
   state.feriados = (feriados || []).map((f) => ({ id: f.id, data: f.data, nome: f.nome || '' }));
-  state.empresaConfig = { cnpj: empresaConfig?.cnpj || '', razaoSocial: empresaConfig?.razao_social || '', nomeFantasia: empresaConfig?.nome_fantasia || '', endereco: empresaConfig?.endereco || '', telefone: empresaConfig?.telefone || '' };
+  state.empresaConfig = { cnpj: empresaConfig?.cnpj || '', razaoSocial: empresaConfig?.razao_social || '', nomeFantasia: empresaConfig?.nome_fantasia || '', endereco: empresaConfig?.endereco || '', telefone: empresaConfig?.telefone || '', emailjsServiceId: empresaConfig?.emailjs_service_id || '', emailjsTemplateId: empresaConfig?.emailjs_template_id || '', emailjsPublicKey: empresaConfig?.emailjs_public_key || '' };
   state.importacoesVendas = (importacoesVendas || []).map((i) => ({ id: i.id, nomeArquivo: i.nome_arquivo || 'Importação', transacaoIds: i.transacao_ids || [], vendasDetalheIds: i.vendas_detalhe_ids || [], skuPendenteIds: i.sku_pendente_ids || [], desfeita: i.desfeita, createdAt: i.created_at }));
   state.kitComponentes = (kitComponentes || []).map((k) => ({ id: k.id, produtoKitId: k.produto_kit_id, componenteProdutoId: k.componente_produto_id, componenteVarianteId: k.componente_variante_id || null, quantidade: Number(k.quantidade) }));
   state.vendasResumoDiario = (vendasResumoDiario || []).map((r) => ({ id: r.id, plataformaNome: r.plataforma_nome || null, data: r.data, pedidos: Number(r.pedidos), unidades: Number(r.unidades), faturamento: Number(r.faturamento) }));
@@ -886,7 +887,7 @@ async function addVariante(produtoId, nome, skuVariante) {
   return data;
 }
 async function updateVarianteEstoque(id, novoEstoque) {
-  const { error } = await sb.from('variantes').update({ estoque_atual: Math.max(0, novoEstoque) }).eq('id', id);
+  const { error } = await sb.from('variantes').update({ estoque_atual: novoEstoque }).eq('id', id);
   if (error) alert('Erro ao atualizar estoque da cor: ' + error.message);
 }
 async function updateVarianteSku(id, sku) {
@@ -1253,6 +1254,153 @@ async function gerarFichaCortePDF(distribuicao, ordem) {
 // ---- Holerite em PDF ----
 // aceita tanto a prévia (dados calculados na hora, ainda não fechado) quanto um holerite
 // já fechado (com data/hora de assinatura, se a funcionária já confirmou)
+// monta o PDF do holerite e devolve o objeto "doc" pronto (sem salvar/baixar ainda) — assim
+// a mesma montagem serve tanto pra baixar quanto pra mandar por e-mail, sem duplicar o
+// layout inteiro duas vezes
+function montarHoleritePDF(funcionaria, mesKey, dados) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  const margemEsq = 15;
+  const largura = 180;
+  let y = 18;
+
+  const mesLabelTexto = new Date(mesKey + '-01T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+  const [anoPdf, mesPdf] = mesKey.split('-').map(Number);
+  const diasCorridosMes = new Date(anoPdf, mesPdf, 0).getDate();
+  const ocorrencias = calcularResumoOcorrencias(funcionaria.id, mesKey);
+
+  doc.setFontSize(14);
+  doc.setFont(undefined, 'bold');
+  doc.text(state.empresaConfig.nomeFantasia || state.empresaConfig.razaoSocial || 'ROSA JULIETA', margemEsq, y);
+  doc.setFont(undefined, 'normal');
+  doc.setFontSize(9);
+  if (state.empresaConfig.nomeFantasia && state.empresaConfig.razaoSocial) { doc.text(state.empresaConfig.razaoSocial, margemEsq, y + 5); y += 4; }
+  doc.setFontSize(10);
+  doc.text('Recibo de Pagamento de Salário', margemEsq, y + 6);
+  y += 6;
+  if (state.empresaConfig.cnpj) { doc.text(`CNPJ: ${state.empresaConfig.cnpj}`, margemEsq, y + 6); y += 5; }
+  if (state.empresaConfig.endereco) { doc.text(state.empresaConfig.endereco, margemEsq, y + 6); y += 5; }
+  if (state.empresaConfig.telefone) { doc.text(`Tel: ${state.empresaConfig.telefone}`, margemEsq, y + 6); y += 5; }
+  y += 10;
+
+  doc.setDrawColor(200);
+  doc.line(margemEsq, y, margemEsq + largura, y);
+  y += 8;
+
+  doc.setFontSize(10);
+  doc.text(`Funcionária: ${funcionaria.nome}`, margemEsq, y); y += 6;
+  if (funcionaria.cargo) { doc.text(`Cargo: ${funcionaria.cargo}`, margemEsq, y); y += 6; }
+  if (funcionaria.matricula) { doc.text(`Matrícula: ${funcionaria.matricula}`, margemEsq, y); y += 6; }
+  if (funcionaria.cpf) { doc.text(`CNPJ: ${formatarCnpj(funcionaria.cpf)}`, margemEsq, y); y += 6; }
+  doc.text(`Referência: ${mesLabelTexto.charAt(0).toUpperCase() + mesLabelTexto.slice(1)} (${diasCorridosMes} dias)`, margemEsq, y); y += 6;
+  doc.text(`Dias trabalhados no mês: ${dados.diasTrabalhados}`, margemEsq, y); y += 6;
+  if (ocorrencias.diasAtestado + ocorrencias.diasAbono + ocorrencias.diasFerias > 0) {
+    const partes = [];
+    if (ocorrencias.diasAtestado > 0) partes.push(`${ocorrencias.diasAtestado} atestado(s)`);
+    if (ocorrencias.diasAbono > 0) partes.push(`${ocorrencias.diasAbono} abono(s)/folga(s)`);
+    if (ocorrencias.diasFerias > 0) partes.push(`${ocorrencias.diasFerias} dia(s) de recesso`);
+    doc.text(`Ocorrências: ${partes.join(', ')}`, margemEsq, y); y += 6;
+  }
+  y += 4;
+
+  doc.setFont(undefined, 'bold');
+  doc.text('Descrição', margemEsq, y);
+  doc.text('Valor', margemEsq + largura - 25, y);
+  doc.setFont(undefined, 'normal');
+  y += 2;
+  doc.line(margemEsq, y, margemEsq + largura, y);
+  y += 6;
+
+  const linha = (texto, valor) => {
+    doc.text(texto, margemEsq, y);
+    doc.text(fmt(valor), margemEsq + largura - 25, y, { align: 'left' });
+    y += 6.5;
+  };
+
+  linha(funcionaria.tipoPagamento === 'mensal' ? 'Salário mensal' : `Salário (${dados.horasTrabalhadasTotal.toFixed(1)}h trabalhadas)`, dados.salarioBase);
+  if (dados.horasExtras > 0) linha(`Horas extras (${formatarHorasMin(dados.horasExtras)} + ${funcionaria.percentualHoraExtra}%)`, dados.modoHorasExtras === 'banco' ? 0 : dados.valorHorasExtras);
+  if (dados.horasExtras100 > 0) linha(`Horas domingo/feriado (${formatarHorasMin(dados.horasExtras100)} + 100%)`, dados.modoHorasExtras === 'banco' ? 0 : dados.valorHorasExtras100);
+  if (dados.valorVt > 0) linha('Auxílio Transporte', dados.valorVt);
+  if (dados.valorVr > 0) linha('Auxílio Alimentação', dados.valorVr);
+  if (dados.diasFeriasGozados > 0) linha(`Recesso (${dados.diasFeriasGozados} dias + adicional)`, (dados.valorFerias || 0) * (4 / 3));
+  if (dados.diasVendidos > 0) linha(`Dias vendidos (${dados.diasVendidos} dias + adicional)`, (dados.valorAbonoPecuniario || 0) * (4 / 3));
+  const totalAdiantamentosPdf = state.adiantamentos.filter((a) => a.funcionariaId === funcionaria.id && a.data.slice(0, 7) === mesKey).reduce((acc, a) => acc + a.valor, 0);
+  if (totalAdiantamentosPdf > 0) linha('Adiantamento/vale descontado', -totalAdiantamentosPdf);
+
+  y += 2;
+  doc.line(margemEsq, y, margemEsq + largura, y);
+  y += 7;
+  doc.setFont(undefined, 'bold');
+  doc.setFontSize(11);
+  doc.text('Total líquido', margemEsq, y);
+  doc.text(fmt(dados.totalPagar), margemEsq + largura - 25, y);
+  doc.setFont(undefined, 'normal');
+  doc.setFontSize(10);
+  y += 12;
+
+  if (dados.horasFaltantes > 0) {
+    doc.setTextColor(180, 0, 0);
+    doc.text(`Observação: ${formatarHorasMin(dados.horasFaltantes)} de falta não abonada registrada em banco de horas — a compensar.`, margemEsq, y, { maxWidth: largura });
+    doc.setTextColor(0);
+    y += 12;
+  }
+  if (dados.modoHorasExtras === 'banco' && (dados.horasExtras > 0 || dados.horasExtras100 > 0)) {
+    doc.text('Observação: horas extras desse mês foram creditadas no banco de horas (compensação em folga), não pagas em dinheiro.', margemEsq, y, { maxWidth: largura });
+    y += 12;
+  }
+  if (dados.horasBancoUsadas > 0) {
+    doc.text(`Observação: ${formatarHorasMin(dados.horasBancoUsadas)} do saldo do banco de horas (de meses anteriores) foram usadas pra cobrir faltas parciais nesse mês.`, margemEsq, y, { maxWidth: largura });
+    y += 12;
+  }
+  if (dados.horasBancoPagasDinheiro > 0) {
+    doc.text(`Observação: ${formatarHorasMin(dados.horasBancoPagasDinheiro)} do banco de horas foram pagas em dinheiro nesse mês (${fmt(dados.valorBancoPagoDinheiro || 0)}), lançamento já feito separadamente.`, margemEsq, y, { maxWidth: largura });
+    y += 12;
+  }
+
+  const extrato = calcularExtratoBancoHoras(funcionaria.id, mesKey);
+  if (extrato.saldoAnterior !== 0 || extrato.produzido !== 0 || extrato.consumido !== 0) {
+    doc.setFont(undefined, 'bold');
+    doc.text('Extrato do banco de horas', margemEsq, y);
+    doc.setFont(undefined, 'normal');
+    y += 6;
+    doc.text(`Saldo anterior: ${extrato.saldoAnterior >= 0 ? '+' : '-'}${formatarHorasMin(extrato.saldoAnterior)}`, margemEsq, y); y += 5.5;
+    doc.text(`Produzido no mês: +${formatarHorasMin(extrato.produzido)}`, margemEsq, y); y += 5.5;
+    doc.text(`Consumido no mês: -${formatarHorasMin(extrato.consumido)}`, margemEsq, y); y += 5.5;
+    doc.setFont(undefined, 'bold');
+    doc.text(`Saldo final: ${extrato.saldoFinal >= 0 ? '+' : '-'}${formatarHorasMin(extrato.saldoFinal)}`, margemEsq, y);
+    doc.setFont(undefined, 'normal');
+    y += 12;
+  }
+
+  y += 10;
+  if (dados.assinaturaImagem) {
+    try {
+      doc.addImage(dados.assinaturaImagem, 'PNG', margemEsq, y - 14, 60, 20);
+    } catch (e) { /* se a imagem vier corrompida, só pula e segue pro texto */ }
+  }
+  doc.line(margemEsq, y, margemEsq + 80, y);
+  y += 5;
+  if (dados.assinadoEm) {
+    doc.setFontSize(9);
+    doc.text(`Assinado eletronicamente por ${funcionaria.nome} em ${new Date(dados.assinadoEm).toLocaleString('pt-BR')}`, margemEsq, y, { maxWidth: 80 });
+  } else {
+    doc.setFontSize(9);
+    doc.text('Assinatura da funcionária', margemEsq, y);
+  }
+
+  y += 16;
+  doc.setFontSize(8);
+  doc.setTextColor(120);
+  const emitidoPorLabel = { dono: 'Proprietária', supervisora: 'Supervisora' }[dados.emitidoPor] || '';
+  const rodapePartes = [];
+  if (dados.numeroRecibo) rodapePartes.push(`Recibo nº ${dados.numeroRecibo}`);
+  rodapePartes.push(`Emitido em ${new Date(dados.createdAt || Date.now()).toLocaleDateString('pt-BR')}`);
+  if (emitidoPorLabel) rodapePartes.push(`por ${emitidoPorLabel}`);
+  doc.text(rodapePartes.join(' · '), margemEsq, y);
+  doc.setTextColor(0);
+
+  return doc;
+}
 async function gerarHoleritePDF(funcionaria, mesKey, dados) {
   try {
     await garantirJsPDF();
@@ -1261,152 +1409,70 @@ async function gerarHoleritePDF(funcionaria, mesKey, dados) {
     return;
   }
   try {
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-    const margemEsq = 15;
-    const largura = 180;
-    let y = 18;
-
-    const mesLabelTexto = new Date(mesKey + '-01T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
-    const [anoPdf, mesPdf] = mesKey.split('-').map(Number);
-    const diasCorridosMes = new Date(anoPdf, mesPdf, 0).getDate();
-    const ocorrencias = calcularResumoOcorrencias(funcionaria.id, mesKey);
-
-    doc.setFontSize(14);
-    doc.setFont(undefined, 'bold');
-    doc.text(state.empresaConfig.nomeFantasia || state.empresaConfig.razaoSocial || 'ROSA JULIETA', margemEsq, y);
-    doc.setFont(undefined, 'normal');
-    doc.setFontSize(9);
-    if (state.empresaConfig.nomeFantasia && state.empresaConfig.razaoSocial) { doc.text(state.empresaConfig.razaoSocial, margemEsq, y + 5); y += 4; }
-    doc.setFontSize(10);
-    doc.text('Recibo de Pagamento de Salário', margemEsq, y + 6);
-    y += 6;
-    if (state.empresaConfig.cnpj) { doc.text(`CNPJ: ${state.empresaConfig.cnpj}`, margemEsq, y + 6); y += 5; }
-    if (state.empresaConfig.endereco) { doc.text(state.empresaConfig.endereco, margemEsq, y + 6); y += 5; }
-    if (state.empresaConfig.telefone) { doc.text(`Tel: ${state.empresaConfig.telefone}`, margemEsq, y + 6); y += 5; }
-    y += 10;
-
-    doc.setDrawColor(200);
-    doc.line(margemEsq, y, margemEsq + largura, y);
-    y += 8;
-
-    doc.setFontSize(10);
-    doc.text(`Funcionária: ${funcionaria.nome}`, margemEsq, y); y += 6;
-    if (funcionaria.cargo) { doc.text(`Cargo: ${funcionaria.cargo}`, margemEsq, y); y += 6; }
-    if (funcionaria.matricula) { doc.text(`Matrícula: ${funcionaria.matricula}`, margemEsq, y); y += 6; }
-    if (funcionaria.cpf) { doc.text(`CPF: ${mascararCpf(funcionaria.cpf)}`, margemEsq, y); y += 6; }
-    doc.text(`Referência: ${mesLabelTexto.charAt(0).toUpperCase() + mesLabelTexto.slice(1)} (${diasCorridosMes} dias)`, margemEsq, y); y += 6;
-    doc.text(`Dias trabalhados no mês: ${dados.diasTrabalhados}`, margemEsq, y); y += 6;
-    if (ocorrencias.diasAtestado + ocorrencias.diasAbono + ocorrencias.diasFerias > 0) {
-      const partes = [];
-      if (ocorrencias.diasAtestado > 0) partes.push(`${ocorrencias.diasAtestado} atestado(s)`);
-      if (ocorrencias.diasAbono > 0) partes.push(`${ocorrencias.diasAbono} abono(s)/folga(s)`);
-      if (ocorrencias.diasFerias > 0) partes.push(`${ocorrencias.diasFerias} dia(s) de recesso`);
-      doc.text(`Ocorrências: ${partes.join(', ')}`, margemEsq, y); y += 6;
-    }
-    y += 4;
-
-    doc.setFont(undefined, 'bold');
-    doc.text('Descrição', margemEsq, y);
-    doc.text('Valor', margemEsq + largura - 25, y);
-    doc.setFont(undefined, 'normal');
-    y += 2;
-    doc.line(margemEsq, y, margemEsq + largura, y);
-    y += 6;
-
-    const linha = (texto, valor) => {
-      doc.text(texto, margemEsq, y);
-      doc.text(fmt(valor), margemEsq + largura - 25, y, { align: 'left' });
-      y += 6.5;
-    };
-
-    linha(funcionaria.tipoPagamento === 'mensal' ? 'Salário mensal' : `Salário (${dados.horasTrabalhadasTotal.toFixed(1)}h trabalhadas)`, dados.salarioBase);
-    if (dados.horasExtras > 0) linha(`Horas extras (${formatarHorasMin(dados.horasExtras)} + ${funcionaria.percentualHoraExtra}%)`, dados.modoHorasExtras === 'banco' ? 0 : dados.valorHorasExtras);
-    if (dados.horasExtras100 > 0) linha(`Horas domingo/feriado (${formatarHorasMin(dados.horasExtras100)} + 100%)`, dados.modoHorasExtras === 'banco' ? 0 : dados.valorHorasExtras100);
-    if (dados.valorVt > 0) linha('Auxílio Transporte', dados.valorVt);
-    if (dados.valorVr > 0) linha('Auxílio Alimentação', dados.valorVr);
-    if (dados.diasFeriasGozados > 0) linha(`Recesso (${dados.diasFeriasGozados} dias + adicional)`, (dados.valorFerias || 0) * (4 / 3));
-    if (dados.diasVendidos > 0) linha(`Dias vendidos (${dados.diasVendidos} dias + adicional)`, (dados.valorAbonoPecuniario || 0) * (4 / 3));
-    const totalAdiantamentosPdf = state.adiantamentos.filter((a) => a.funcionariaId === funcionaria.id && a.data.slice(0, 7) === mesKey).reduce((acc, a) => acc + a.valor, 0);
-    if (totalAdiantamentosPdf > 0) linha('Adiantamento/vale descontado', -totalAdiantamentosPdf);
-
-    y += 2;
-    doc.line(margemEsq, y, margemEsq + largura, y);
-    y += 7;
-    doc.setFont(undefined, 'bold');
-    doc.setFontSize(11);
-    doc.text('Total líquido', margemEsq, y);
-    doc.text(fmt(dados.totalPagar), margemEsq + largura - 25, y);
-    doc.setFont(undefined, 'normal');
-    doc.setFontSize(10);
-    y += 12;
-
-    if (dados.horasFaltantes > 0) {
-      doc.setTextColor(180, 0, 0);
-      doc.text(`Observação: ${formatarHorasMin(dados.horasFaltantes)} de falta não abonada registrada em banco de horas — a compensar.`, margemEsq, y, { maxWidth: largura });
-      doc.setTextColor(0);
-      y += 12;
-    }
-    if (dados.modoHorasExtras === 'banco' && (dados.horasExtras > 0 || dados.horasExtras100 > 0)) {
-      doc.text('Observação: horas extras desse mês foram creditadas no banco de horas (compensação em folga), não pagas em dinheiro.', margemEsq, y, { maxWidth: largura });
-      y += 12;
-    }
-    if (dados.horasBancoUsadas > 0) {
-      doc.text(`Observação: ${formatarHorasMin(dados.horasBancoUsadas)} do saldo do banco de horas (de meses anteriores) foram usadas pra cobrir faltas parciais nesse mês.`, margemEsq, y, { maxWidth: largura });
-      y += 12;
-    }
-    if (dados.horasBancoPagasDinheiro > 0) {
-      doc.text(`Observação: ${formatarHorasMin(dados.horasBancoPagasDinheiro)} do banco de horas foram pagas em dinheiro nesse mês (${fmt(dados.valorBancoPagoDinheiro || 0)}), lançamento já feito separadamente.`, margemEsq, y, { maxWidth: largura });
-      y += 12;
-    }
-
-    const extrato = calcularExtratoBancoHoras(funcionaria.id, mesKey);
-    if (extrato.saldoAnterior !== 0 || extrato.produzido !== 0 || extrato.consumido !== 0) {
-      doc.setFont(undefined, 'bold');
-      doc.text('Extrato do banco de horas', margemEsq, y);
-      doc.setFont(undefined, 'normal');
-      y += 6;
-      doc.text(`Saldo anterior: ${extrato.saldoAnterior >= 0 ? '+' : '-'}${formatarHorasMin(extrato.saldoAnterior)}`, margemEsq, y); y += 5.5;
-      doc.text(`Produzido no mês: +${formatarHorasMin(extrato.produzido)}`, margemEsq, y); y += 5.5;
-      doc.text(`Consumido no mês: -${formatarHorasMin(extrato.consumido)}`, margemEsq, y); y += 5.5;
-      doc.setFont(undefined, 'bold');
-      doc.text(`Saldo final: ${extrato.saldoFinal >= 0 ? '+' : '-'}${formatarHorasMin(extrato.saldoFinal)}`, margemEsq, y);
-      doc.setFont(undefined, 'normal');
-      y += 12;
-    }
-
-    y += 10;
-    if (dados.assinaturaImagem) {
-      try {
-        doc.addImage(dados.assinaturaImagem, 'PNG', margemEsq, y - 14, 60, 20);
-      } catch (e) { /* se a imagem vier corrompida, só pula e segue pro texto */ }
-    }
-    doc.line(margemEsq, y, margemEsq + 80, y);
-    y += 5;
-    if (dados.assinadoEm) {
-      doc.setFontSize(9);
-      doc.text(`Assinado eletronicamente por ${funcionaria.nome} em ${new Date(dados.assinadoEm).toLocaleString('pt-BR')}`, margemEsq, y, { maxWidth: 80 });
-    } else {
-      doc.setFontSize(9);
-      doc.text('Assinatura da funcionária', margemEsq, y);
-    }
-
-    y += 16;
-    doc.setFontSize(8);
-    doc.setTextColor(120);
-    const emitidoPorLabel = { dono: 'Proprietária', supervisora: 'Supervisora' }[dados.emitidoPor] || '';
-    const rodapePartes = [];
-    if (dados.numeroRecibo) rodapePartes.push(`Recibo nº ${dados.numeroRecibo}`);
-    rodapePartes.push(`Emitido em ${new Date(dados.createdAt || Date.now()).toLocaleDateString('pt-BR')}`);
-    if (emitidoPorLabel) rodapePartes.push(`por ${emitidoPorLabel}`);
-    doc.text(rodapePartes.join(' · '), margemEsq, y);
-    doc.setTextColor(0);
-
+    const doc = montarHoleritePDF(funcionaria, mesKey, dados);
     const nomeArquivo = `holerite-${funcionaria.nome.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${mesKey}.pdf`;
     doc.save(nomeArquivo);
   } catch (err) {
     console.error(err);
     alert('Não consegui gerar o PDF: ' + err.message);
+  }
+}
+// carrega o SDK do EmailJS sob demanda, igual já fazemos com o jsPDF
+let __emailjsLoadingPromise = null;
+function garantirEmailJS() {
+  if (window.emailjs) return Promise.resolve();
+  if (__emailjsLoadingPromise) return __emailjsLoadingPromise;
+  __emailjsLoadingPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js';
+    script.onload = () => { if (window.emailjs) resolve(); else reject(new Error('emailjs não inicializou')); };
+    script.onerror = () => reject(new Error('falha ao carregar o script do emailjs'));
+    document.head.appendChild(script);
+  }).catch((e) => { __emailjsLoadingPromise = null; throw e; });
+  return __emailjsLoadingPromise;
+}
+// manda o holerite por e-mail pra funcionária, com um LINK pro PDF (em vez de anexo — o
+// EmailJS passou a cobrar por anexo, então guardamos o PDF no Supabase Storage e mandamos
+// um link assinado, que expira sozinho em 30 dias por segurança) — usa exatamente o mesmo
+// layout de quem baixa o PDF
+async function enviarHoleritePorEmail(funcionaria, mesKey, dados) {
+  if (!funcionaria.email) {
+    alert(`${funcionaria.nome} ainda não tem e-mail cadastrado. Edite o cadastro dela (✏️) e preencha o campo de e-mail primeiro.`);
+    return;
+  }
+  const { emailjsServiceId, emailjsTemplateId, emailjsPublicKey } = state.empresaConfig;
+  if (!emailjsServiceId || !emailjsTemplateId || !emailjsPublicKey) {
+    alert('Configure o envio de e-mail primeiro — clique em "✉️ Configurar e-mail" no topo da tela de RH e cole as credenciais do EmailJS.');
+    return;
+  }
+  try {
+    await garantirJsPDF();
+    await garantirEmailJS();
+  } catch (e) {
+    alert('Não consegui carregar as bibliotecas necessárias. Confira sua internet e tenta de novo.');
+    return;
+  }
+  try {
+    const doc = montarHoleritePDF(funcionaria, mesKey, dados);
+    const pdfBlob = doc.output('blob');
+    const caminhoArquivo = `${funcionaria.id}/${mesKey}.pdf`;
+    const { error: erroUpload } = await sb.storage.from('holerites').upload(caminhoArquivo, pdfBlob, { contentType: 'application/pdf', upsert: true });
+    if (erroUpload) throw new Error(`falha ao salvar o PDF: ${erroUpload.message}`);
+    const trintaDiasSegundos = 60 * 60 * 24 * 30;
+    const { data: linkData, error: erroLink } = await sb.storage.from('holerites').createSignedUrl(caminhoArquivo, trintaDiasSegundos);
+    if (erroLink || !linkData) throw new Error(`falha ao gerar o link: ${erroLink?.message || 'erro desconhecido'}`);
+    const mesLabelTexto = new Date(mesKey + '-01T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+    await window.emailjs.send(emailjsServiceId, emailjsTemplateId, {
+      to_email: funcionaria.email,
+      to_name: funcionaria.nome,
+      subject: mesLabelTexto,
+      message: `seu holerite de ${mesLabelTexto}`,
+      pdf_link: linkData.signedUrl,
+    }, { publicKey: emailjsPublicKey });
+    alert(`Holerite enviado por e-mail pra ${funcionaria.nome} (${funcionaria.email})! O link no e-mail é válido por 30 dias.`);
+  } catch (err) {
+    console.error(err);
+    alert('Não consegui enviar o e-mail: ' + (err?.text || err?.message || 'erro desconhecido') + '. Confira se as credenciais do EmailJS estão certas e se o template usa a variável {{pdf_link}}.');
   }
 }
 // ---- Espelho de ponto em PDF (batidas dia a dia do mês, separado do holerite) ----
@@ -1643,7 +1709,43 @@ async function updateProdutoEstoque(id, novoEstoque) {
 // ex: "Kit 2 Top Joy" = 2x Top Joy), desconta dos componentes de verdade, multiplicado pela
 // quantidade de cada componente × quantidade vendida do kit, em vez de tentar descontar de
 // um estoque próprio que o kit nem tem
+// pra kit "2x do mesmo produto, cores variadas": o kit tem suas próprias "variantes" (as
+// combinações, ex: "Amarelo Bebê + Branco"), mas quem guarda estoque de verdade é o produto
+// unitário (ex: Top Joy). Essa função pega o nome da combinação, separa nas duas cores, e
+// acha a variante correspondente no produto unitário — pra abater a cor certa de cada vez,
+// em vez de sempre abater a mesma cor fixa configurada uma vez só na ficha técnica do kit
+function resolverComponentesKitPorCombo(kitProdutoId, kitVarianteId) {
+  const kitVariante = state.variantes.find((v) => v.id === kitVarianteId);
+  if (!kitVariante) return null;
+  const produtoBaseId = state.kitComponentes.find((k) => k.produtoKitId === kitProdutoId)?.componenteProdutoId;
+  if (!produtoBaseId) return null;
+  const coresDoProdutoBase = variantesDoProduto(produtoBaseId);
+  const pedacos = kitVariante.nome.split('+').map((s) => s.trim()).filter(Boolean);
+  if (pedacos.length === 0) return null;
+  const resolvidos = [];
+  for (const pedaco of pedacos) {
+    const cor = coresDoProdutoBase.find((v) => v.nome.trim().toLowerCase() === pedaco.toLowerCase());
+    if (!cor) return null; // não achou essa cor no produto unitário — não arrisca, cai no padrão fixo
+    resolvidos.push(cor.id);
+  }
+  // agrupa (ex: "Azul Marinho + Azul Marinho" vira 1 entrada com quantidade 2, não 2 abates separados)
+  const porVariante = new Map();
+  resolvidos.forEach((varianteId) => porVariante.set(varianteId, (porVariante.get(varianteId) || 0) + 1));
+  return { produtoBaseId, porVariante };
+}
 async function baixarEstoqueVenda(produto, varianteId, quantidadeVendida) {
+  if (produto.ehKit) {
+    const resolvido = varianteId ? resolverComponentesKitPorCombo(produto.id, varianteId) : null;
+    if (resolvido) {
+      // achou a combinação certa (ex: Amarelo Bebê + Branco) — abate cada cor do produto
+      // unitário na quantidade certa, multiplicada por quantos kits foram vendidos
+      for (const [varId, qtdNaCombo] of resolvido.porVariante.entries()) {
+        const cor = state.variantes.find((v) => v.id === varId);
+        if (cor) await updateVarianteEstoque(varId, cor.estoqueAtual - (qtdNaCombo * quantidadeVendida));
+      }
+      return;
+    }
+  }
   if (produto.ehKit) {
     const componentes = state.kitComponentes.filter((k) => k.produtoKitId === produto.id);
     for (const comp of componentes) {
@@ -1776,19 +1878,20 @@ async function vincularSkuPendente(pendenteId, produtoId, varianteId) {
   const aliasSku = pendente.varianteTexto ? `${pendente.sku.trim()}||${pendente.varianteTexto.trim()}` : pendente.sku.trim();
   if (produto.ehKit) {
     // kit não guarda estoque próprio — desconta direto dos componentes, multiplicado pela
-    // quantidade de cada um
+    // quantidade de cada um. Se a combinação de cor foi identificada (varianteId aponta pra
+    // uma "combo" do kit, ex: "Amarelo Bebê + Branco"), abate a cor certa do produto unitário
     const skusAtuais = (produto.sku || '').split(',').map((s) => s.trim()).filter(Boolean);
     if (!skusAtuais.some((s) => s.toLowerCase() === aliasSku.toLowerCase())) {
       skusAtuais.push(aliasSku);
       await updateProduto(produtoId, { ...produto, sku: skusAtuais.join(', ') });
     }
-    await baixarEstoqueVenda(produto, null, pendente.quantidade);
+    await baixarEstoqueVenda(produto, varianteId, pendente.quantidade);
     const novoTotalVendidoKit = (produto.totalVendido || 0) + pendente.quantidade;
     await registrarVendaProduto(produtoId, produto.estoqueAtual, novoTotalVendidoKit, pendente.ultimaData);
     await atualizarPrecoVendaMedio(produtoId, pendente.faturamento, pendente.quantidade);
     await baixarEstoquePorFichaTecnica(produtoId, pendente.quantidade, pendente.ultimaData);
     const { error: errDetalheKit } = await sb.from('vendas_detalhe').insert({
-      produto_id: produtoId, plataforma_nome: pendente.plataformaNome || null, sku: pendente.sku,
+      produto_id: produtoId, variante_id: varianteId || null, plataforma_nome: pendente.plataformaNome || null, sku: pendente.sku,
       quantidade: pendente.quantidade, valor: pendente.faturamento, data: pendente.ultimaData, pedidos: pendente.pedidos || pendente.quantidade, taxa: pendente.taxa || 0,
     });
     if (errDetalheKit) { alert('Vinculei e já baixei o estoque, mas deu erro ao registrar o detalhe da venda (não vai aparecer no ranking/lucro): ' + errDetalheKit.message); return; }
@@ -1814,7 +1917,9 @@ async function vincularSkuPendente(pendenteId, produtoId, varianteId) {
     }
   }
   // estoque geral do produto só é mexido quando não tem cor envolvida (produto sem variante)
-  const novoEstoque = varianteId ? produto.estoqueAtual : Math.max(0, produto.estoqueAtual - pendente.quantidade);
+  // — pode ficar negativo se vendeu mais do que tinha; volta a se ajustar sozinho quando
+  // entrar produção nova (a próxima peça lançada soma em cima do saldo negativo)
+  const novoEstoque = varianteId ? produto.estoqueAtual : produto.estoqueAtual - pendente.quantidade;
   const novoTotalVendido = (produto.totalVendido || 0) + pendente.quantidade;
   await registrarVendaProduto(produtoId, novoEstoque, novoTotalVendido, pendente.ultimaData);
   await atualizarPrecoVendaMedio(produtoId, pendente.faturamento, pendente.quantidade);
@@ -2028,7 +2133,7 @@ async function lancarVendaManual({ produtoId, quantidade, valor, frete, canal, d
     const novoTotalVendido = (produto.totalVendido || 0) + qtdTotal;
     await registrarVendaProduto(produtoId, produto.estoqueAtual, novoTotalVendido, data);
   } else {
-    const novoEstoque = Math.max(0, produto.estoqueAtual - qtdTotal);
+    const novoEstoque = produto.estoqueAtual - qtdTotal;
     const novoTotalVendido = (produto.totalVendido || 0) + qtdTotal;
     await registrarVendaProduto(produtoId, novoEstoque, novoTotalVendido, data);
   }
@@ -2128,7 +2233,7 @@ async function baixarEstoquePorFichaTecnica(produtoId, quantidadeVendida, dataVe
     } else if (item.tipoItem === 'produto') {
       const componente = state.produtos.find((p) => p.id === item.componenteProdutoId);
       if (componente) {
-        const novoEstoque = Math.max(0, componente.estoqueAtual - qtdConsumida);
+        const novoEstoque = componente.estoqueAtual - qtdConsumida;
         const novoTotalVendido = (componente.totalVendido || 0) + qtdConsumida;
         await registrarVendaProduto(componente.id, novoEstoque, novoTotalVendido, dataVenda);
         await baixarEstoquePorFichaTecnica(componente.id, qtdConsumida, dataVenda, visitados);
@@ -2214,7 +2319,7 @@ async function updateFuncionaria(id, dados) {
     modo_compensacao_padrao: dados.modoCompensacaoPadrao || 'dinheiro',
     valor_vt_dia: dados.valorVtDia || 0, valor_vr_dia: dados.valorVrDia || 0,
     horas_compensacao_semanal: dados.horasCompensacaoSemanal || 0,
-    cpf: dados.cpf || null, cargo: dados.cargo || null, matricula: dados.matricula || null,
+    cpf: dados.cpf || null, cargo: dados.cargo || null, matricula: dados.matricula || null, email: dados.email || null,
   }).eq('id', id);
   if (error) alert('Erro ao atualizar funcionária: ' + error.message);
 }
@@ -2389,6 +2494,12 @@ async function salvarEmpresaConfig(dados) {
     nome_fantasia: dados.nomeFantasia || null, endereco: dados.endereco || null, telefone: dados.telefone || null,
   });
   if (error) alert('Erro ao salvar dados da empresa: ' + error.message);
+}
+async function salvarConfigEmailJS(serviceId, templateId, publicKey) {
+  const { error } = await sb.from('empresa_config').upsert({
+    id: 1, emailjs_service_id: serviceId || null, emailjs_template_id: templateId || null, emailjs_public_key: publicKey || null,
+  });
+  if (error) alert('Erro ao salvar configuração de e-mail: ' + error.message);
 }
 // a funcionária confirma (assina eletronicamente, desenhando o nome na tela) o holerite
 // dela, pelo próprio celular — fica registrado com data/hora + a imagem da assinatura
@@ -2572,6 +2683,13 @@ function mascararCpf(cpf) {
   const digitos = (cpf || '').replace(/\D/g, '');
   if (digitos.length !== 11) return cpf || '';
   return `${digitos.slice(0, 3)}.***.***-${digitos.slice(9)}`;
+}
+// formata o CNPJ no padrão XX.XXX.XXX/XXXX-XX — sem mascarar, porque CNPJ é registro
+// público de empresa, normal aparecer completo em documentos comerciais (nota, recibo etc)
+function formatarCnpj(cnpj) {
+  const digitos = (cnpj || '').replace(/\D/g, '');
+  if (digitos.length !== 14) return cnpj || '';
+  return `${digitos.slice(0, 2)}.${digitos.slice(2, 5)}.${digitos.slice(5, 8)}/${digitos.slice(8, 12)}-${digitos.slice(12)}`;
 }
 function formatarHorasMin(horasDecimais) {
   const totalMin = Math.round(Math.abs(horasDecimais) * 60);
@@ -5976,6 +6094,7 @@ function renderRH(c) {
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="icon-btn-ghost" id="copiarLinkPonto">🔗 Link de ponto</button>
         <button class="icon-btn-ghost" id="toggleEmpresaConfigForm">🏢 Dados da empresa</button>
+        <button class="icon-btn-ghost" id="toggleEmailConfigForm">✉️ Configurar e-mail</button>
         <button class="icon-btn-ghost" id="toggleFeriadosForm">🗓️ Feriados</button>
         <button class="icon-btn-ghost" id="toggleHoleritesLote" style="${lembreteHoleriteRH ? 'background:rgba(255,182,39,0.15);border:1.5px solid var(--amber);color:var(--amber);font-weight:700' : ''}">📋 Fechar holerites do mês</button>
         <button class="icon-btn" id="toggleFuncionariaForm">＋ Funcionária</button>
@@ -5992,6 +6111,17 @@ function renderRH(c) {
         <input type="text" id="empresaEndereco" placeholder="Endereço (opcional)" value="${esc(state.empresaConfig.endereco)}" style="margin-top:8px" />
         <input type="text" id="empresaTelefone" placeholder="Telefone (opcional)" value="${esc(state.empresaConfig.telefone)}" style="margin-top:8px" />
         <button class="confirm-btn" style="margin-top:8px" id="salvarEmpresaConfig">Salvar</button>
+      </div>
+    ` : ''}
+
+    ${state.showEmailConfigForm ? `
+      <div class="form-card">
+        <div class="section-title" style="margin-bottom:2px">Configurar envio de e-mail</div>
+        <div class="section-subtitle" style="margin-bottom:10px">Cole aqui as 3 credenciais da sua conta do EmailJS (emailjs.com) — é só uma vez. Isso é o que permite mandar o holerite direto pro e-mail da funcionária.</div>
+        <input type="text" id="empresaEmailjsServiceId" placeholder="Service ID (ex: service_xxxxxxx)" value="${esc(state.empresaConfig.emailjsServiceId)}" />
+        <input type="text" id="empresaEmailjsTemplateId" placeholder="Template ID (ex: template_xxxxxxx)" value="${esc(state.empresaConfig.emailjsTemplateId)}" style="margin-top:8px" />
+        <input type="text" id="empresaEmailjsPublicKey" placeholder="Public Key" value="${esc(state.empresaConfig.emailjsPublicKey)}" style="margin-top:8px" />
+        <button class="confirm-btn" style="margin-top:8px" id="salvarEmailConfig">Salvar</button>
       </div>
     ` : ''}
 
@@ -6076,7 +6206,8 @@ function renderRH(c) {
                   <input type="text" id="editFuncCargo-${f.id}" placeholder="Cargo/função (ex: Costureira)" value="${esc(f.cargo || '')}" />
                   <input type="text" id="editFuncMatricula-${f.id}" placeholder="Matrícula (ex: 001)" value="${esc(f.matricula || '')}" />
                 </div>
-                <input type="text" id="editFuncCpf-${f.id}" placeholder="CPF (ex: 000.000.000-00)" value="${esc(f.cpf || '')}" style="margin-top:8px" />
+                <input type="text" id="editFuncCpf-${f.id}" placeholder="CNPJ (ex: 00.000.000/0001-00)" value="${esc(f.cpf || '')}" style="margin-top:8px" />
+                <input type="email" id="editFuncEmail-${f.id}" placeholder="E-mail dela (pra receber o holerite)" value="${esc(f.email || '')}" style="margin-top:8px" />
                 <div class="form-hint" style="margin-top:10px">Pagamento — usado pro holerite</div>
                 <div class="form-row">
                   <button class="toggle-btn ${(window.__editFuncTipoPag?.[f.id] || f.tipoPagamento) === 'hora' ? 'active-teal' : ''}" data-edit-func-tipo-pag="${f.id}" data-valor="hora">Por hora</button>
@@ -6182,7 +6313,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
       <div><div class="section-title">${esc(f?.nome || 'Funcionária')}</div><div class="section-subtitle">${f ? [1, 2, 3, 4, 5, 6, 0].filter((dia) => (f.jornadaSemanal[dia] ? f.jornadaSemanal[dia].trabalha : (dia >= 1 && dia <= 5))).map((dia) => DIAS_SEMANA[dia].slice(0, 3)).join(', ') : ''}</div></div>
     </div>
     ${f && (f.cargo || f.matricula || f.cpf) ? `
-      <div class="form-hint" style="margin-top:-10px;margin-bottom:14px">${[f.cargo, f.matricula ? `Matrícula ${f.matricula}` : '', f.cpf ? `CPF ${mascararCpf(f.cpf)}` : ''].filter(Boolean).join(' · ')}</div>
+      <div class="form-hint" style="margin-top:-10px;margin-bottom:14px">${[f.cargo, f.matricula ? `Matrícula ${f.matricula}` : '', f.cpf ? `CNPJ ${formatarCnpj(f.cpf)}` : ''].filter(Boolean).join(' · ')}</div>
     ` : ''}
 
     ${diasPendentes.length > 0 ? `
@@ -6599,6 +6730,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
         ${holeriteExistente.assinaturaImagem ? `<img src="${holeriteExistente.assinaturaImagem}" alt="Assinatura" style="background:#fff;border-radius:6px;height:50px;margin-top:6px" />` : ''}
         <div class="form-row" style="margin-top:10px">
           <button class="icon-btn-ghost" data-baixar-pdf-holerite="${holeriteExistente.id}">🖨️ Baixar PDF</button>
+          <button class="icon-btn-ghost" data-enviar-email-holerite="${holeriteExistente.id}">📧 Enviar por e-mail</button>
           <button class="toggle-btn" data-reabrir-holerite="${holeriteExistente.id}">Refazer esse holerite</button>
         </div>
       </div>
@@ -6693,7 +6825,7 @@ function renderFuncionariaDetalhe(funcionariaId) {
               <div>Funcionária: <strong>${esc(f.nome)}</strong></div>
               ${f.cargo ? `<div>Cargo: <strong>${esc(f.cargo)}</strong></div>` : ''}
               ${f.matricula ? `<div>Matrícula: <strong>${esc(f.matricula)}</strong></div>` : ''}
-              ${f.cpf ? `<div>CPF: <strong>${mascararCpf(f.cpf)}</strong></div>` : ''}
+              ${f.cpf ? `<div>CNPJ: <strong>${formatarCnpj(f.cpf)}</strong></div>` : ''}
               <div>Referência: <strong>${mesLabelHolerite(mesHolerite)} (${new Date(Number(mesHolerite.slice(0, 4)), Number(mesHolerite.slice(5, 7)), 0).getDate()} dias)</strong></div>
               <div>Dias trabalhados: <strong>${resumoHolerite.diasTrabalhados}</strong></div>
               ${(() => {
@@ -7032,6 +7164,17 @@ function attachRHHandlers(c) {
       });
     });
 
+    document.querySelectorAll('[data-enviar-email-holerite]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const holerite = state.holerites.find((h) => h.id === btn.dataset.enviarEmailHolerite);
+        const funcionaria = state.funcionarias.find((x) => x.id === holerite.funcionariaId);
+        const horasBancoUsadas = state.abonosPonto.filter((a) => a.funcionariaId === holerite.funcionariaId && a.data.slice(0, 7) === holerite.mes && a.horas != null).reduce((acc, a) => acc + a.horas, 0);
+        const horasBancoPagasDinheiro = state.bancoHorasLancamentos.filter((b) => b.funcionariaId === holerite.funcionariaId && b.data.slice(0, 7) === holerite.mes && b.descricao && b.descricao.startsWith('Pago em dinheiro')).reduce((acc, b) => acc + Math.abs(b.horas), 0);
+        const valorBancoPagoDinheiro = state.tx.filter((t) => t.tipo === 'saida' && monthKey(t.data) === holerite.mes && t.descricao && t.descricao.startsWith(`Pagamento de banco de horas — ${funcionaria.nome}`)).reduce((acc, t) => acc + t.valor, 0);
+        enviarHoleritePorEmail(funcionaria, holerite.mes, { ...holerite, horasBancoUsadas, horasBancoPagasDinheiro, valorBancoPagoDinheiro });
+      });
+    });
+
     const fecharHoleriteBtn = document.querySelector('[data-fechar-holerite]');
     if (fecharHoleriteBtn) fecharHoleriteBtn.addEventListener('click', async () => {
       const funcionariaId = fecharHoleriteBtn.dataset.fecharHolerite;
@@ -7245,6 +7388,18 @@ function attachRHHandlers(c) {
     await loadData();
   });
 
+  const toggleEmailConfigForm = document.getElementById('toggleEmailConfigForm');
+  if (toggleEmailConfigForm) toggleEmailConfigForm.addEventListener('click', () => { state.showEmailConfigForm = !state.showEmailConfigForm; render(); });
+  const salvarEmailConfigBtn = document.getElementById('salvarEmailConfig');
+  if (salvarEmailConfigBtn) salvarEmailConfigBtn.addEventListener('click', async () => {
+    const serviceId = document.getElementById('empresaEmailjsServiceId').value.trim();
+    const templateId = document.getElementById('empresaEmailjsTemplateId').value.trim();
+    const publicKey = document.getElementById('empresaEmailjsPublicKey').value.trim();
+    await salvarConfigEmailJS(serviceId, templateId, publicKey);
+    state.showEmailConfigForm = false;
+    await loadData();
+  });
+
   const toggleFeriadosForm = document.getElementById('toggleFeriadosForm');
   if (toggleFeriadosForm) toggleFeriadosForm.addEventListener('click', () => { state.showFeriadosForm = !state.showFeriadosForm; render(); });
   const salvarFeriado = document.getElementById('salvarFeriado');
@@ -7408,11 +7563,12 @@ function attachRHHandlers(c) {
       const cpf = document.getElementById(`editFuncCpf-${id}`).value.trim();
       const cargo = document.getElementById(`editFuncCargo-${id}`).value.trim();
       const matricula = document.getElementById(`editFuncMatricula-${id}`).value.trim();
+      const email = document.getElementById(`editFuncEmail-${id}`).value.trim();
       await updateFuncionaria(id, {
         nome, pin, dataAdmissao, ativa, jornadaSemanal,
         jornadaEntrada: segunda.entrada, jornadaSaidaAlmoco: segunda.saidaAlmoco, jornadaVoltaAlmoco: segunda.voltaAlmoco, jornadaSaida: segunda.saida,
         tipoPagamento, salarioMensal, valorHora, percentualHoraExtra, modoCompensacaoPadrao, valorVtDia, valorVrDia, horasCompensacaoSemanal,
-        cpf, cargo, matricula,
+        cpf, cargo, matricula, email,
       });
       state.editingFuncionariaId = null;
       if (window.__editFuncTipoPag) delete window.__editFuncTipoPag[id];
@@ -9322,8 +9478,14 @@ function attachVendasHandlers(c) {
       const produto = state.produtos.find((p) => p.id === produtoId);
       if (!produto) continue;
       if (produto.ehKit) {
-        // kit não guarda estoque próprio — desconta direto dos componentes
-        await baixarEstoqueVenda(produto, null, info.qtd);
+        // kit não guarda estoque próprio — desconta direto dos componentes. Se a venda veio
+        // com a combinação de cor identificada (ex: SKU específico de "Amarelo Bebê +
+        // Branco"), abate a cor certa do produto unitário — só cai no padrão fixo da ficha
+        // técnica quando a venda bateu no SKU genérico do kit, sem indicar a combinação
+        for (const [kitVarianteId, qtdCombo] of info.porVariante.entries()) {
+          await baixarEstoqueVenda(produto, kitVarianteId, qtdCombo);
+        }
+        if (info.semVariante > 0) await baixarEstoqueVenda(produto, null, info.semVariante);
         const novoTotalVendidoKit = (produto.totalVendido || 0) + info.qtd;
         await registrarVendaProduto(produtoId, produto.estoqueAtual, novoTotalVendidoKit, info.ultimaData);
         await atualizarPrecoVendaMedio(produtoId, info.faturamento, info.qtd);
@@ -9339,7 +9501,7 @@ function attachVendasHandlers(c) {
       let novoEstoque = produto.estoqueAtual;
       if (info.semVariante > 0) {
         if (vs.length === 0) {
-          novoEstoque = Math.max(0, produto.estoqueAtual - info.semVariante);
+          novoEstoque = produto.estoqueAtual - info.semVariante;
         } else {
           // produto tem cor cadastrada mas o SKU que bateu foi o genérico — não dá pra saber
           // de qual cor descontar, então não mexe no estoque de nenhuma cor pra não errar
