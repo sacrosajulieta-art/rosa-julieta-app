@@ -1867,6 +1867,22 @@ async function registrarSkusPendentes(pendentesMap) {
 // vincula um SKU pendente a um produto (e, opcionalmente, a uma cor específica): salva o
 // SKU como apelido do produto ou da cor (pra próximos imports já entrarem automático) e
 // aplica a baixa de estoque retroativa acumulada no lugar certo
+// o texto da variação (ex: "Preto,Único 36 a 42") costuma vir com vírgula dentro (separando
+// cor e tamanho) — como os vínculos salvos também são separados por vírgula, essa vírgula
+// interna quebrava o vínculo no lugar errado e ele nunca mais batia depois. Troca a vírgula
+// de dentro do texto por ponto-e-vírgula antes de usar, sem mexer na vírgula que separa
+// vínculos diferentes
+const normalizarVarianteTexto = (texto) => (texto || '').trim().replace(/,/g, ';');
+// verifica se o SKU puro (sem o texto da variação) já está vinculado a outra cor DIFERENTE
+// dessa — se estiver, não é seguro cadastrar o SKU puro aqui também (voltaria a ficar
+// ambíguo, igual o bug que já corrigimos antes). Se não estiver, vale a pena cadastrar o SKU
+// puro como vínculo extra: protege contra o texto da variação vir formatado diferente entre
+// um import e outro (ex: "Vermelho,Único 36 a 42" vs "Vermelho, Único 36 a 42"), que senão
+// faz o mesmo SKU parecer "novo" de novo e nunca sair da lista de pendentes
+function skuBaseSeguroPraRegistrar(skuBase, produtoId, varianteIdAlvo) {
+  const key = skuBase.trim().toLowerCase();
+  return !state.variantes.some((v) => v.produtoId === produtoId && v.id !== varianteIdAlvo && (v.skuVariante || '').split(',').some((s) => s.trim().toLowerCase() === key));
+}
 async function vincularSkuPendente(pendenteId, produtoId, varianteId) {
   const pendente = state.vendasSkuPendentes.find((v) => v.id === pendenteId);
   const produto = state.produtos.find((p) => p.id === produtoId);
@@ -1875,16 +1891,17 @@ async function vincularSkuPendente(pendenteId, produtoId, varianteId) {
   // kit), salva o alias como "sku||variação" em vez do sku puro — assim, se o mesmo SKU for
   // reusado pra outras combinações no futuro (comum em kit com várias opções de cor), cada
   // combinação casa só com o vínculo certo, em vez de todas caírem no mesmo lugar
-  const aliasSku = pendente.varianteTexto ? `${pendente.sku.trim()}||${pendente.varianteTexto.trim()}` : pendente.sku.trim();
+  const aliasSku = pendente.varianteTexto ? `${pendente.sku.trim()}||${normalizarVarianteTexto(pendente.varianteTexto)}` : pendente.sku.trim();
+  const skuBase = pendente.sku.trim();
   if (produto.ehKit) {
     // kit não guarda estoque próprio — desconta direto dos componentes, multiplicado pela
     // quantidade de cada um. Se a combinação de cor foi identificada (varianteId aponta pra
     // uma "combo" do kit, ex: "Amarelo Bebê + Branco"), abate a cor certa do produto unitário
     const skusAtuais = (produto.sku || '').split(',').map((s) => s.trim()).filter(Boolean);
-    if (!skusAtuais.some((s) => s.toLowerCase() === aliasSku.toLowerCase())) {
-      skusAtuais.push(aliasSku);
-      await updateProduto(produtoId, { ...produto, sku: skusAtuais.join(', ') });
-    }
+    const jaTemKit = (s) => skusAtuais.some((x) => x.toLowerCase() === s.toLowerCase());
+    if (!jaTemKit(aliasSku)) skusAtuais.push(aliasSku);
+    if (pendente.varianteTexto && !jaTemKit(skuBase) && skuBaseSeguroPraRegistrar(skuBase, produtoId, varianteId)) skusAtuais.push(skuBase);
+    if (skusAtuais.join(', ') !== (produto.sku || '')) await updateProduto(produtoId, { ...produto, sku: skusAtuais.join(', ') });
     await baixarEstoqueVenda(produto, varianteId, pendente.quantidade);
     const novoTotalVendidoKit = (produto.totalVendido || 0) + pendente.quantidade;
     await registrarVendaProduto(produtoId, produto.estoqueAtual, novoTotalVendidoKit, pendente.ultimaData);
@@ -1903,18 +1920,18 @@ async function vincularSkuPendente(pendenteId, produtoId, varianteId) {
     const variante = state.variantes.find((v) => v.id === varianteId);
     if (variante) {
       const skusAtuaisCor = (variante.skuVariante || '').split(',').map((s) => s.trim()).filter(Boolean);
-      if (!skusAtuaisCor.some((s) => s.toLowerCase() === aliasSku.toLowerCase())) {
-        skusAtuaisCor.push(aliasSku);
-        await updateVarianteSku(varianteId, skusAtuaisCor.join(', '));
-      }
+      const jaTemCor = (s) => skusAtuaisCor.some((x) => x.toLowerCase() === s.toLowerCase());
+      if (!jaTemCor(aliasSku)) skusAtuaisCor.push(aliasSku);
+      if (pendente.varianteTexto && !jaTemCor(skuBase) && skuBaseSeguroPraRegistrar(skuBase, produtoId, varianteId)) skusAtuaisCor.push(skuBase);
+      if (skusAtuaisCor.join(', ') !== (variante.skuVariante || '')) await updateVarianteSku(varianteId, skusAtuaisCor.join(', '));
       await updateVarianteEstoque(varianteId, variante.estoqueAtual - pendente.quantidade);
     }
   } else {
     const skusAtuais = (produto.sku || '').split(',').map((s) => s.trim()).filter(Boolean);
-    if (!skusAtuais.some((s) => s.toLowerCase() === aliasSku.toLowerCase())) {
-      skusAtuais.push(aliasSku);
-      await updateProduto(produtoId, { ...produto, sku: skusAtuais.join(', ') });
-    }
+    const jaTem = (s) => skusAtuais.some((x) => x.toLowerCase() === s.toLowerCase());
+    if (!jaTem(aliasSku)) skusAtuais.push(aliasSku);
+    if (pendente.varianteTexto && !jaTem(skuBase)) skusAtuais.push(skuBase);
+    if (skusAtuais.join(', ') !== (produto.sku || '')) await updateProduto(produtoId, { ...produto, sku: skusAtuais.join(', ') });
   }
   // estoque geral do produto só é mexido quando não tem cor envolvida (produto sem variante)
   // — pode ficar negativo se vendeu mais do que tinha; volta a se ajustar sozinho quando
@@ -9422,7 +9439,7 @@ function attachVendasHandlers(c) {
         // assim cada combinação vinculada fica de fato separada das outras, mesmo tendo o
         // mesmo código de SKU
         const varianteTextoLinhaMatch = guessVarianteTextoField(row);
-        const chaveComposta = varianteTextoLinhaMatch ? `${sku.trim().toLowerCase()}||${varianteTextoLinhaMatch.trim().toLowerCase()}` : null;
+        const chaveComposta = varianteTextoLinhaMatch ? `${sku.trim().toLowerCase()}||${normalizarVarianteTexto(varianteTextoLinhaMatch).toLowerCase()}` : null;
         const match = (chaveComposta && skuMap.get(chaveComposta)) || skuMap.get(sku.trim().toLowerCase());
         const qtd = qtdLinha;
         if (match) {
