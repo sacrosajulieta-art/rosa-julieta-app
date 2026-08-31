@@ -4474,7 +4474,8 @@ function renderMateriais(c) {
           ${state.cartoesCredito.filter((cc) => cc.ativo !== false).map((cc) => `<option value="${cc.id}">${esc(cc.nome)}</option>`).join('')}
         </select>
         <div id="tecidoParcelasBox" style="display:none">
-          <input type="text" id="tecidoNumParcelas" placeholder="Número de parcelas (1 = à vista)" inputmode="numeric" value="1" />
+          <div class="form-hint" style="margin-bottom:2px">💳 Em quantas vezes? (1 = à vista, sem parcelar)</div>
+          <input type="text" id="tecidoNumParcelas" placeholder="Número de parcelas" inputmode="numeric" value="1" />
           <div class="form-hint">A data de cada parcela é calculada sozinha, pelo fechamento/vencimento do cartão — não pela data da compra.</div>
         </div>
         <button class="confirm-btn" id="salvarCompraTecido">Registrar compra</button>
@@ -4564,7 +4565,8 @@ function renderMateriais(c) {
           ${state.cartoesCredito.filter((cc) => cc.ativo !== false).map((cc) => `<option value="${cc.id}">${esc(cc.nome)}</option>`).join('')}
         </select>
         <div id="insumoParcelasBox" style="display:none">
-          <input type="text" id="insumoNumParcelas" placeholder="Número de parcelas (1 = à vista)" inputmode="numeric" value="1" />
+          <div class="form-hint" style="margin-bottom:2px">💳 Em quantas vezes? (1 = à vista, sem parcelar)</div>
+          <input type="text" id="insumoNumParcelas" placeholder="Número de parcelas" inputmode="numeric" value="1" />
           <div class="form-hint">A data de cada parcela é calculada sozinha, pelo fechamento/vencimento do cartão.</div>
         </div>
         <button class="confirm-btn" id="salvarCompraInsumo">Registrar compra</button>
@@ -5669,7 +5671,8 @@ function renderFinanceiro(c) {
           </select>
           <div id="txParcelasBox" style="display:none">
             <div class="form-hint">O valor digitado acima é o TOTAL da compra — o sistema divide pelas parcelas.</div>
-            <input type="text" id="txNumParcelas" placeholder="Número de parcelas (1 = à vista)" inputmode="numeric" value="1" />
+            <div class="form-hint" style="margin-bottom:2px">💳 Em quantas vezes? (1 = à vista, sem parcelar)</div>
+            <input type="text" id="txNumParcelas" placeholder="Número de parcelas" inputmode="numeric" value="1" />
           </div>
         ` : ''}
         <button class="confirm-btn" id="salvarTx">Salvar lançamento</button>
