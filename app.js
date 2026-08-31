@@ -672,7 +672,7 @@ async function loadData() {
   state.materiaPrima = (materiaPrima || []).map((m) => ({ id: m.id, cor: m.cor, rolosDisponiveis: m.rolos_disponiveis, custoMedioRolo: Number(m.custo_medio_rolo || 0) }));
   state.ordensCorte = (ordensCorte || []).map((o) => ({ id: o.id, cor: o.cor, quantidadeRolos: o.quantidade_rolos, valorTecido: Number(o.valor_tecido), dataEnvio: o.data_envio, status: o.status, dataConclusao: o.data_conclusao, tipo: o.tipo || 'principal', valorCorte: Number(o.valor_corte || 0), transacaoCorteId: o.transacao_corte_id || null, grupoId: o.grupo_id || null }));
   state.ordensCorteItens = (ordensCorteItens || []).map((i) => ({ id: i.id, ordemId: i.ordem_id, produtoId: i.produto_id, quantidade: i.quantidade, varianteId: i.variante_id || null }));
-  state.insumos = (insumos || []).map((i) => ({ id: i.id, nome: i.nome, unidade: i.unidade, quantidadeDisponivel: Number(i.quantidade_disponivel), custoMedioUnitario: Number(i.custo_medio_unitario), usadoNoEnvio: !!i.usado_no_envio, qtdVendaManual: Number(i.qtd_venda_manual ?? 1) }));
+  state.insumos = (insumos || []).map((i) => ({ id: i.id, nome: i.nome, unidade: i.unidade, quantidadeDisponivel: Number(i.quantidade_disponivel), custoMedioUnitario: Number(i.custo_medio_unitario), usadoNoEnvio: !!i.usado_no_envio, qtdVendaManual: Number(i.qtd_venda_manual ?? 1), quantidadeMinima: Number(i.quantidade_minima || 0) }));
   state.distribuicoes = (distribuicoes || []).map((d) => ({ id: d.id, ordemItemId: d.ordem_item_id, produtoId: d.produto_id, varianteId: d.variante_id || null, costureiraId: d.costureira_id, quantidadeDistribuida: d.quantidade_distribuida, quantidadeDevolvida: d.quantidade_devolvida, data: d.data, numeroSerie: d.numero_serie || null }));
   state.fichaTecnicaItens = (fichaTecnicaItens || []).map((f) => ({ id: f.id, produtoId: f.produto_id, tipoItem: f.tipo_item, insumoId: f.insumo_id || null, componenteProdutoId: f.componente_produto_id || null, quantidade: Number(f.quantidade), momento: f.momento || 'venda' }));
   state.insumoPlataformaQtd = (insumoPlataformaQtd || []).map((q) => ({ id: q.id, insumoId: q.insumo_id, plataformaId: q.plataforma_id, quantidade: Number(q.quantidade) }));
@@ -1046,8 +1046,8 @@ async function baixarInsumo(id, quantidadeUsada) {
   const { error } = await sb.from('insumos').update({ quantidade_disponivel: nova }).eq('id', id);
   if (error) alert('Erro ao dar baixa: ' + error.message);
 }
-async function updateInsumo(id, nome, quantidadeDisponivel, custoMedioUnitario) {
-  const { error } = await sb.from('insumos').update({ nome, quantidade_disponivel: quantidadeDisponivel, custo_medio_unitario: custoMedioUnitario }).eq('id', id);
+async function updateInsumo(id, nome, quantidadeDisponivel, custoMedioUnitario, quantidadeMinima) {
+  const { error } = await sb.from('insumos').update({ nome, quantidade_disponivel: quantidadeDisponivel, custo_medio_unitario: custoMedioUnitario, quantidade_minima: quantidadeMinima || 0 }).eq('id', id);
   if (error) alert('Erro ao atualizar insumo: ' + error.message);
 }
 async function toggleInsumoUsadoNoEnvio(id, valor) {
@@ -4579,6 +4579,7 @@ function renderMateriais(c) {
               <div class="form-card">
                 <input type="text" id="editInsumoNome-${i.id}" placeholder="Nome" value="${esc(i.nome)}" />
                 <input type="text" id="editInsumoQtd-${i.id}" placeholder="Quantidade disponível" value="${i.quantidadeDisponivel}" />
+                <input type="text" id="editInsumoMinimo-${i.id}" placeholder="Quantidade mínima (alerta)" value="${i.quantidadeMinima || ''}" />
                 <div class="form-hint">Preencha o valor TOTAL pago por essa quantidade — o custo médio é calculado sozinho.</div>
                 <div class="form-row">
                   <input type="text" id="editInsumoValorTotal-${i.id}" placeholder="Valor total pago (R$)" inputmode="decimal" />
@@ -4593,8 +4594,8 @@ function renderMateriais(c) {
           }
           return `
           <div class="tx-row">
-            <div class="tx-dot" style="background:${i.quantidadeDisponivel > 0 ? 'var(--teal)' : 'var(--red)'}"></div>
-            <div style="flex:1"><div class="tx-categoria">${esc(i.nome)}${i.usadoNoEnvio ? ' <span style="font-size:10px;font-weight:600;color:var(--amber);border:1px solid var(--amber)55;border-radius:4px;padding:1px 5px;vertical-align:middle">POR PEDIDO</span>' : ''}</div><div class="tx-desc">${fmt(i.custoMedioUnitario)}/${esc(i.unidade)} (média)</div></div>
+            <div class="tx-dot" style="background:${i.quantidadeDisponivel <= 0 ? 'var(--red)' : (i.quantidadeMinima > 0 && i.quantidadeDisponivel <= i.quantidadeMinima) ? 'var(--amber)' : 'var(--teal)'}"></div>
+            <div style="flex:1"><div class="tx-categoria">${esc(i.nome)}${i.usadoNoEnvio ? ' <span style="font-size:10px;font-weight:600;color:var(--amber);border:1px solid var(--amber)55;border-radius:4px;padding:1px 5px;vertical-align:middle">POR PEDIDO</span>' : ''}</div><div class="tx-desc">${fmt(i.custoMedioUnitario)}/${esc(i.unidade)} (média)${i.quantidadeMinima > 0 ? ` · mín. ${i.quantidadeMinima}` : ''}</div></div>
             ${state.showBaixaInsumoId === i.id ? `
               <input type="text" id="baixaQtd-${i.id}" placeholder="Qtd usada" style="width:70px;margin-right:6px" />
               <button class="confirm-btn" style="width:auto;padding:8px 10px" data-confirmar-baixa="${i.id}">OK</button>
@@ -7971,6 +7972,12 @@ function renderDashboard(c) {
     .filter((p) => p.status !== 'ok' && p.ativo !== false)
     .sort((a, b) => ({ critico: 0, aguarde: 1, 'pode-cortar': 2 }[a.status] - { critico: 0, aguarde: 1, 'pode-cortar': 2 }[b.status]));
 
+  // insumos zerados ou abaixo do mínimo cadastrado (bojo, etiqueta, elástico...) — alerta
+  // separado do semáforo de produtos, porque insumo não depende de "ter saldo pra repor
+  // tecido", é só "acabou ou tá acabando, compra de novo"
+  const insumosZerados = state.insumos.filter((i) => i.quantidadeMinima > 0 && i.quantidadeDisponivel <= 0);
+  const insumosAbaixoMinimo = state.insumos.filter((i) => i.quantidadeMinima > 0 && i.quantidadeDisponivel > 0 && i.quantidadeDisponivel <= i.quantidadeMinima);
+
   // lembrete de holerite: aparece nos últimos 3 dias do mês se tiver funcionária ativa
   // ainda sem holerite fechado nesse mês
   const hoje = new Date();
@@ -7981,6 +7988,20 @@ function renderDashboard(c) {
 
   return `
     ${renderSeletorPeriodo('dash')}
+
+    ${insumosZerados.length > 0 ? `
+      <div class="alerta-vencimento" data-ir-materiais="1" style="background:rgba(255,71,87,0.1);border-color:var(--red);color:var(--red)">
+        <span>🔴 Insumo(s) ZERADO(S): ${insumosZerados.map((i) => esc(i.nome)).join(', ')}</span>
+        <span class="alerta-vencimento-link">Ver em Materiais ›</span>
+      </div>
+    ` : ''}
+
+    ${insumosAbaixoMinimo.length > 0 ? `
+      <div class="alerta-vencimento" data-ir-materiais="1" style="background:rgba(255,182,39,0.1);border-color:var(--amber);color:var(--amber)">
+        <span>🟡 Insumo(s) abaixo do mínimo: ${insumosAbaixoMinimo.map((i) => `${esc(i.nome)} (${i.quantidadeDisponivel} ${esc(i.unidade)})`).join(', ')}</span>
+        <span class="alerta-vencimento-link">Ver em Materiais ›</span>
+      </div>
+    ` : ''}
 
     ${c.contasVencidasNaoConfirmadas.length > 0 ? `
       <div class="alerta-vencimento" data-ir-financeiro="1" style="background:rgba(255,71,87,0.1);border-color:var(--red);color:var(--red)">
@@ -8190,6 +8211,10 @@ function attachHandlers(c) {
     }));
     document.querySelectorAll('[data-ir-rh]').forEach((el) => el.addEventListener('click', () => {
       state.tab = 'rh';
+      render();
+    }));
+    document.querySelectorAll('[data-ir-materiais]').forEach((el) => el.addEventListener('click', () => {
+      state.tab = 'tecido';
       render();
     }));
   }
@@ -9513,6 +9538,10 @@ function attachVendasHandlers(c) {
         const novoTotalVendidoKit = (produto.totalVendido || 0) + info.qtd;
         await registrarVendaProduto(produtoId, produto.estoqueAtual, novoTotalVendidoKit, info.ultimaData);
         await atualizarPrecoVendaMedio(produtoId, info.faturamento, info.qtd);
+        // insumos "na venda" (ex: bojo) da ficha técnica do PRÓPRIO kit — antes esse passo
+        // era pulado pra produtos kit, então nunca descontava bojo nas vendas que batiam
+        // automático (só quando vinculava manual um SKU pendente)
+        await baixarEstoquePorFichaTecnica(produtoId, info.qtd, info.ultimaData);
         continue;
       }
       const vs = variantesDoProduto(produtoId);
@@ -10009,8 +10038,9 @@ function attachTecidoHandlers(c) {
       const nome = document.getElementById(`editInsumoNome-${id}`).value.trim();
       const qtd = parseBRNumber(document.getElementById(`editInsumoQtd-${id}`).value);
       const custo = parseBRNumber(document.getElementById(`editInsumoCusto-${id}`).value);
+      const minimo = parseBRNumber(document.getElementById(`editInsumoMinimo-${id}`).value);
       if (!nome) { alert('Informe o nome do insumo.'); return; }
-      await updateInsumo(id, nome, qtd, custo);
+      await updateInsumo(id, nome, qtd, custo, minimo);
       state.editingInsumoId = null;
       await loadData();
     });
