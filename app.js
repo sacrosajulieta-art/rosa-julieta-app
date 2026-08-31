@@ -2174,6 +2174,57 @@ async function lancarVendaManual({ produtoId, quantidade, valor, frete, canal, d
     sku: (produto.sku || '').split(',')[0]?.trim() || null, quantidade: qtdTotal, valor, data,
   }]);
 }
+// mesma coisa que lancarVendaManual, mas pra quando a cliente levou VÁRIOS modelos numa
+// venda só — cada item do carrinho vira sua própria linha de detalhe/preço médio (pra não
+// misturar o preço de produtos diferentes), mas o dinheiro entra como 1 lançamento só no
+// Financeiro (é 1 venda de verdade, só com vários itens dentro)
+async function lancarVendaManualMultipla(itens, frete, canal, data) {
+  if (!itens || itens.length === 0) return;
+  const canalLabel = (canal || '').trim() || 'Venda direta';
+  const valorTotalGeral = itens.reduce((a, it) => a + it.valor, 0);
+  const descricaoPartes = itens.map((it) => `${it.produtoNome} x${it.qtdTotal}`);
+  await addTx({
+    tipo: 'entrada', valor: valorTotalGeral, categoria: `Venda ${canalLabel}`,
+    descricao: descricaoPartes.join(', '), data,
+  });
+  if (frete > 0) {
+    await addTx({
+      tipo: 'entrada', valor: frete, categoria: 'Reembolso de frete',
+      descricao: `Frete — ${descricaoPartes.join(', ')}`, data,
+    });
+  }
+  const detalhesBatch = [];
+  for (const it of itens) {
+    const produto = state.produtos.find((p) => p.id === it.produtoId);
+    if (!produto) continue;
+    const vs = variantesDoProduto(it.produtoId);
+    if (vs.length > 0) {
+      for (const v of vs) {
+        const qtdCor = it.coresQtd?.[v.id] || 0;
+        if (qtdCor > 0) await updateVarianteEstoque(v.id, v.estoqueAtual - qtdCor);
+      }
+      const novoTotalVendido = (produto.totalVendido || 0) + it.qtdTotal;
+      await registrarVendaProduto(it.produtoId, produto.estoqueAtual, novoTotalVendido, data);
+    } else {
+      const novoEstoque = produto.estoqueAtual - it.qtdTotal;
+      const novoTotalVendido = (produto.totalVendido || 0) + it.qtdTotal;
+      await registrarVendaProduto(it.produtoId, novoEstoque, novoTotalVendido, data);
+    }
+    await atualizarPrecoVendaMedio(it.produtoId, it.valor, it.qtdTotal);
+    await baixarEstoquePorFichaTecnica(it.produtoId, it.qtdTotal, data);
+    detalhesBatch.push({
+      produtoId: it.produtoId, plataformaId: null, plataformaNome: canalLabel,
+      sku: (produto.sku || '').split(',')[0]?.trim() || null, quantidade: it.qtdTotal, valor: it.valor, data,
+    });
+  }
+  // insumos por pedido (envelope, etiqueta de rastreio) contam 1x pro PEDIDO inteiro — não
+  // multiplica pela quantidade de modelos diferentes que vieram juntos na mesma caixa
+  const insumosEnvio = state.insumos.filter((i) => i.usadoNoEnvio);
+  for (const insumo of insumosEnvio) {
+    await baixarInsumo(insumo.id, insumo.qtdVendaManual);
+  }
+  await addVendasDetalheBatch(detalhesBatch);
+}
 async function updateProduto(id, p) {
   const { error } = await sb.from('produtos').update({
     nome: p.nome, sku: p.sku || null, estoque_atual: p.estoqueAtual, estoque_minimo: p.estoqueMinimo, custo_unitario: p.custoUnitario, custo_estimado: !!p.custoEstimado, valor_mao_obra: p.valorMaoObra || 0, tipo: p.tipo || 'unitario',
@@ -8791,8 +8842,26 @@ function renderVendas(c) {
 
     ${state.showVendaManualForm ? `
       <div class="form-card">
-        <div class="form-hint">Pra vendas fora de marketplace (atacado, feira, venda direta etc). Lança a entrada no Financeiro, baixa o estoque do produto e entra no ranking/comparação dessa aba. Se o cliente te reembolsou o frete junto com o pagamento, preencha o campo de frete separado — ele entra no caixa mas não conta como faturamento de venda.</div>
+        <div class="form-hint">Pra vendas fora de marketplace (atacado, feira, venda direta etc). Lança a entrada no Financeiro, baixa o estoque de cada modelo e entra no ranking/comparação dessa aba. Se o cliente te reembolsou o frete junto com o pagamento, preencha o campo de frete separado — ele entra no caixa mas não conta como faturamento de venda.</div>
         <div class="form-hint" style="color:#ffb627">💡 Etiqueta de envio comprada por você é uma <strong>saída</strong> separada (categoria Frete/Logística), lançada normalmente quando você paga — não é aqui.</div>
+
+        ${(window.__vendaManualItens || []).length > 0 ? `
+          <div class="tx-list" style="margin-bottom:10px">
+            ${(window.__vendaManualItens || []).map((it, idx) => `
+              <div class="tx-row">
+                <div class="tx-dot" style="background:var(--teal)"></div>
+                <div style="flex:1">
+                  <div class="tx-categoria">${esc(it.produtoNome)} — ${it.qtdTotal} peça(s)</div>
+                  <div class="tx-desc">${esc(it.detalheCores || '')}${it.detalheCores ? ' · ' : ''}${fmt(it.valor)}</div>
+                </div>
+                <button class="trash-btn" data-remover-item-venda-manual="${idx}">🗑</button>
+              </div>
+            `).join('')}
+          </div>
+          <div class="form-hint" style="margin-bottom:10px">Total dos modelos adicionados: <strong style="color:var(--text)">${fmt((window.__vendaManualItens || []).reduce((a, it) => a + it.valor, 0))}</strong></div>
+        ` : `<div class="form-hint">Nenhum modelo adicionado ainda — adiciona um por vez com o formulário abaixo.</div>`}
+
+        <div class="form-hint" style="margin-top:6px;margin-bottom:2px;font-weight:600">➕ Adicionar modelo</div>
         <select id="vendaManualProduto">
           <option value="">Selecione o produto...</option>
           ${state.produtos.filter((p) => p.ativo !== false).map((p) => `<option value="${p.id}" ${window.__vendaManualProdutoId === p.id ? 'selected' : ''}>${esc(p.nome)}${p.sku ? ' — ' + esc(p.sku) : ''}</option>`).join('')}
@@ -8812,7 +8881,10 @@ function renderVendas(c) {
           }
           return `<input type="text" id="vendaManualQtd" placeholder="Quantidade" inputmode="numeric" />`;
         })()}
-        <input type="text" id="vendaManualValor" placeholder="Valor da venda — sem frete (R$)" />
+        <input type="text" id="vendaManualItemValor" placeholder="Valor desse modelo — sem frete (R$)" />
+        <button class="entrada-btn" type="button" id="addItemVendaManual" style="margin-top:8px">＋ Adicionar modelo à venda</button>
+
+        <div class="form-hint" style="margin-top:16px;margin-bottom:2px;font-weight:600">Dados da venda (valem pra todos os modelos acima)</div>
         <input type="text" id="vendaManualFrete" placeholder="Valor do frete reembolsado pelo cliente (opcional, R$)" />
         <input type="text" id="vendaManualCanal" placeholder="Canal (ex: Atacado, Feira, Venda direta)" />
         <input type="date" id="vendaManualData" value="${todayStr()}" />
@@ -9072,40 +9144,72 @@ function attachVendasHandlers(c) {
   const toggleVendaManual = document.getElementById('toggleVendaManual');
   if (toggleVendaManual) toggleVendaManual.addEventListener('click', () => { state.showVendaManualForm = !state.showVendaManualForm; render(); });
   const cancelarVendaManual = document.getElementById('cancelarVendaManual');
-  if (cancelarVendaManual) cancelarVendaManual.addEventListener('click', () => { state.showVendaManualForm = false; window.__vendaManualProdutoId = null; render(); });
+  if (cancelarVendaManual) cancelarVendaManual.addEventListener('click', () => { state.showVendaManualForm = false; window.__vendaManualProdutoId = null; window.__vendaManualItens = []; render(); });
   const vendaManualProdutoSelect = document.getElementById('vendaManualProduto');
   if (vendaManualProdutoSelect) vendaManualProdutoSelect.addEventListener('change', (e) => { window.__vendaManualProdutoId = e.target.value; render(); });
-  const salvarVendaManual = document.getElementById('salvarVendaManual');
-  if (salvarVendaManual) salvarVendaManual.addEventListener('click', async () => {
+
+  document.querySelectorAll('[data-remover-item-venda-manual]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const idx = Number(btn.dataset.removerItemVendaManual);
+      (window.__vendaManualItens || []).splice(idx, 1);
+      render();
+    });
+  });
+
+  const addItemVendaManual = document.getElementById('addItemVendaManual');
+  if (addItemVendaManual) addItemVendaManual.addEventListener('click', () => {
     const produtoId = document.getElementById('vendaManualProduto').value;
-    const valor = parseBRNumber(document.getElementById('vendaManualValor').value);
-    const frete = parseBRNumber(document.getElementById('vendaManualFrete').value) || 0;
-    const canal = document.getElementById('vendaManualCanal').value;
-    const data = document.getElementById('vendaManualData').value || todayStr();
-    if (!produtoId) { alert('Selecione o produto.'); return; }
+    const valorItem = parseBRNumber(document.getElementById('vendaManualItemValor').value);
+    if (!produtoId) { alert('Selecione o produto desse modelo.'); return; }
+    const produto = state.produtos.find((p) => p.id === produtoId);
     const vs = variantesDoProduto(produtoId);
-    let quantidade = 0;
+    let qtdTotal = 0;
     let coresQtd = {};
+    let detalheCores = '';
     if (vs.length > 0) {
+      const partesCores = [];
       vs.forEach((v) => {
         const qtdCor = Number(document.getElementById(`vendaManualCorQtd-${v.id}`)?.value) || 0;
         coresQtd[v.id] = qtdCor;
-        quantidade += qtdCor;
+        qtdTotal += qtdCor;
+        if (qtdCor > 0) partesCores.push(`${v.nome} x${qtdCor}`);
       });
-      if (quantidade <= 0) { alert('Informe a quantidade vendida de pelo menos uma cor.'); return; }
+      detalheCores = partesCores.join(', ');
+      if (qtdTotal <= 0) { alert('Informe a quantidade vendida de pelo menos uma cor.'); return; }
     } else {
-      quantidade = Number(document.getElementById('vendaManualQtd').value);
-      if (!quantidade || quantidade <= 0) { alert('Informe a quantidade.'); return; }
+      qtdTotal = Number(document.getElementById('vendaManualQtd').value);
+      if (!qtdTotal || qtdTotal <= 0) { alert('Informe a quantidade.'); return; }
     }
-    if (!valor || valor <= 0) { alert('Informe o valor da venda.'); return; }
-    const custoUnit = calcularCustoTotalProduto(produtoId);
-    const custoTotal = custoUnit * quantidade;
-    const lucro = valor - custoTotal;
-    await lancarVendaManual({ produtoId, quantidade, valor, frete, canal, data, coresQtd });
+    if (!valorItem || valorItem <= 0) { alert('Informe o valor desse modelo.'); return; }
+    if (!window.__vendaManualItens) window.__vendaManualItens = [];
+    window.__vendaManualItens.push({ produtoId, produtoNome: produto?.nome || '', qtdTotal, coresQtd, valor: valorItem, detalheCores });
+    window.__vendaManualProdutoId = null;
+    render();
+  });
+
+  const salvarVendaManual = document.getElementById('salvarVendaManual');
+  if (salvarVendaManual) salvarVendaManual.addEventListener('click', async () => {
+    const itens = window.__vendaManualItens || [];
+    const frete = parseBRNumber(document.getElementById('vendaManualFrete').value) || 0;
+    const canal = document.getElementById('vendaManualCanal').value;
+    const data = document.getElementById('vendaManualData').value || todayStr();
+    if (itens.length === 0) { alert('Adiciona pelo menos um modelo antes de lançar a venda.'); return; }
+    let custoTotalGeral = 0;
+    let valorTotalGeral = 0;
+    let qtdTotalGeral = 0;
+    itens.forEach((it) => {
+      const custoUnit = calcularCustoTotalProduto(it.produtoId);
+      custoTotalGeral += custoUnit * it.qtdTotal;
+      valorTotalGeral += it.valor;
+      qtdTotalGeral += it.qtdTotal;
+    });
+    const lucro = valorTotalGeral - custoTotalGeral;
+    await lancarVendaManualMultipla(itens, frete, canal, data);
     state.showVendaManualForm = false;
     window.__vendaManualProdutoId = null;
+    window.__vendaManualItens = [];
     await loadData();
-    let msg = `Lançado! ${quantidade} peça(s) por ${fmt(valor)} (${fmt(valor / quantidade)}/un).\n\nCusto: ${fmt(custoTotal)} (${fmt(custoUnit)}/un) · Lucro: ${fmt(lucro)} (${valor > 0 ? ((lucro / valor) * 100).toFixed(0) : 0}% de margem)`;
+    let msg = `Lançado! ${itens.length} modelo(s), ${qtdTotalGeral} peça(s) no total, por ${fmt(valorTotalGeral)}.\n\nCusto: ${fmt(custoTotalGeral)} · Lucro: ${fmt(lucro)} (${valorTotalGeral > 0 ? ((lucro / valorTotalGeral) * 100).toFixed(0) : 0}% de margem)`;
     if (frete > 0) {
       msg += `\n\n+ Frete reembolsado: ${fmt(frete)} (não entra no faturamento nem no lucro de venda, só passa pelo caixa).`;
     }
