@@ -2974,6 +2974,12 @@ function calcularResumoHolerite(funcionaria, mesKey) {
 // procura, nos últimos N dias, dias em que ela deveria ter trabalhado mas falta alguma
 // das 4 batidas — hoje só conta a partir do horário de saída esperado. Separa o que já
 // tem solicitação pendente daquilo que ainda não foi nem solicitado.
+// verifica se uma data cai dentro de algum período de recesso já registrado pra essa
+// funcionária — usado pra não gerar alerta de "ponto pendente" nem cobrar falta em dia que
+// ela está de férias mesmo, só porque não tem bloqueio de calendário pra folga avulsa
+function estaDeRecesso(funcionariaId, dataStr) {
+  return state.feriasTiradas.some((v) => v.funcionariaId === funcionariaId && dataStr >= v.dataInicio && dataStr <= v.dataFim);
+}
 function verificarPontosEsquecidos(funcionaria, diasParaTras) {
   diasParaTras = diasParaTras || 14;
   const resultado = [];
@@ -2984,6 +2990,7 @@ function verificarPontosEsquecidos(funcionaria, diasParaTras) {
     d.setDate(d.getDate() - i);
     const dataStr = d.toISOString().slice(0, 10);
     if (funcionaria.dataAdmissao && dataStr < funcionaria.dataAdmissao) continue;
+    if (estaDeRecesso(funcionaria.id, dataStr)) continue;
     const esperado = jornadaEsperadaDoDia(funcionaria, dataStr);
     if (!esperado.trabalha) continue;
     if (i === 0) {
