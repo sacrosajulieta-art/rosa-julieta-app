@@ -151,13 +151,20 @@ const fmtSkuExibicao = (sku) => (sku ?? '').toString().split(',').map((s) => {
   return partes.length > 1 ? `${partes[0]} (${partes[1]})` : partes[0];
 }).join(', ');
 
+// interpreta número digitado no padrão BR: vírgula é sempre decimal, ponto pode ser milhar
+// ("3.000" = três mil) OU decimal ("19.5" = dezenove e meio), dependendo do formato — se
+// tem vírgula, todo ponto antes dela é milhar; sem vírgula, só é milhar se aparecer em
+// grupos certinhos de 3 dígitos (ex: "3.000", "12.500.000"), senão é tratado como decimal
 function parseBRNumber(str) {
   if (typeof str !== 'string') return Number(str) || 0;
   const cleaned = str.replace(/[^\d,.-]/g, '');
-  if (cleaned.includes(',') && cleaned.lastIndexOf(',') > cleaned.lastIndexOf('.')) {
+  if (cleaned.includes(',')) {
     return parseFloat(cleaned.replace(/\./g, '').replace(',', '.')) || 0;
   }
-  return parseFloat(cleaned.replace(/,/g, '')) || 0;
+  if (/^-?\d{1,3}(\.\d{3})+$/.test(cleaned)) {
+    return parseFloat(cleaned.replace(/\./g, '')) || 0;
+  }
+  return parseFloat(cleaned) || 0;
 }
 // nos campos de estoque editável: "+63" soma ao valor atual, "-10" subtrai,
 // e um número puro (ex: "63") substitui o valor direto — pra não precisar somar de cabeça
