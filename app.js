@@ -8852,7 +8852,7 @@ function renderVendas(c) {
                 <div class="tx-dot" style="background:var(--teal)"></div>
                 <div style="flex:1">
                   <div class="tx-categoria">${esc(it.produtoNome)} — ${it.qtdTotal} peça(s)</div>
-                  <div class="tx-desc">${esc(it.detalheCores || '')}${it.detalheCores ? ' · ' : ''}${fmt(it.valor)}</div>
+                  <div class="tx-desc">${esc(it.detalheCores || '')}${it.detalheCores ? ' · ' : ''}${fmt(it.valorPorPeca || it.valor / it.qtdTotal)}/peça × ${it.qtdTotal} = <strong style="color:var(--text)">${fmt(it.valor)}</strong></div>
                 </div>
                 <button class="trash-btn" data-remover-item-venda-manual="${idx}">🗑</button>
               </div>
@@ -8881,7 +8881,7 @@ function renderVendas(c) {
           }
           return `<input type="text" id="vendaManualQtd" placeholder="Quantidade" inputmode="numeric" />`;
         })()}
-        <input type="text" id="vendaManualItemValor" placeholder="Valor desse modelo — sem frete (R$)" />
+        <input type="text" id="vendaManualItemValor" placeholder="Valor por peça (R$) — o sistema multiplica pela quantidade" />
         <button class="entrada-btn" type="button" id="addItemVendaManual" style="margin-top:8px">＋ Adicionar modelo à venda</button>
 
         <div class="form-hint" style="margin-top:16px;margin-bottom:2px;font-weight:600">Dados da venda (valem pra todos os modelos acima)</div>
@@ -9159,7 +9159,7 @@ function attachVendasHandlers(c) {
   const addItemVendaManual = document.getElementById('addItemVendaManual');
   if (addItemVendaManual) addItemVendaManual.addEventListener('click', () => {
     const produtoId = document.getElementById('vendaManualProduto').value;
-    const valorItem = parseBRNumber(document.getElementById('vendaManualItemValor').value);
+    const valorPorPeca = parseBRNumber(document.getElementById('vendaManualItemValor').value);
     if (!produtoId) { alert('Selecione o produto desse modelo.'); return; }
     const produto = state.produtos.find((p) => p.id === produtoId);
     const vs = variantesDoProduto(produtoId);
@@ -9180,9 +9180,10 @@ function attachVendasHandlers(c) {
       qtdTotal = Number(document.getElementById('vendaManualQtd').value);
       if (!qtdTotal || qtdTotal <= 0) { alert('Informe a quantidade.'); return; }
     }
-    if (!valorItem || valorItem <= 0) { alert('Informe o valor desse modelo.'); return; }
+    if (!valorPorPeca || valorPorPeca <= 0) { alert('Informe o valor por peça desse modelo.'); return; }
+    const valorItem = valorPorPeca * qtdTotal;
     if (!window.__vendaManualItens) window.__vendaManualItens = [];
-    window.__vendaManualItens.push({ produtoId, produtoNome: produto?.nome || '', qtdTotal, coresQtd, valor: valorItem, detalheCores });
+    window.__vendaManualItens.push({ produtoId, produtoNome: produto?.nome || '', qtdTotal, coresQtd, valor: valorItem, valorPorPeca, detalheCores });
     window.__vendaManualProdutoId = null;
     render();
   });
