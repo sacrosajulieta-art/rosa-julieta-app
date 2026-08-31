@@ -2867,21 +2867,28 @@ function calcularResumoOcorrencias(funcionariaId, mesKey) {
 }
 // conta quantos sábados caem entre duas datas (inclusive) e calcula o débito de
 // compensação — NUNCA desconta um sábado que ainda não aconteceu (mesmo que já esteja
-// dentro do mês corrente), só os que já passaram até hoje. Assim o valor não fica
-// artificialmente mais negativo por causa de um sábado futuro que nem chegou ainda
+// dentro do mês corrente), só os que já passaram até hoje. E nunca conta mais que 4
+// sábados por mês civil, mesmo que o mês tenha 5 — assim a funcionária nunca paga a mais só
+// porque o calendário desse mês específico "sobrou" um sábado a mais (isso sobe 4h por
+// semana que passa, sempre travando em 16h no total, nunca chegando em 20h)
 function calcularDebitoCompensacaoSabado(funcionaria, dataInicioStr, dataFimStr) {
   if (!funcionaria.horasCompensacaoSemanal || funcionaria.horasCompensacaoSemanal <= 0) return 0;
   const hoje = todayStr();
   const fimReal = dataFimStr > hoje ? hoje : dataFimStr;
   if (fimReal < dataInicioStr) return 0;
-  let numSabados = 0;
+  const sabadosPorMes = {};
   const cursor = new Date(dataInicioStr + 'T00:00:00');
   const fim = new Date(fimReal + 'T00:00:00');
   while (cursor <= fim) {
-    if (cursor.getDay() === 6) numSabados++;
+    if (cursor.getDay() === 6) {
+      const mesKeyCursor = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`;
+      sabadosPorMes[mesKeyCursor] = (sabadosPorMes[mesKeyCursor] || 0) + 1;
+    }
     cursor.setDate(cursor.getDate() + 1);
   }
-  return numSabados * funcionaria.horasCompensacaoSemanal;
+  let totalSabados = 0;
+  Object.values(sabadosPorMes).forEach((qtd) => { totalSabados += Math.min(qtd, 4); });
+  return totalSabados * funcionaria.horasCompensacaoSemanal;
 }
 function calcularResumoHolerite(funcionaria, mesKey) {
   const [ano, mes] = mesKey.split('-').map(Number);
