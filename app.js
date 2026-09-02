@@ -4899,7 +4899,7 @@ function renderCorte(c) {
                 ${expandidoGrupo ? `
                   <div class="entrada-box">
                     <div class="form-hint">Quantas peças de cada modelo saíram desse corte (total, sem separar por cor — o sistema divide o custo sozinho, proporcional aos rolos de cada cor)?</div>
-                    ${[0, 1, 2, 3, 4, 5, 6].map((i) => `
+                    ${Array.from({ length: window.__corteGrupoNumItens?.[chaveGrupo] || 7 }, (_, i) => i).map((i) => `
                       <div class="form-row">
                         <select id="grupoItemProduto-${chaveGrupo}-${i}">
                           <option value="">Modelo (opcional)</option>
@@ -4908,6 +4908,7 @@ function renderCorte(c) {
                         <input type="text" id="grupoItemQtd-${chaveGrupo}-${i}" placeholder="Peças (total, misturadas)" inputmode="numeric" />
                       </div>
                     `).join('')}
+                    <button class="icon-btn-ghost" data-mais-item-corte-grupo="${chaveGrupo}" style="margin-bottom:8px">＋ Mais um modelo</button>
                     <div class="form-row">
                       <button class="confirm-btn" data-confirmar-conclusao-grupo="${chaveGrupo}">Salvar resultado</button>
                       <button class="toggle-btn" data-cancelar-conclusao-grupo="1">Cancelar</button>
@@ -4934,7 +4935,7 @@ function renderCorte(c) {
               ${expandido ? `
                 <div class="entrada-box">
                   <div class="form-hint">Quantas peças de cada modelo saíram desse corte?</div>
-                  ${[0, 1, 2, 3, 4].map((i) => `
+                  ${Array.from({ length: window.__corteNumItens?.[o.id] || 5 }, (_, i) => i).map((i) => `
                     <div class="form-row">
                       <select id="corteItemProduto-${o.id}-${i}">
                         <option value="">Modelo (opcional)</option>
@@ -4943,6 +4944,7 @@ function renderCorte(c) {
                       <input type="text" id="corteItemQtd-${o.id}-${i}" placeholder="Peças" inputmode="numeric" />
                     </div>
                   `).join('')}
+                  <button class="icon-btn-ghost" data-mais-item-corte="${o.id}" style="margin-bottom:8px">＋ Mais um modelo</button>
                   <div class="form-row">
                     <button class="confirm-btn" data-confirmar-conclusao="${o.id}">Salvar resultado</button>
                     <button class="toggle-btn" data-cancelar-conclusao="${o.id}">Cancelar</button>
@@ -10087,11 +10089,21 @@ function attachTecidoHandlers(c) {
   document.querySelectorAll('[data-cancelar-conclusao]').forEach((btn) => {
     btn.addEventListener('click', () => { state.ordemConcluindoId = null; render(); });
   });
+  document.querySelectorAll('[data-mais-item-corte]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const ordemId = btn.dataset.maisItemCorte;
+      if (!window.__corteNumItens) window.__corteNumItens = {};
+      window.__corteNumItens[ordemId] = (window.__corteNumItens[ordemId] || 5) + 1;
+      render();
+    });
+  });
+
   document.querySelectorAll('[data-confirmar-conclusao]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const ordemId = btn.dataset.confirmarConclusao;
       const itens = [];
-      for (let i = 0; i < 5; i++) {
+      const numItens = window.__corteNumItens?.[ordemId] || 5;
+      for (let i = 0; i < numItens; i++) {
         const produtoId = document.getElementById(`corteItemProduto-${ordemId}-${i}`)?.value;
         const quantidade = Number(document.getElementById(`corteItemQtd-${ordemId}-${i}`)?.value);
         if (produtoId && quantidade > 0) itens.push({ produtoId, quantidade });
@@ -10099,6 +10111,7 @@ function attachTecidoHandlers(c) {
       if (!itens.length) { alert('Informe pelo menos um modelo e quantidade de peças.'); return; }
       await concluirOrdemCorte(ordemId, itens);
       state.ordemConcluindoId = null;
+      if (window.__corteNumItens) delete window.__corteNumItens[ordemId];
       await loadData();
     });
   });
@@ -10109,12 +10122,21 @@ function attachTecidoHandlers(c) {
   document.querySelectorAll('[data-cancelar-conclusao-grupo]').forEach((btn) => {
     btn.addEventListener('click', () => { state.grupoConcluindoId = null; render(); });
   });
+  document.querySelectorAll('[data-mais-item-corte-grupo]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const chaveGrupo = btn.dataset.maisItemCorteGrupo;
+      if (!window.__corteGrupoNumItens) window.__corteGrupoNumItens = {};
+      window.__corteGrupoNumItens[chaveGrupo] = (window.__corteGrupoNumItens[chaveGrupo] || 7) + 1;
+      render();
+    });
+  });
   document.querySelectorAll('[data-confirmar-conclusao-grupo]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const grupoId = btn.dataset.confirmarConclusaoGrupo;
       const ordensDoGrupo = state.ordensCorte.filter((o) => o.grupoId === grupoId);
       const itensTotais = [];
-      for (let i = 0; i < 7; i++) {
+      const numItens = window.__corteGrupoNumItens?.[grupoId] || 7;
+      for (let i = 0; i < numItens; i++) {
         const produtoId = document.getElementById(`grupoItemProduto-${grupoId}-${i}`)?.value;
         const quantidade = Number(document.getElementById(`grupoItemQtd-${grupoId}-${i}`)?.value);
         if (produtoId && quantidade > 0) itensTotais.push({ produtoId, quantidade });
@@ -10126,6 +10148,7 @@ function attachTecidoHandlers(c) {
       // devolver as peças prontas, lá em "Registrar produção" (onde já dá pra escolher a cor)
       const [representante, ...outras] = ordensDoGrupo;
       await concluirOrdemCorte(representante.id, itensTotais);
+      if (window.__corteGrupoNumItens) delete window.__corteGrupoNumItens[grupoId];
       for (const outra of outras) {
         await concluirOrdemCorte(outra.id, []);
       }
