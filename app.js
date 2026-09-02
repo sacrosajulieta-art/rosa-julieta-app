@@ -667,7 +667,7 @@ async function loadData() {
   state.produtos = (produtos || []).map(mapProdutoFromDb);
   state.plataformas = (plataformas || []).map((p) => ({ id: p.id, nome: p.nome, taxaPercentual: Number(p.taxa_percentual), taxaFixa: Number(p.taxa_fixa || 0), taxaFaixas: Array.isArray(p.taxa_faixas) ? p.taxa_faixas : [] }));
   state.costureiras = (costureiras || []).map((c) => ({ id: c.id, nome: c.nome, ativa: c.ativa, metaSemanal: c.meta_semanal || 0, numeroIdentificacao: c.numero_identificacao || null }));
-  state.producoes = (producoes || []).map((p) => ({ id: p.id, costureiraId: p.costureira_id, produtoId: p.produto_id, quantidade: p.quantidade, data: p.data, pago: p.pago, varianteId: p.variante_id || null, abateVarianteId: 'abate_variante_id' in p ? p.abate_variante_id : undefined, motivoDefeito: p.motivo_defeito || null, valorAjuste: p.valor_ajuste != null ? Number(p.valor_ajuste) : null, abateDistribuicoes: Array.isArray(p.abate_distribuicoes) ? p.abate_distribuicoes.map((x) => ({ distribuicaoId: x.distribuicaoId, quantidade: x.quantidade })) : null }));
+  state.producoes = (producoes || []).map((p) => ({ id: p.id, costureiraId: p.costureira_id, produtoId: p.produto_id, quantidade: p.quantidade, data: p.data, pago: p.pago, varianteId: p.variante_id || null, abateVarianteId: 'abate_variante_id' in p ? p.abate_variante_id : undefined, motivoDefeito: p.motivo_defeito || null, valorAjuste: p.valor_ajuste != null ? Number(p.valor_ajuste) : null, abateDistribuicoes: Array.isArray(p.abate_distribuicoes) ? p.abate_distribuicoes.map((x) => ({ distribuicaoId: x.distribuicaoId, quantidade: x.quantidade })) : null, observacao: p.observacao || null }));
   state.variantes = (variantes || []).map((v) => ({ id: v.id, produtoId: v.produto_id, nome: v.nome, estoqueAtual: v.estoque_atual, skuVariante: v.sku_variante }));
   state.materiaPrima = (materiaPrima || []).map((m) => ({ id: m.id, cor: m.cor, rolosDisponiveis: m.rolos_disponiveis, custoMedioRolo: Number(m.custo_medio_rolo || 0) }));
   state.ordensCorte = (ordensCorte || []).map((o) => ({ id: o.id, cor: o.cor, quantidadeRolos: o.quantidade_rolos, valorTecido: Number(o.valor_tecido), dataEnvio: o.data_envio, status: o.status, dataConclusao: o.data_conclusao, tipo: o.tipo || 'principal', valorCorte: Number(o.valor_corte || 0), transacaoCorteId: o.transacao_corte_id || null, grupoId: o.grupo_id || null }));
@@ -3070,9 +3070,9 @@ async function removeCostureira(id) {
 // veio de um corte de cor mista (ex: "Preto + Marrom" cortado junto), dá pra passar a cor da
 // LEVA em mãos (diferente da cor da peça em si), e o abate da fila de "em mãos" usa essa —
 // null explícito = abater da leva "sem cor" (produto sem variante)
-async function registrarProducao(costureiraId, produtoId, quantidade, data, varianteId, jaPago, origemVarianteId, motivoDefeito, valorAjuste, origemDistribuicaoId) {
+async function registrarProducao(costureiraId, produtoId, quantidade, data, varianteId, jaPago, origemVarianteId, motivoDefeito, valorAjuste, origemDistribuicaoId, observacao) {
   const varianteParaAbater = origemVarianteId !== undefined ? origemVarianteId : varianteId;
-  const { data: linhaCriada, error } = await sb.from('producoes').insert({ costureira_id: costureiraId, produto_id: produtoId, quantidade, data, pago: !!jaPago, variante_id: varianteId || null, abate_variante_id: varianteParaAbater || null, motivo_defeito: motivoDefeito || null, valor_ajuste: valorAjuste !== undefined ? valorAjuste : null }).select('id').single();
+  const { data: linhaCriada, error } = await sb.from('producoes').insert({ costureira_id: costureiraId, produto_id: produtoId, quantidade, data, pago: !!jaPago, variante_id: varianteId || null, abate_variante_id: varianteParaAbater || null, motivo_defeito: motivoDefeito || null, valor_ajuste: valorAjuste !== undefined ? valorAjuste : null, observacao: observacao || null }).select('id').single();
   if (error) { alert('Erro ao registrar produção: ' + error.message); return; }
   // só peça BOA entregue (quantidade > 0) entra no estoque de venda — defeito nunca chegou a
   // virar peça vendável, então não pode tirar estoque que nunca foi somado
@@ -3850,6 +3850,7 @@ function renderCostureiraDetalhe(costureiraId) {
           ` : ''}
         ` : ''}
         <input type="date" id="detalheData" value="${todayStr()}" />
+        <input type="text" id="detalheObservacao" placeholder="Observação (opcional) — ex: cortador passou quantidade errada" />
         <label class="checkbox-label"><input type="checkbox" id="detalheJaPago" /> 💰 Já foi pago antes (não lançar no financeiro)</label>
         <button class="confirm-btn" id="salvarDetalheProducao" data-costureira="${costureiraId}">${tipo === 'defeito' ? 'Registrar defeito' : 'Registrar produção'}</button>
       </div>
@@ -3922,6 +3923,7 @@ function renderCostureiraDetalhe(costureiraId) {
               <div style="flex:1">
                 <div class="tx-categoria">${esc(produto?.nome || 'Produto removido')}${p.varianteId ? ` — ${esc(state.variantes.find((v) => v.id === p.varianteId)?.nome || '')}` : ''}${ehDefeito ? ` ⚠️ Defeito${p.motivoDefeito ? ` (${esc(LABELS_MOTIVO_DEFEITO[p.motivoDefeito] || p.motivoDefeito)})` : ''}` : ''}</div>
                 <div class="tx-desc">${p.quantidade} peças · ${fmt(valor)}${p.pago ? ' · pago' : ' · pendente'}</div>
+                ${p.observacao ? `<div class="tx-desc" style="font-style:italic;color:var(--text-muted)">📝 ${esc(p.observacao)}</div>` : ''}
                 <div class="tx-date" style="display:inline-block;margin-top:2px;padding:2px 7px;border-radius:4px;background:rgba(255,214,10,0.16);color:#ffd60a;font-weight:600">${p.data}</div>
               </div>
               <button class="trash-btn" data-editar-producao="${p.id}">✏️</button>
@@ -10334,7 +10336,8 @@ function attachProducaoHandlers(c) {
       const textoOriginalBtn = salvarDetalhe.textContent;
       salvarDetalhe.disabled = true;
       salvarDetalhe.textContent = 'Salvando...';
-      await registrarProducao(costureiraId, produtoId, quantidade, data, varianteId || null, jaPago, origemVarianteId, motivoDefeito, valorAjuste, origemDistribuicaoId);
+      const observacao = document.getElementById('detalheObservacao')?.value.trim() || null;
+      await registrarProducao(costureiraId, produtoId, quantidade, data, varianteId || null, jaPago, origemVarianteId, motivoDefeito, valorAjuste, origemDistribuicaoId, observacao);
       state.showProducaoForm = false;
       window.__prodDetalheTipo = 'producao';
       window.__prodFormProdutoId = null;
