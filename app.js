@@ -1724,8 +1724,17 @@ async function updateProdutoEstoque(id, novoEstoque) {
 function resolverComponentesKitPorCombo(kitProdutoId, kitVarianteId) {
   const kitVariante = state.variantes.find((v) => v.id === kitVarianteId);
   if (!kitVariante) return null;
-  const produtoBaseId = state.kitComponentes.find((k) => k.produtoKitId === kitProdutoId)?.componenteProdutoId;
-  if (!produtoBaseId) return null;
+  // só se aplica quando o nome da cor do kit É uma combinação (tem "+", ex: "Amarelo Bebê +
+  // Branco") — uma cor simples (ex: "Marrom") não é combo, é só a cor do kit em si, mesmo
+  // que o kit também tenha peças diferentes por baixo (ex: Conjunto = Saia + Blusa)
+  if (!kitVariante.nome.includes('+')) return null;
+  const componentesDoKit = state.kitComponentes.filter((k) => k.produtoKitId === kitProdutoId);
+  const produtosBaseUnicos = [...new Set(componentesDoKit.map((k) => k.componenteProdutoId))];
+  // só se aplica quando o kit é feito do MESMO produto repetido (ex: 2x Top Joy, cores
+  // diferentes) — se o kit combina produtos DIFERENTES (ex: Conjunto = Saia Lolla + Blusa
+  // Gabi), essa função não deve mexer, cai pro abate padrão por componente
+  if (produtosBaseUnicos.length !== 1) return null;
+  const produtoBaseId = produtosBaseUnicos[0];
   const coresDoProdutoBase = variantesDoProduto(produtoBaseId);
   const pedacos = kitVariante.nome.split('+').map((s) => s.trim()).filter(Boolean);
   if (pedacos.length === 0) return null;
@@ -1740,15 +1749,59 @@ function resolverComponentesKitPorCombo(kitProdutoId, kitVarianteId) {
   resolvidos.forEach((varianteId) => porVariante.set(varianteId, (porVariante.get(varianteId) || 0) + 1));
   return { produtoBaseId, porVariante };
 }
+// pra kit "produtos diferentes, mesma cor" (ex: Conjunto = 1x Saia Lolla + 1x Blusa Gabi,
+// vendido em várias cores — Marrom, Preto etc): a cor do kit sozinha (sem "+", isso é
+// tratado por resolverComponentesKitPorCombo) precisa achar a cor CORRESPONDENTE em CADA
+// produto componente diferente, em vez de usar uma cor fixa configurada uma vez só na ficha
+// técnica — senão, venderia sempre a mesma cor fixa não importa qual cor do kit foi vendida
+function resolverComponentesKitPorCorPorProduto(kitProdutoId, kitVarianteId) {
+  const kitVariante = state.variantes.find((v) => v.id === kitVarianteId);
+  if (!kitVariante) return null;
+  const componentesDoKit = state.kitComponentes.filter((k) => k.produtoKitId === kitProdutoId);
+  const produtosBaseUnicos = [...new Set(componentesDoKit.map((k) => k.componenteProdutoId))];
+  // essa função é o espelho da resolverComponentesKitPorCombo: só se aplica quando o kit
+  // combina produtos DIFERENTES (mais de um producto base distinto) — se for o mesmo
+  // produto repetido, quem resolve é a outra função
+  if (produtosBaseUnicos.length < 2) return null;
+  const resolvidos = [];
+  for (const comp of componentesDoKit) {
+    const coresDoComponente = variantesDoProduto(comp.componenteProdutoId);
+    if (coresDoComponente.length === 0) {
+      // esse componente não tem cor cadastrada — usa ele direto, sem cor
+      resolvidos.push({ produtoId: comp.componenteProdutoId, varianteId: null, quantidade: comp.quantidade });
+      continue;
+    }
+    const cor = coresDoComponente.find((v) => v.nome.trim().toLowerCase() === kitVariante.nome.trim().toLowerCase());
+    if (!cor) return null; // esse componente não tem essa cor cadastrada — não arrisca, cai no padrão fixo
+    resolvidos.push({ produtoId: comp.componenteProdutoId, varianteId: cor.id, quantidade: comp.quantidade });
+  }
+  return resolvidos;
+}
 async function baixarEstoqueVenda(produto, varianteId, quantidadeVendida) {
   if (produto.ehKit) {
-    const resolvido = varianteId ? resolverComponentesKitPorCombo(produto.id, varianteId) : null;
-    if (resolvido) {
+    const resolvidoCombo = varianteId ? resolverComponentesKitPorCombo(produto.id, varianteId) : null;
+    if (resolvidoCombo) {
       // achou a combinação certa (ex: Amarelo Bebê + Branco) — abate cada cor do produto
       // unitário na quantidade certa, multiplicada por quantos kits foram vendidos
-      for (const [varId, qtdNaCombo] of resolvido.porVariante.entries()) {
+      for (const [varId, qtdNaCombo] of resolvidoCombo.porVariante.entries()) {
         const cor = state.variantes.find((v) => v.id === varId);
         if (cor) await updateVarianteEstoque(varId, cor.estoqueAtual - (qtdNaCombo * quantidadeVendida));
+      }
+      return;
+    }
+    const resolvidoPorProduto = varianteId ? resolverComponentesKitPorCorPorProduto(produto.id, varianteId) : null;
+    if (resolvidoPorProduto) {
+      // achou a cor certa em cada produto componente diferente (ex: Marrom na Saia Lolla E
+      // Marrom na Blusa Gabi) — abate cada um na cor certa
+      for (const item of resolvidoPorProduto) {
+        const qtdBaixar = item.quantidade * quantidadeVendida;
+        if (item.varianteId) {
+          const cor = state.variantes.find((v) => v.id === item.varianteId);
+          if (cor) await updateVarianteEstoque(item.varianteId, cor.estoqueAtual - qtdBaixar);
+        } else {
+          const componenteProduto = state.produtos.find((p) => p.id === item.produtoId);
+          if (componenteProduto) await updateProdutoEstoque(item.produtoId, componenteProduto.estoqueAtual - qtdBaixar);
+        }
       }
       return;
     }
@@ -3098,6 +3151,36 @@ async function registrarProducao(costureiraId, produtoId, quantidade, data, vari
       const { error: errBreakdown } = await sb.from('producoes').update({ abate_distribuicoes: breakdown }).eq('id', linhaCriada.id);
       if (errBreakdown) console.error('Erro ao salvar de qual leva veio o abate:', errBreakdown);
     }
+    // se abateu de uma leva que pertence a um KIT (ex: registrou "Saia Lolla" abatendo do
+    // corte combinado "Conjunto Juju"), essa mesma leva também rende a(s) outra(s) peça(s)
+    // do kit (ex: a blusa) — cria automaticamente uma nova "peça em mãos" pro(s) outro(s)
+    // componente(s), na mesma quantidade, pra não perder o rastro do que ainda falta vir
+    if (quantidade > 0 && origemDistribuicaoId) {
+      const distribuicaoOrigem = state.distribuicoes.find((d) => d.id === origemDistribuicaoId);
+      const produtoOrigem = distribuicaoOrigem ? state.produtos.find((p) => p.id === distribuicaoOrigem.produtoId) : null;
+      if (produtoOrigem && produtoOrigem.ehKit && produtoOrigem.id !== produtoId) {
+        // a leva de origem pode ter sua própria cor (ex: "Marrom" do Conjunto Juju) — acha a
+        // cor correspondente em CADA componente irmão pelo nome, em vez de usar a cor fixa
+        // configurada uma vez só na ficha técnica do kit (senão sempre criaria a peça irmã
+        // na cor errada quando o kit é vendido/produzido em mais de uma cor)
+        const corOrigemNome = distribuicaoOrigem.varianteId ? state.variantes.find((v) => v.id === distribuicaoOrigem.varianteId)?.nome : null;
+        const irmaos = state.kitComponentes.filter((k) => k.produtoKitId === produtoOrigem.id && k.componenteProdutoId !== produtoId);
+        for (const irmao of irmaos) {
+          let varianteIrmaoId = irmao.componenteVarianteId || null;
+          if (corOrigemNome) {
+            const corCorrespondente = variantesDoProduto(irmao.componenteProdutoId).find((v) => v.nome.trim().toLowerCase() === corOrigemNome.trim().toLowerCase());
+            if (corCorrespondente) varianteIrmaoId = corCorrespondente.id;
+          }
+          const numeroSerieIrmao = proximoNumeroSerieFicha(costureiraId, data);
+          const { error: errIrmao } = await sb.from('distribuicoes').insert({
+            ordem_item_id: distribuicaoOrigem.ordemItemId, produto_id: irmao.componenteProdutoId, variante_id: varianteIrmaoId,
+            costureira_id: costureiraId, quantidade_distribuida: Math.abs(quantidade) * (irmao.quantidade || 1), quantidade_devolvida: 0, data,
+            numero_serie: numeroSerieIrmao,
+          });
+          if (errIrmao) console.error('Erro ao criar peça em mãos automática do componente irmão do kit:', errIrmao);
+        }
+      }
+    }
   }
   // peças de verdade entregues (não defeito) já consomem os insumos de "produção" da ficha técnica, tipo etiqueta
   if (quantidade > 0) await baixarInsumosProducao(produtoId, quantidade, data);
@@ -3816,22 +3899,29 @@ function renderCostureiraDetalhe(costureiraId) {
         ${(() => {
           if (!window.__prodFormProdutoId) return '';
           const emMaosDoProduto = emMaosLista.filter((item) => item.produtoId === window.__prodFormProdutoId);
-          if (emMaosDoProduto.length === 0) return '';
+          // + levas de um KIT que tem esse produto como peça componente (ex: registrar "Saia
+          // Lolla" abatendo de uma leva cortada como "Conjunto Juju", que rende saia + blusa
+          // juntas de um corte só)
+          const kitsQueUsamEsseProduto = state.kitComponentes.filter((k) => k.componenteProdutoId === window.__prodFormProdutoId).map((k) => k.produtoKitId);
+          const emMaosDeKits = emMaosLista.filter((item) => kitsQueUsamEsseProduto.includes(item.produtoId));
+          const todasOrigens = [...emMaosDoProduto, ...emMaosDeKits];
+          if (todasOrigens.length === 0) return '';
           // cada LEVA individual vira uma opção própria (não o grupo somado) — assim, se a
           // costureira tiver mais de um corte de cor mista em aberto do mesmo produto, dá pra
           // escolher exatamente qual leva/data abater, em vez do sistema decidir sozinho pela
           // mais antiga (o que podia abater da leva errada quando tinha mais de uma aberta)
           const lotesFlat = [];
-          emMaosDoProduto.forEach((item) => {
+          todasOrigens.forEach((item) => {
+            const ehDeKit = kitsQueUsamEsseProduto.includes(item.produtoId);
             item.lotes.forEach((lote) => {
-              lotesFlat.push({ ...lote, nome: item.nome });
+              lotesFlat.push({ ...lote, nome: item.nome, ehDeKit });
             });
           });
           lotesFlat.sort((a, b) => b.data.localeCompare(a.data));
           return `
             <select id="detalheOrigemDistribuicao">
               <option value="">Abater automático (mesma cor que a peça)</option>
-              ${lotesFlat.map((lote) => `<option value="lote:${lote.distribuicaoId}">Abater de: ${esc(lote.nome)} — ${lote.qtd} em mãos, corte de ${new Date(lote.data + 'T00:00:00').toLocaleDateString('pt-BR')}${lote.numeroSerie ? ` (ficha ${esc(lote.numeroSerie)})` : ''}</option>`).join('')}
+              ${lotesFlat.map((lote) => `<option value="lote:${lote.distribuicaoId}">Abater de: ${esc(lote.nome)} — ${lote.qtd} em mãos, corte de ${new Date(lote.data + 'T00:00:00').toLocaleDateString('pt-BR')}${lote.numeroSerie ? ` (ficha ${esc(lote.numeroSerie)})` : ''}${lote.ehDeKit ? ' 🎁 (leva do kit — a(s) outra(s) peça(s) fica(m) pendente(s) automaticamente)' : ''}</option>`).join('')}
             </select>
             <div class="form-hint" style="margin-top:-4px">Se essa peça veio de um corte de cor mista (ex: cortou "Preto + Marrom" junto e agora tá devolvendo só o Marrom), escolhe aqui a leva certa pra abater — mesmo lançando a peça na cor pura. Se tiver mais de um corte da mesma combinação em datas diferentes, escolhe a data certa.</div>
           `;
