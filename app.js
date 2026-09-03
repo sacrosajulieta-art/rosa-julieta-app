@@ -5947,6 +5947,7 @@ function renderFichaTecnica(c) {
                 <div class="produto-header">
                   <div><div class="produto-nome">${esc(p.nome)}${p.tipo === 'kit' ? ' 🎁' : ''}</div></div>
                 </div>
+                ${p.tipo === 'kit' ? `<div class="form-hint" style="color:var(--amber);margin-bottom:8px">⚠️ Isso é um Kit — o custo de tecido/corte e mão de obra de cada peça que compõe ele já é somado automaticamente lá embaixo, em "Componentes". Deixe os 2 campos abaixo em 0,00, senão o sistema conta o custo em dobro.</div>` : ''}
                 <div class="form-hint">🧵 Custo de tecido/corte</div>
                 <input type="text" id="ftCusto-${p.id}" placeholder="Custo por unidade" value="${p.custoUnitario.toFixed(2).replace('.', ',')}" />
                 <label class="checkbox-label"><input type="checkbox" id="ftCustoEstimado-${p.id}" ${p.custoEstimado ? 'checked' : ''} /> ≈ Esse é um custo estimado (não sei o valor real do tecido/corte ainda)</label>
