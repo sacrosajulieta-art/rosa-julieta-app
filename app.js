@@ -5,6 +5,22 @@ const SUPABASE_ANON_KEY = 'sb_publishable_JfxpEAafLngstJeouuaepA_RHqRUFOT';
 
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// abre uma sessão anônima no Supabase antes de qualquer leitura/escrita — sem isso, com a
+// trava de segurança (RLS) ligada nas tabelas, nada funcionaria. Não pede nada da pessoa
+// (nem e-mail, nem senha) — só garante que toda operação passe por uma sessão de verdade,
+// em vez de qualquer um com a chave pública conseguir acessar direto por fora do app
+async function garantirSessaoSupabase() {
+  try {
+    const { data } = await sb.auth.getSession();
+    if (!data?.session) {
+      const { error } = await sb.auth.signInAnonymously();
+      if (error) console.error('Erro ao abrir sessão do Supabase:', error);
+    }
+  } catch (e) {
+    console.error('Erro ao verificar sessão do Supabase:', e);
+  }
+}
+
 // Códigos de acesso simples — troque por códigos à sua escolha.
 // Não é uma senha de segurança bancária, é só uma trava leve pra
 // separar quem vê o app completo de quem só lança produção.
@@ -10982,6 +10998,7 @@ if (new URLSearchParams(window.location.search).get('ponto')) {
 // (funcionárias) pra tela de gate conseguir validar o PIN de ponto. O resto só entra
 // depois que o código de acesso ou o PIN forem confirmados (ver renderGate).
 (async () => {
+  await garantirSessaoSupabase();
   if (state.papel) {
     await loadData();
     await garantirRecorrentes();
