@@ -1499,6 +1499,103 @@ async function enviarHoleritePorEmail(funcionaria, mesKey, dados) {
   }
 }
 // ---- Espelho de ponto em PDF (batidas dia a dia do mês, separado do holerite) ----
+// PDF com a lista detalhada de lançamentos de produção de uma costureira, no período que
+// ela tiver filtrado na tela (ou tudo, se não tiver filtro) — pra mandar pra ela conferir
+// em caso de divergência, sem precisar tirar print da tela por tela
+async function gerarLancamentosProducaoPDF(costureira, entradas, dataInicio, dataFim) {
+  try {
+    await garantirJsPDF();
+  } catch (e) {
+    alert('Não consegui carregar a biblioteca de PDF. Confira sua internet e tenta de novo — se persistir, feche e abra o app.');
+    return;
+  }
+  try {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const margemEsq = 15;
+    const largura = 180;
+    let y = 18;
+
+    doc.setFontSize(14);
+    doc.setFont(undefined, 'bold');
+    doc.text(state.empresaConfig.nomeFantasia || state.empresaConfig.razaoSocial || 'ROSA JULIETA', margemEsq, y);
+    doc.setFont(undefined, 'normal');
+    y += 8;
+    doc.setFontSize(11);
+    doc.text(`Lançamentos de produção — ${costureira.nome}`, margemEsq, y);
+    y += 6;
+    doc.setFontSize(9);
+    doc.setTextColor(100);
+    const periodoTexto = dataInicio && dataFim ? `Período: ${new Date(dataInicio + 'T00:00:00').toLocaleDateString('pt-BR')} a ${new Date(dataFim + 'T00:00:00').toLocaleDateString('pt-BR')}`
+      : dataInicio ? `A partir de ${new Date(dataInicio + 'T00:00:00').toLocaleDateString('pt-BR')}`
+      : dataFim ? `Até ${new Date(dataFim + 'T00:00:00').toLocaleDateString('pt-BR')}`
+      : 'Período: todos os lançamentos';
+    doc.text(periodoTexto, margemEsq, y);
+    doc.setTextColor(0);
+    y += 6;
+    doc.setDrawColor(200);
+    doc.line(margemEsq, y, margemEsq + largura, y);
+    y += 8;
+
+    doc.setFontSize(9);
+    doc.setFont(undefined, 'bold');
+    doc.text('Data', margemEsq, y);
+    doc.text('Produto', margemEsq + 22, y);
+    doc.text('Qtd', margemEsq + 118, y);
+    doc.text('Valor', margemEsq + 138, y);
+    doc.text('Status', margemEsq + 160, y);
+    doc.setFont(undefined, 'normal');
+    y += 2;
+    doc.line(margemEsq, y, margemEsq + largura, y);
+    y += 6;
+
+    let totalPecas = 0;
+    let totalValor = 0;
+    const ordenadas = [...entradas].sort((a, b) => a.data.localeCompare(b.data));
+    ordenadas.forEach((p) => {
+      if (y > 275) { doc.addPage(); y = 18; }
+      const produto = state.produtos.find((x) => x.id === p.produtoId);
+      const variante = p.varianteId ? state.variantes.find((v) => v.id === p.varianteId) : null;
+      const nomeProduto = `${produto?.nome || 'Produto removido'}${variante ? ' — ' + variante.nome : ''}${p.quantidade < 0 ? ' (defeito)' : ''}`;
+      const valorItem = valorProducaoItem(p);
+      doc.text(new Date(p.data + 'T00:00:00').toLocaleDateString('pt-BR'), margemEsq, y);
+      doc.text(nomeProduto, margemEsq + 22, y, { maxWidth: 94 });
+      doc.text(String(p.quantidade), margemEsq + 118, y);
+      doc.text(fmt(valorItem), margemEsq + 138, y);
+      doc.text(p.pago ? 'Pago' : 'Pendente', margemEsq + 160, y);
+      if (p.observacao) {
+        y += 4.5;
+        doc.setFontSize(7.5);
+        doc.setTextColor(120);
+        doc.text(`Obs: ${p.observacao}`, margemEsq + 22, y, { maxWidth: 150 });
+        doc.setTextColor(0);
+        doc.setFontSize(9);
+      }
+      totalPecas += p.quantidade;
+      totalValor += valorItem;
+      y += 6.5;
+    });
+
+    y += 3;
+    doc.line(margemEsq, y, margemEsq + largura, y);
+    y += 7;
+    doc.setFont(undefined, 'bold');
+    doc.text(`Total: ${totalPecas} peças — ${fmt(totalValor)}`, margemEsq, y);
+    doc.setFont(undefined, 'normal');
+
+    y += 14;
+    doc.setFontSize(8);
+    doc.setTextColor(120);
+    doc.text(`Emitido em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`, margemEsq, y);
+    doc.setTextColor(0);
+
+    const nomeArquivo = `lancamentos-${costureira.nome.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${todayStr()}.pdf`;
+    doc.save(nomeArquivo);
+  } catch (err) {
+    console.error(err);
+    alert('Não consegui gerar o PDF: ' + err.message);
+  }
+}
 async function gerarEspelhoPontoPDF(funcionaria, mesKey) {
   try {
     await garantirJsPDF();
@@ -3977,6 +4074,7 @@ function renderCostureiraDetalhe(costureiraId) {
       <button class="icon-btn-ghost" id="filtroEstaSemana" style="flex:1">📅 Esta semana</button>
       <button class="icon-btn-ghost" id="filtroLimpar" style="flex:1">✕ Limpar período</button>
     </div>
+    <button class="icon-btn-ghost" id="baixarLancamentosPDF" style="margin-bottom:20px;width:100%">🖨️ Baixar lançamentos do período (PDF)</button>
 
     <div class="section-title-wrap">
       <div><div class="section-title">Resumo por dia</div></div>
@@ -10418,6 +10516,21 @@ function attachProducaoHandlers(c) {
 
     const toggleResumo = document.getElementById('toggleResumoPorDia');
     if (toggleResumo) toggleResumo.addEventListener('click', () => { state.mostrarResumoPorDia = !state.mostrarResumoPorDia; render(); });
+
+    const baixarLancamentosPDF = document.getElementById('baixarLancamentosPDF');
+    if (baixarLancamentosPDF) baixarLancamentosPDF.addEventListener('click', () => {
+      const costureira = state.costureiras.find((cc) => cc.id === state.costureiraDetalheId);
+      const entradasParaPdf = state.producoes.filter((p) => {
+        if (p.costureiraId !== state.costureiraDetalheId) return false;
+        if (state.prodFiltroStatus === 'pendente' && p.pago) return false;
+        if (state.prodFiltroStatus === 'pago' && !p.pago) return false;
+        if (state.prodFiltroInicio && p.data < state.prodFiltroInicio) return false;
+        if (state.prodFiltroFim && p.data > state.prodFiltroFim) return false;
+        return true;
+      });
+      if (entradasParaPdf.length === 0) { alert('Nenhum lançamento encontrado nesse período/filtro pra exportar.'); return; }
+      gerarLancamentosProducaoPDF(costureira, entradasParaPdf, state.prodFiltroInicio, state.prodFiltroFim);
+    });
 
     document.querySelectorAll('[data-prod-detalhe-tipo]').forEach((btn) => {
       btn.addEventListener('click', () => { window.__prodDetalheTipo = btn.dataset.prodDetalheTipo; window.__prodFormMotivoDefeito = null; render(); });
