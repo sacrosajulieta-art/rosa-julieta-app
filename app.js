@@ -482,6 +482,7 @@ const state = {
   showProducaoForm: false,
   costureiraDetalheId: null,
   mostrarPecasPorModelo: false,
+  mostrarPecasEntregues: false,
   editandoFeriasId: null,
   showNovoAdiantamento: false,
   modeloExpandido: null,
@@ -711,6 +712,21 @@ async function loadData() {
   state.kitComponentes = (kitComponentes || []).map((k) => ({ id: k.id, produtoKitId: k.produto_kit_id, componenteProdutoId: k.componente_produto_id, componenteVarianteId: k.componente_variante_id || null, quantidade: Number(k.quantidade) }));
   state.vendasResumoDiario = (vendasResumoDiario || []).map((r) => ({ id: r.id, plataformaNome: r.plataforma_nome || null, data: r.data, pedidos: Number(r.pedidos), unidades: Number(r.unidades), faturamento: Number(r.faturamento) }));
   state.adiantamentos = (adiantamentos || []).map((a) => ({ id: a.id, funcionariaId: a.funcionaria_id, data: a.data, valor: Number(a.valor), motivo: a.motivo || '', transacaoId: a.transacao_id || null }));
+  // se a sessão dela era de ponto e a funcionária foi desativada nesse meio tempo (ex: dono
+  // bloqueou o acesso), derruba a sessão na hora — sem isso, quem já tinha "lembrar" marcado
+  // continuava acessando normal até a sessão expirar sozinha, mesmo já desativada
+  if (state.papel === 'ponto' && state.funcionariaLogadaId) {
+    const funcionariaDaSessao = state.funcionarias.find((f) => f.id === state.funcionariaLogadaId);
+    if (!funcionariaDaSessao || funcionariaDaSessao.ativa === false) {
+      localStorage.removeItem('rj_papel');
+      localStorage.removeItem('rj_funcionaria_id');
+      localStorage.removeItem('rj_ponto_expira_em');
+      sessionStorage.removeItem('rj_papel_sessao');
+      sessionStorage.removeItem('rj_funcionaria_id_sessao');
+      state.papel = null;
+      state.funcionariaLogadaId = null;
+    }
+  }
   state.loading = false;
   state.sincronizando = false;
   render();
@@ -3517,6 +3533,58 @@ function valorProducaoItem(p) {
 // tela agregada: quanto tem em produção (em mãos de QUALQUER costureira, cortado e ainda
 // não devolvido pronto) por modelo + cor — pra ver de cara "500 - Top Joy GG - Preto" sem
 // precisar abrir costureira por costureira somando na cabeça
+// tela com filtro de data livre: quantas peças foram entregues (produção boa, sem contar
+// defeito) no período escolhido — total geral e separado por costureira, pra bater com o
+// que o DRE mostra de custo de mão de obra do mesmo período
+function renderPecasEntreguesPeriodo() {
+  const inicio = state.periodoInicio;
+  const fim = state.periodoFim;
+  const entregasNoPeriodo = state.producoes.filter((p) => p.quantidade > 0 && p.data >= inicio && p.data <= fim);
+  const totalPecas = entregasNoPeriodo.reduce((a, p) => a + p.quantidade, 0);
+  const totalValor = entregasNoPeriodo.reduce((a, p) => a + valorProducaoItem(p), 0);
+
+  const porCostureira = {};
+  entregasNoPeriodo.forEach((p) => {
+    const costureira = state.costureiras.find((c) => c.id === p.costureiraId);
+    const nome = costureira?.nome || 'Costureira removida';
+    if (!porCostureira[nome]) porCostureira[nome] = { peças: 0, valor: 0 };
+    porCostureira[nome].peças += p.quantidade;
+    porCostureira[nome].valor += valorProducaoItem(p);
+  });
+  const listaCostureiras = Object.entries(porCostureira).sort((a, b) => b[1].peças - a[1].peças);
+
+  return `
+    <div class="section-title-wrap"><button class="icon-btn-ghost" id="voltarPecasEntreguesPeriodo">← Voltar</button></div>
+    <div class="section-title-wrap"><div><div class="section-title">Peças entregues por período</div></div></div>
+    ${renderSeletorPeriodo('pecasEntregues')}
+
+    <div class="stats-grid" style="margin-top:16px">
+      <div class="stat-card">
+        <div class="stat-icon" style="background:rgba(0,212,160,0.1)">📦</div>
+        <div class="stat-label">Total de peças entregues</div>
+        <div class="stat-value">${totalPecas}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:rgba(255,46,126,0.1)">💰</div>
+        <div class="stat-label">Total pago de mão de obra</div>
+        <div class="stat-value">${fmt(totalValor)}</div>
+      </div>
+    </div>
+
+    <div class="section-title-wrap"><div><div class="section-title">Por costureira</div></div></div>
+    ${listaCostureiras.length === 0 ? `<div class="empty-state">Nenhuma peça entregue nesse período.</div>` : `
+      <div class="tx-list">
+        ${listaCostureiras.map(([nome, info]) => `
+          <div class="tx-row">
+            <div class="tx-dot" style="background:var(--teal)"></div>
+            <div style="flex:1"><div class="tx-categoria">${esc(nome)}</div></div>
+            <div class="tx-valor" style="color:var(--teal)">${info.peças} peças · ${fmt(info.valor)}</div>
+          </div>
+        `).join('')}
+      </div>
+    `}
+  `;
+}
 function renderPecasPorModelo() {
   const porModelo = {};
   state.distribuicoes.forEach((d) => {
@@ -3575,6 +3643,7 @@ function renderPecasPorModelo() {
 function renderProducaoDono(c) {
   if (state.costureiraDetalheId) return renderCostureiraDetalhe(state.costureiraDetalheId);
   if (state.mostrarPecasPorModelo) return renderPecasPorModelo();
+  if (state.mostrarPecasEntregues) return renderPecasEntreguesPeriodo();
 
   const naoPagas = state.producoes.filter((p) => !p.pago);
   const porCostureira = {};
@@ -3639,6 +3708,11 @@ function renderProducaoDono(c) {
         <div class="stat-icon" style="background:rgba(255,46,126,0.1)">💰</div>
         <div class="stat-label">Previsão de pagamento</div>
         <div class="stat-value">${fmt(totalPrevisaoPagamento)}</div>
+      </div>
+      <div class="stat-card" style="cursor:pointer" id="abrirPecasEntreguesPeriodo">
+        <div class="stat-icon" style="background:rgba(0,212,160,0.1)">📦</div>
+        <div class="stat-label">Peças entregues (por período)</div>
+        <div class="stat-value">Ver</div>
       </div>
     </div>
 
@@ -10663,9 +10737,19 @@ function attachProducaoHandlers(c) {
     return;
   }
 
+  // ---- Tela de peças entregues por período ----
+  if (state.mostrarPecasEntregues) {
+    const voltar = document.getElementById('voltarPecasEntreguesPeriodo');
+    if (voltar) voltar.addEventListener('click', () => { state.mostrarPecasEntregues = false; render(); });
+    wireSeletorPeriodo('pecasEntregues');
+    return;
+  }
+
   // ---- Tela principal de Produção ----
   const abrirPecasPorModelo = document.getElementById('abrirPecasPorModelo');
   if (abrirPecasPorModelo) abrirPecasPorModelo.addEventListener('click', () => { state.mostrarPecasPorModelo = true; render(); });
+  const abrirPecasEntreguesPeriodo = document.getElementById('abrirPecasEntreguesPeriodo');
+  if (abrirPecasEntreguesPeriodo) abrirPecasEntreguesPeriodo.addEventListener('click', () => { state.mostrarPecasEntregues = true; render(); });
 
   const toggleTotalDefeitos = document.getElementById('toggleTotalDefeitos');
   if (toggleTotalDefeitos) toggleTotalDefeitos.addEventListener('click', () => { state.showTotalDefeitos = !state.showTotalDefeitos; render(); });
