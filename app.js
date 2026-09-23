@@ -3926,8 +3926,17 @@ function renderCostureiraDetalhe(costureiraId) {
     if (restante <= 0) return;
     const produto = state.produtos.find((p) => p.id === d.produtoId);
     const variante = d.varianteId ? state.variantes.find((v) => v.id === d.varianteId) : null;
-    const chaveId = `${d.produtoId}|${d.varianteId || ''}`;
-    const nome = `${produto?.nome || 'Produto removido'}${variante ? ' — ' + variante.nome : ''}`;
+    // quando não tem cor identificada, confere se é porque veio de um corte de RETALHO (que
+    // não guarda cor própria) — pra sinalizar isso na lista, em vez de deixar sem nada
+    // escrito (o que parecia esquecimento, quando na verdade é esperado pra retalho)
+    let ehRetalho = false;
+    if (!variante) {
+      const itemOrigem = state.ordensCorteItens.find((i) => i.id === d.ordemItemId);
+      const ordemOrigem = itemOrigem ? state.ordensCorte.find((o) => o.id === itemOrigem.ordemId) : null;
+      ehRetalho = ordemOrigem?.tipo === 'retalho';
+    }
+    const chaveId = `${d.produtoId}|${d.varianteId || ''}|${ehRetalho ? 'retalho' : ''}`;
+    const nome = `${produto?.nome || 'Produto removido'}${variante ? ' — ' + variante.nome : ehRetalho ? ' — RETALHOS' : ''}`;
     if (!emMaosMap[chaveId]) emMaosMap[chaveId] = { nome, qtd: 0, produtoId: d.produtoId, varianteId: d.varianteId || null, lotes: [] };
     emMaosMap[chaveId].qtd += restante;
     emMaosMap[chaveId].lotes.push({ data: d.data, qtd: restante, distribuicaoId: d.id, numeroSerie: d.numeroSerie });
